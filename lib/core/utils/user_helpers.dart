@@ -50,7 +50,6 @@ class UserHelpers {
       case 'manager': return 'Manager';
       case 'pengawas': return 'Pengawas';
       case 'mitra': return 'Mitra';
-      case 'officer_safety': return 'Officer Safety';
       default: return role;
     }
   }
@@ -77,8 +76,8 @@ class UserHelpers {
     }
   }
 
-  static List<String> get roleList => ['superadmin', 'manager', 'pengawas', 'mitra', 'officer_safety'];
-  static List<String> get roleLabelList => ['Super Admin', 'Manager', 'Pengawas', 'Mitra', 'Officer Safety'];
+  static List<String> get roleList => ['superadmin', 'manager', 'pengawas', 'mitra'];
+  static List<String> get roleLabelList => ['Super Admin', 'Manager', 'Pengawas', 'Mitra'];
 
   // ================= STATUS HELPERS =================
   static String statusLabel(String status) {
@@ -123,12 +122,11 @@ class UserHelpers {
   // ================= FUNGSI HELPERS =================
   static String fungsiLabel(String fungsi) {
     switch (fungsi) {
-      case 'operation': return 'Operasi'; // 🔥 Diubah ke Bahasa Indonesia
-      case 'lab': return 'Laboratorium'; // 🔥 Diubah ke Bahasa Indonesia
-      case 'maintenance': return 'Pemeliharaan'; // 🔥 Diubah ke Bahasa Indonesia
+      case 'operation': return 'Operasional'; 
+      case 'maintenance': return 'Maintenance'; 
       case 'hsse': return 'HSSE';
       case 'gpr': return 'GPR';
-      case 'bs': return 'Dukungan Bisnis'; // 🔥 Diubah ke Bahasa Indonesia
+      case 'bs': return 'Business Support';
       default: return fungsi;
     }
   }
@@ -136,7 +134,6 @@ class UserHelpers {
   static Color fungsiColor(String fungsi) {
     switch (fungsi) {
       case 'operation': return accentBlue;
-      case 'lab': return accentIndigo;
       case 'maintenance': return accentOrange;
       case 'hsse': return accentGreen;
       case 'gpr': return accentCyan;
@@ -145,8 +142,8 @@ class UserHelpers {
     }
   }
 
-  static List<String> get fungsiList => ['operation', 'lab', 'maintenance', 'hsse', 'gpr', 'bs'];
-  static List<String> get fungsiLabelList => ['Operasi', 'Laboratorium', 'Pemeliharaan', 'HSSE', 'GPR', 'Dukungan Bisnis']; // 🔥 Diubah ke Bahasa Indonesia
+  static List<String> get fungsiList => ['operation', 'maintenance', 'hsse', 'gpr', 'bs'];
+  static List<String> get fungsiLabelList => ['Operational', 'Maintenance', 'HSSE', 'GPR', 'Business Support']; // 🔥 Diubah ke Bahasa Indonesia
 
   // ================= DATE FORMATTER =================
   static String formatDate(dynamic t) {

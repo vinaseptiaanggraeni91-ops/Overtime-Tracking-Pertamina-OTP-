@@ -1,22 +1,29 @@
+// lib/core/services/overtime_history_service.dart
+// 🔥 FINAL VERSION - V11 FIX DocumentSnapshot Sealed Class ERROR
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
+// ============================================================================
+// MODEL: OvertimeHistory - FULL COMPLETE VERSION V7
+// ============================================================================
+
 class OvertimeHistory {
-  // Basic Info
+  // ─── BASIC INFO ───
   final String id;
   final String groupId;
   final String tipeDokumen;
-  
-  // Pengaju Info
+
+  // ─── PENGAJU INFO ───
   final String? pengawasId;
   final String? namaPengawas;
   final String? pengawasFungsi;
   final String? diajukanOlehId;
   final String? diajukanOlehNama;
-  
-  // Mitra Info
+
+  // ─── MITRA INFO ───
   final String? mitraId;
   final String? namaMitra;
   final String? fungsiMitra;
@@ -24,47 +31,62 @@ class OvertimeHistory {
   final List<String>? mitraIds;
   final int totalMitra;
   final bool isMultiple;
-  
-  // Waktu & Durasi
+
+  // ─── WAKTU & DURASI ───
   final DateTime tanggal;
   final String jamMulai;
   final String jamSelesai;
   final double totalJam;
-  
-  // Detail Lembur
+
+  // ─── DETAIL LEMBUR ───
   final String jenisLembur;
   final Map<String, dynamic> lokasi;
   final String urgensi;
   final String alasan;
   final String catatanTambahan;
-  
-  // Biaya
+
+  // ─── BIAYA ───
   final double estimasiBiayaPerMitra;
   final double estimasiBiayaTotal;
   final bool isOverride;
-  
-  // Status Utama
+
+  // ─── STATUS UTAMA ───
   final String status;
-  
-  // Approval Umum
+
+  // ─── APPROVAL UMUM ───
   final String? approvedBy;
   final String? approvedByName;
   final DateTime? approvedAt;
-  
-  // SPKL
+
+  // ─── SPKL ───
   final bool spklGenerated;
   final String? spklNomor;
   final String? spklPath;
-  
-  // Timestamps
+
+  // ─── TIMESTAMPS ───
   final DateTime createdAt;
   final DateTime updatedAt;
-  
-  // Pembatalan
+
+  // ─── PEMBATALAN ───
   final DateTime? dibatalkanPada;
   final String? dibatalkanOleh;
-  
-  // HSSE FIELDS
+
+  // ─── ABSENSI ───
+  final DateTime? checkInTime;
+  final DateTime? checkOutTime;
+  final String? checkInFotoUrl;
+  final String? checkOutFotoUrl;
+  final String? absensiStatus;
+  final Map<String, dynamic>? absensiKeterlambatan;
+
+  // ═══════════════════════════════════════════════════════
+  // 🔥🔥🔥 PROPERTI BARU V7
+  // ═══════════════════════════════════════════════════════
+  final String? keterlambatanAlasan;
+  final String? alasanTidakLembur;
+  final DateTime? confirmedAt;
+
+  // ─── HSSE FIELDS ───
   final bool isRisky;
   final String? risikoLevel;
   final String? risikoKategori;
@@ -108,6 +130,7 @@ class OvertimeHistory {
   final List<String>? tags;
   final Map<String, dynamic>? metadata;
 
+  // ─── CONSTRUCTOR ───
   OvertimeHistory({
     required this.id,
     required this.groupId,
@@ -145,6 +168,15 @@ class OvertimeHistory {
     this.spklPath,
     required this.createdAt,
     required this.updatedAt,
+    this.checkInTime,
+    this.checkOutTime,
+    this.checkInFotoUrl,
+    this.checkOutFotoUrl,
+    this.absensiStatus,
+    this.absensiKeterlambatan,
+    this.keterlambatanAlasan,
+    this.alasanTidakLembur,
+    this.confirmedAt,
     this.dibatalkanPada,
     this.dibatalkanOleh,
     this.isRisky = false,
@@ -191,10 +223,7 @@ class OvertimeHistory {
     this.metadata,
   });
 
-  // ─────────────────────────────────────────────────────────────────
-  // PARSING HELPERS
-  // ─────────────────────────────────────────────────────────────────
-  
+  // ─── PARSING HELPERS ───
   static DateTime _parseTimestamp(dynamic value, {DateTime? fallback}) {
     if (value is Timestamp) return value.toDate();
     if (value is DateTime) return value;
@@ -209,7 +238,7 @@ class OvertimeHistory {
 
   static List<String>? _parseStringList(dynamic value) {
     if (value == null) return null;
-    if (value is List) return List<String>.from(value);
+    if (value is List) return value.map((e) => e.toString()).toList();
     return null;
   }
 
@@ -222,27 +251,58 @@ class OvertimeHistory {
   static List<Map<String, dynamic>>? _parseMapList(dynamic value) {
     if (value == null) return null;
     if (value is List) {
-      return value.map((item) => Map<String, dynamic>.from(item)).toList();
+      return value
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
     }
     return null;
   }
 
-  // ─────────────────────────────────────────────────────────────────
-  // FROM/TO FIRESTORE
-  // ─────────────────────────────────────────────────────────────────
-
-  factory OvertimeHistory.fromFirestore(DocumentSnapshot<Map<String, dynamic>> doc) {
+  // ─── FROM FIRESTORE ───
+  factory OvertimeHistory.fromFirestore(
+      DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = doc.data()!;
+
     final tanggalValue = data['tanggal'] ?? data['tanggal_lembur'];
     final DateTime tanggal = _parseTimestamp(tanggalValue);
     final createdAt = _parseTimestamp(data['created_at']);
     final updatedAt = _parseTimestamp(data['updated_at']);
-    final estimasiBiayaPerMitra = (data['estimasi_biaya_per_mitra'] ?? data['estimasi_biaya'] ?? 0).toDouble();
-    final estimasiBiayaTotal = (data['estimasi_biaya_total'] ?? data['estimasi_biaya'] ?? 0).toDouble();
+    final estimasiBiayaPerMitra =
+        (data['estimasi_biaya_per_mitra'] ?? data['estimasi_biaya'] ?? 0)
+            .toDouble();
+    final estimasiBiayaTotal =
+        (data['estimasi_biaya_total'] ?? data['estimasi_biaya'] ?? 0)
+            .toDouble();
+
+    String? keterlambatanAlasan;
+    String? alasanTidakLembur;
+    DateTime? confirmedAt;
+
+    if (data['absensi_keterlambatan'] is Map) {
+      final map = data['absensi_keterlambatan'] as Map;
+      final isLemburTerlambat = map['melakukan_lembur'] == true;
+      final isTidakLembur = map['melakukan_lembur'] == false;
+
+      if (isLemburTerlambat) {
+        keterlambatanAlasan = map['alasan']?.toString();
+      } else if (isTidakLembur) {
+        alasanTidakLembur = map['alasan']?.toString();
+      }
+
+      if (map['confirmed_at'] != null) {
+        confirmedAt = _parseTimestampOrNull(map['confirmed_at']);
+      }
+    }
+
+    keterlambatanAlasan ??= data['keterlambatan_alasan']?.toString();
+    alasanTidakLembur ??= data['alasan_tidak_lembur']?.toString();
+    confirmedAt ??= _parseTimestampOrNull(
+        data['confirmed_at'] ?? data['tidak_lembur_at'] ?? data['check_out_time']);
 
     return OvertimeHistory(
       id: doc.id,
-      groupId: data['group_id'] ?? '',
+      groupId: data['group_id'] ?? doc.id,
       tipeDokumen: data['tipe_dokumen'] ?? 'lembur_mitra',
       pengawasId: data['pengawas_id'] ?? data['diajukan_oleh_id'],
       namaPengawas: data['nama_pengawas'] ?? data['diajukan_oleh_nama'],
@@ -266,7 +326,8 @@ class OvertimeHistory {
       alasan: data['alasan'] ?? '',
       catatanTambahan: data['catatan_tambahan'] ?? '',
       estimasiBiayaPerMitra: estimasiBiayaPerMitra,
-      estimasiBiayaTotal: estimasiBiayaTotal > 0 ? estimasiBiayaTotal : estimasiBiayaPerMitra,
+      estimasiBiayaTotal:
+          estimasiBiayaTotal > 0 ? estimasiBiayaTotal : estimasiBiayaPerMitra,
       isOverride: data['is_override'] ?? false,
       status: data['status'] ?? 'pending',
       approvedBy: data['approved_by'],
@@ -277,10 +338,19 @@ class OvertimeHistory {
       spklPath: data['spkl_path'],
       createdAt: createdAt,
       updatedAt: updatedAt,
+      checkInTime: _parseTimestampOrNull(data['check_in_time']),
+      checkOutTime: _parseTimestampOrNull(data['check_out_time']),
+      checkInFotoUrl: data['check_in_foto_url'] ?? data['absensi_foto_url'],
+      checkOutFotoUrl: data['check_out_foto_url'],
+      absensiStatus: data['absensi_status'],
+      absensiKeterlambatan: _parseMap(data['absensi_keterlambatan']),
+      keterlambatanAlasan: keterlambatanAlasan,
+      alasanTidakLembur: alasanTidakLembur,
+      confirmedAt: confirmedAt,
       dibatalkanPada: _parseTimestampOrNull(data['dibatalkan_pada']),
       dibatalkanOleh: data['dibatalkan_oleh'],
       isRisky: data['is_risky'] ?? false,
-      risikoLevel: data['risiko_level'],
+      risikoLevel: data['risiko_level'] ?? data['risk_level'],
       risikoKategori: data['risiko_kategori'],
       risikoDeskripsi: data['risiko_deskripsi'],
       risikoMitigasi: _parseStringList(data['risiko_mitigasi']),
@@ -308,13 +378,14 @@ class OvertimeHistory {
       hsseEscalationBy: data['hsse_escalation_by'],
       hsseEscalationByName: data['hsse_escalation_by_name'],
       hsseSafetyBriefing: data['hsse_safety_briefing'] ?? false,
-      hsseSafetyBriefingDate: _parseTimestampOrNull(data['hsse_safety_briefing_date']),
+      hsseSafetyBriefingDate:
+          _parseTimestampOrNull(data['hsse_safety_briefing_date']),
       hsseSafetyBriefingBy: data['hsse_safety_briefing_by'],
       hsseSafetyBriefingByName: data['hsse_safety_briefing_by_name'],
       hsseSafetyBriefingCatatan: data['hsse_safety_briefing_catatan'],
       hsseApprovalHistory: _parseMapList(data['hsse_approval_history']),
       approvalChain: _parseMap(data['approval_chain']),
-      approvalLevel: data['approval_level']?.toString() ?? '0',  
+      approvalLevel: data['approval_level']?.toString() ?? '',
       maxApprovalLevel: data['max_approval_level'] ?? 1,
       lastModifiedBy: data['last_modified_by'],
       lastModifiedByName: data['last_modified_by_name'],
@@ -324,86 +395,42 @@ class OvertimeHistory {
     );
   }
 
-  Map<String, dynamic> toMap() {
-    return {
-      'id': id, 'group_id': groupId, 'tipe_dokumen': tipeDokumen,
-      'pengawas_id': pengawasId, 'nama_pengawas': namaPengawas,
-      'pengawas_fungsi': pengawasFungsi,
-      'diajukan_oleh_id': diajukanOlehId, 'diajukan_oleh_nama': diajukanOlehNama,
-      'mitra_id': mitraId, 'nama_mitra': namaMitra,
-      'fungsi_mitra': fungsiMitra, 'no_hp_mitra': noHpMitra,
-      'mitra_ids': mitraIds, 'total_mitra': totalMitra, 'is_multiple': isMultiple,
-      'tanggal': Timestamp.fromDate(tanggal),
-      'jam_mulai': jamMulai, 'jam_selesai': jamSelesai,
-      'total_jam_desimal': totalJam, 'jenis_lembur': jenisLembur,
-      'lokasi': lokasi, 'urgensi': urgensi, 'alasan': alasan,
-      'catatan_tambahan': catatanTambahan,
-      'estimasi_biaya_per_mitra': estimasiBiayaPerMitra,
-      'estimasi_biaya_total': estimasiBiayaTotal, 'is_override': isOverride,
-      'status': status,
-      'approved_by': approvedBy, 'approved_by_name': approvedByName,
-      'approved_at': approvedAt != null ? Timestamp.fromDate(approvedAt!) : null,
-      'spkl_generated': spklGenerated, 'spkl_nomor': spklNomor, 'spkl_path': spklPath,
-      'created_at': Timestamp.fromDate(createdAt),
-      'updated_at': Timestamp.fromDate(updatedAt),
-      'dibatalkan_pada': dibatalkanPada != null ? Timestamp.fromDate(dibatalkanPada!) : null,
-      'dibatalkan_oleh': dibatalkanOleh,
-      'is_risky': isRisky, 'risiko_level': risikoLevel,
-      'risiko_kategori': risikoKategori, 'risiko_deskripsi': risikoDeskripsi,
-      'risiko_mitigasi': risikoMitigasi, 'hsse_status': hsseStatus,
-      'hsse_approved_by': hsseApprovedBy, 'hsse_approved_by_name': hsseApprovedByName,
-      'hsse_approved_at': hsseApprovedAt != null ? Timestamp.fromDate(hsseApprovedAt!) : null,
-      'hsse_rejected_by': hsseRejectedBy, 'hsse_rejected_by_name': hsseRejectedByName,
-      'hsse_rejected_at': hsseRejectedAt != null ? Timestamp.fromDate(hsseRejectedAt!) : null,
-      'hsse_alasan_penolakan': hsseAlasanPenolakan,
-      'hsse_review_by': hsseReviewBy, 'hsse_review_by_name': hsseReviewByName,
-      'hsse_review_at': hsseReviewAt != null ? Timestamp.fromDate(hsseReviewAt!) : null,
-      'hsse_catatan_revisi': hsseCatatanRevisi, 'hsse_items_revisi': hsseItemsRevisi,
-      'hsse_catatan': hsseCatatan, 'hsse_rekomendasi': hsseRekomendasi,
-      'hsse_dokumen_pendukung': hsseDokumenPendukung, 'hsse_checklist': hsseChecklist,
-      'hsse_need_escalation': hsseNeedEscalation,
-      'hsse_escalation_to': hsseEscalationTo, 'hsse_escalation_reason': hsseEscalationReason,
-      'hsse_escalation_at': hsseEscalationAt != null ? Timestamp.fromDate(hsseEscalationAt!) : null,
-      'hsse_escalation_by': hsseEscalationBy, 'hsse_escalation_by_name': hsseEscalationByName,
-      'hsse_safety_briefing': hsseSafetyBriefing,
-      'hsse_safety_briefing_date': hsseSafetyBriefingDate != null ? Timestamp.fromDate(hsseSafetyBriefingDate!) : null,
-      'hsse_safety_briefing_by': hsseSafetyBriefingBy,
-      'hsse_safety_briefing_by_name': hsseSafetyBriefingByName,
-      'hsse_safety_briefing_catatan': hsseSafetyBriefingCatatan,
-      'hsse_approval_history': hsseApprovalHistory,
-      'approval_chain': approvalChain,
-      'approval_level': approvalLevel, 'max_approval_level': maxApprovalLevel,
-      'last_modified_by': lastModifiedBy, 'last_modified_by_name': lastModifiedByName,
-      'last_modified_at': lastModifiedAt != null ? Timestamp.fromDate(lastModifiedAt!) : null,
-      'tags': tags, 'metadata': metadata,
-    };
-  }
+  // ═══════════════════════════════════════════════════════
+  // COMPUTED PROPERTIES
+  // ═══════════════════════════════════════════════════════
 
-  // ─────────────────────────────────────────────────────────────────
-  // HELPER PROPERTIES
-  // ─────────────────────────────────────────────────────────────────
+  // 🔥🔥🔥 GETTER BARU UNTUK FILTER PEMBATALAN (V12)
+  /// Getter untuk cek status pengajuan (alias dari field `status`)
+  String? get statusPengajuan => status;
+  
+  /// Getter untuk cek apakah lembur dibatalkan/ditolak
+  bool get isCancelled => 
+      status == 'dibatalkan' || 
+      status == 'cancelled' || 
+      status == 'ditolak';
+  
+  /// Getter untuk cek apakah absensi sudah resolved (check-out/selesai/expired)
+  bool get isAbsensiResolved => 
+      isCheckedOut || 
+      absensiStatus == 'selesai' || 
+      absensiStatus == 'selesai_terlambat' || 
+      absensiStatus == 'tidak_lembur' || 
+      absensiStatus == 'expired';
 
   String get tahunBulan => DateFormat('yyyy-MM').format(tanggal);
+  String get tanggalFormatted => DateFormat('dd MMM yyyy', 'id_ID').format(tanggal);
   String get namaPengaju => diajukanOlehNama ?? namaPengawas ?? 'Tidak diketahui';
   bool get isMitraDocument => tipeDokumen == 'lembur_mitra';
   bool get isPengajuanDocument => tipeDokumen == 'pengajuan';
-  
-  bool get canBeCancelled {
-    if (status != 'pending' && status != 'disetujui') return false;
-    return DateTime.now().difference(createdAt).inDays > 3;
-  }
+  double get biayaAktual => estimasiBiayaTotal > 0 ? estimasiBiayaTotal : estimasiBiayaPerMitra;
 
-  bool get needsHSSEApproval => isRisky && hsseStatus == 'pending';
-  bool get isHSSEApproved => isRisky && hsseStatus == 'disetujui';
-  bool get isHSSERejected => isRisky && hsseStatus == 'ditolak';
-  bool get isHSSEReview => isRisky && hsseStatus == 'dalam_review';
-  bool get needsHSSERevision => isRisky && hsseStatus == 'perlu_revisi';
-  bool get isHSSEProcessed => hsseStatus == 'disetujui' || hsseStatus == 'ditolak';
-  bool get isEscalated => hsseNeedEscalation;
-  
   String get statusLabel {
     switch (status) {
-      case 'pending': return 'Menunggu';
+      case 'pending': return 'Menunggu Manager';
+      case 'manager_approved': return 'Disetujui Manager';
+      case 'pending_hsse':
+      case 'manager_approval_pending_hsse':
+      case 'manager_approved_pending_hsse': return 'Menunggu HSSE';
       case 'disetujui': return 'Disetujui';
       case 'ditolak': return 'Ditolak';
       case 'selesai': return 'Selesai';
@@ -412,13 +439,13 @@ class OvertimeHistory {
       default: return status;
     }
   }
-  
+
   String get risikoLevelLabel {
-    switch (risikoLevel) {
-      case 'rendah': return 'Rendah';
-      case 'sedang': return 'Sedang';
-      case 'tinggi': return 'Tinggi';
-      case 'kritis': return 'Kritis';
+    switch (risikoLevel?.toLowerCase()) {
+      case 'rendah': case 'low': return 'Rendah';
+      case 'sedang': case 'medium': return 'Sedang';
+      case 'tinggi': case 'high': return 'Tinggi';
+      case 'kritis': case 'critical': return 'Kritis';
       default: return 'Tidak Diketahui';
     }
   }
@@ -437,21 +464,25 @@ class OvertimeHistory {
   Color get statusColor {
     switch (status) {
       case 'pending': return Colors.orange;
+      case 'manager_approved': return Colors.blue.shade400;
+      case 'pending_hsse':
+      case 'manager_approval_pending_hsse':
+      case 'manager_approved_pending_hsse': return Colors.deepOrange;
       case 'disetujui': return Colors.green;
       case 'ditolak': return Colors.red;
       case 'selesai': return Colors.blue;
       case 'kadaluarsa': return Colors.grey;
-      case 'dibatalkan': return Colors.red[300]!;
+      case 'dibatalkan': return Colors.red.shade300;
       default: return Colors.grey;
     }
   }
 
   Color get risikoLevelColor {
-    switch (risikoLevel) {
-      case 'rendah': return Colors.green;
-      case 'sedang': return Colors.orange;
-      case 'tinggi': return Colors.deepOrange;
-      case 'kritis': return Colors.red;
+    switch (risikoLevel?.toLowerCase()) {
+      case 'rendah': case 'low': return Colors.green;
+      case 'sedang': case 'medium': return Colors.orange;
+      case 'tinggi': case 'high': return Colors.deepOrange;
+      case 'kritis': case 'critical': return Colors.red;
       default: return Colors.grey;
     }
   }
@@ -467,9 +498,39 @@ class OvertimeHistory {
     }
   }
 
+  String get absensiLabel {
+    switch (absensiStatus) {
+      case 'belum_absen': return '⏳ Belum Absen';
+      case 'check_in':
+      case 'sudah_absen': return '📥 Check In';
+      case 'check_out': return '📤 Check Out';
+      case 'selesai': return '✅ Selesai';
+      case 'selesai_terlambat': return '⚠️ Terlambat';
+      case 'tidak_lembur': return '❌ Tidak Lembur';
+      case 'expired': return '⏰ Kadaluarsa';
+      default: return absensiStatus ?? 'Tidak Diketahui';
+    }
+  }
+
+  Color get absensiColor {
+    switch (absensiStatus) {
+      case 'check_in':
+      case 'sudah_absen': return Colors.blue;
+      case 'selesai': return Colors.green;
+      case 'selesai_terlambat': return Colors.orange;
+      case 'tidak_lembur':
+      case 'expired': return Colors.red;
+      default: return Colors.grey;
+    }
+  }
+
   IconData get statusIcon {
     switch (status) {
       case 'pending': return Icons.schedule;
+      case 'manager_approved': return Icons.thumb_up_outlined;
+      case 'pending_hsse':
+      case 'manager_approval_pending_hsse':
+      case 'manager_approved_pending_hsse': return Icons.health_and_safety_outlined;
       case 'disetujui': return Icons.check_circle_outline;
       case 'ditolak': return Icons.cancel_outlined;
       case 'selesai': return Icons.task_alt;
@@ -480,11 +541,11 @@ class OvertimeHistory {
   }
 
   IconData get risikoLevelIcon {
-    switch (risikoLevel) {
-      case 'rendah': return Icons.check_circle_outline;
-      case 'sedang': return Icons.warning_amber_outlined;
-      case 'tinggi': return Icons.warning_rounded;
-      case 'kritis': return Icons.dangerous_outlined;
+    switch (risikoLevel?.toLowerCase()) {
+      case 'rendah': case 'low': return Icons.check_circle_outline;
+      case 'sedang': case 'medium': return Icons.info_outline;
+      case 'tinggi': case 'high': return Icons.warning_amber_outlined;
+      case 'kritis': case 'critical': return Icons.dangerous_outlined;
       default: return Icons.help_outline;
     }
   }
@@ -499,61 +560,324 @@ class OvertimeHistory {
       default: return Icons.help_outline;
     }
   }
+
+  bool get canBeCancelled {
+    if (status != 'pending' && status != 'disetujui') return false;
+    return DateTime.now().difference(createdAt).inDays <= 3;
+  }
+
+  bool get isCheckedIn =>
+      checkInTime != null ||
+      absensiStatus == 'check_in' ||
+      absensiStatus == 'sudah_absen' ||
+      absensiStatus == 'selesai' ||
+      absensiStatus == 'selesai_terlambat';
+
+  bool get isCheckedOut =>
+      checkOutTime != null ||
+      absensiStatus == 'check_out' ||
+      absensiStatus == 'selesai' ||
+      absensiStatus == 'selesai_terlambat' ||
+      absensiStatus == 'tidak_lembur';
+
+  bool get needsAbsensi =>
+      !isCheckedOut &&
+      (status == 'disetujui' || status == 'selesai') &&
+      (absensiStatus == null ||
+          absensiStatus == 'belum_absen' ||
+          absensiStatus == 'check_in' ||
+          absensiStatus == 'sudah_absen');
+
+  String get checkInTimeFormatted {
+    if (checkInTime == null) return '-';
+    return DateFormat('HH:mm', 'id_ID').format(checkInTime!);
+  }
+
+  String get checkOutTimeFormatted {
+    if (checkOutTime == null) return '-';
+    return DateFormat('HH:mm', 'id_ID').format(checkOutTime!);
+  }
+
+  String get checkInDateTimeFormatted {
+    if (checkInTime == null) return '-';
+    return DateFormat('dd MMM yyyy, HH:mm', 'id_ID').format(checkInTime!);
+  }
+
+  String get checkOutDateTimeFormatted {
+    if (checkOutTime == null) return '-';
+    return DateFormat('dd MMM yyyy, HH:mm', 'id_ID').format(checkOutTime!);
+  }
+
+  String get absensiStatusLabel {
+    switch (absensiStatus) {
+      case 'belum_absen': return 'Belum Absen';
+      case 'check_in': return 'Check In';
+      case 'sudah_absen': return 'Sudah Absen';
+      case 'check_out': return 'Check Out';
+      case 'selesai': return 'Selesai';
+      case 'selesai_terlambat': return 'Absen Terlambat';
+      case 'tidak_lembur': return 'Tidak Lembur';
+      case 'expired': return 'Kadaluarsa';
+      default: return absensiStatus ?? 'Tidak Diketahui';
+    }
+  }
+
+  Color get absensiStatusColor {
+    switch (absensiStatus) {
+      case 'belum_absen': return Colors.orange;
+      case 'check_in': return Colors.blue;
+      case 'sudah_absen': return Colors.blue.shade700;
+      case 'check_out': return Colors.purple;
+      case 'selesai': return Colors.green;
+      case 'selesai_terlambat': return Colors.deepOrange;
+      case 'tidak_lembur': return Colors.red;
+      case 'expired': return Colors.grey;
+      default: return Colors.grey;
+    }
+  }
+
+  IconData get absensiStatusIcon {
+    switch (absensiStatus) {
+      case 'belum_absen': return Icons.schedule;
+      case 'check_in': return Icons.login;
+      case 'sudah_absen': return Icons.check_circle_outline;
+      case 'check_out': return Icons.logout;
+      case 'selesai': return Icons.task_alt;
+      case 'selesai_terlambat': return Icons.warning_amber;
+      case 'tidak_lembur': return Icons.cancel;
+      case 'expired': return Icons.timer_off;
+      default: return Icons.help_outline;
+    }
+  }
+
+  bool get isLateAbsensi =>
+      absensiStatus == 'selesai_terlambat' ||
+      (absensiKeterlambatan != null &&
+          absensiKeterlambatan!['melakukan_lembur'] == true);
+
+  bool get isTidakLembur =>
+      absensiStatus == 'tidak_lembur' ||
+      (absensiKeterlambatan != null &&
+          absensiKeterlambatan!['melakukan_lembur'] == false);
+
+  String? get alasanKeterlambatan => keterlambatanAlasan;
+
+  bool get needsHSSEApproval => hsseStatus == 'pending';
+  bool get isHSSEApproved => hsseStatus == 'disetujui';
+  bool get isHSSERejected => hsseStatus == 'ditolak';
+  bool get isHSSEReview => hsseStatus == 'dalam_review';
+  bool get needsHSSERevision => hsseStatus == 'perlu_revisi';
+
+  // 🔥🔥🔥 V11: Static factory method untuk parsing langsung dari Map
+  factory OvertimeHistory.fromMap(Map<String, dynamic> data, String id) {
+    final tanggalValue = data['tanggal'] ?? data['tanggal_lembur'];
+    final DateTime tanggal = _parseTimestamp(tanggalValue);
+    final createdAt = _parseTimestamp(data['created_at']);
+    final updatedAt = _parseTimestamp(data['updated_at']);
+    final estimasiBiayaPerMitra =
+        (data['estimasi_biaya_per_mitra'] ?? data['estimasi_biaya'] ?? 0)
+            .toDouble();
+    final estimasiBiayaTotal =
+        (data['estimasi_biaya_total'] ?? data['estimasi_biaya'] ?? 0)
+            .toDouble();
+
+    String? keterlambatanAlasan;
+    String? alasanTidakLembur;
+    DateTime? confirmedAt;
+
+    if (data['absensi_keterlambatan'] is Map) {
+      final map = data['absensi_keterlambatan'] as Map;
+      final isLemburTerlambat = map['melakukan_lembur'] == true;
+      final isTidakLembur = map['melakukan_lembur'] == false;
+
+      if (isLemburTerlambat) {
+        keterlambatanAlasan = map['alasan']?.toString();
+      } else if (isTidakLembur) {
+        alasanTidakLembur = map['alasan']?.toString();
+      }
+
+      if (map['confirmed_at'] != null) {
+        confirmedAt = _parseTimestampOrNull(map['confirmed_at']);
+      }
+    }
+
+    keterlambatanAlasan ??= data['keterlambatan_alasan']?.toString();
+    alasanTidakLembur ??= data['alasan_tidak_lembur']?.toString();
+    confirmedAt ??= _parseTimestampOrNull(
+        data['confirmed_at'] ?? data['tidak_lembur_at'] ?? data['check_out_time']);
+
+    return OvertimeHistory(
+      id: id,
+      groupId: data['group_id'] ?? id,
+      tipeDokumen: data['tipe_dokumen'] ?? 'lembur_mitra',
+      pengawasId: data['pengawas_id'] ?? data['diajukan_oleh_id'],
+      namaPengawas: data['nama_pengawas'] ?? data['diajukan_oleh_nama'],
+      pengawasFungsi: data['pengawas_fungsi'],
+      diajukanOlehId: data['diajukan_oleh_id'] ?? data['pengawas_id'],
+      diajukanOlehNama: data['diajukan_oleh_nama'] ?? data['nama_pengawas'],
+      mitraId: data['mitra_id'],
+      namaMitra: data['nama_mitra'],
+      fungsiMitra: data['fungsi_mitra'],
+      noHpMitra: data['no_hp_mitra'],
+      mitraIds: _parseStringList(data['mitra_ids']),
+      totalMitra: data['total_mitra'] ?? 1,
+      isMultiple: data['is_multiple'] ?? false,
+      tanggal: tanggal,
+      jamMulai: data['jam_mulai'] ?? '',
+      jamSelesai: data['jam_selesai'] ?? '',
+      totalJam: (data['total_jam_desimal'] ?? 0).toDouble(),
+      jenisLembur: data['jenis_lembur'] ?? 'hari_kerja',
+      lokasi: data['lokasi'] ?? {},
+      urgensi: data['urgensi'] ?? 'normal',
+      alasan: data['alasan'] ?? '',
+      catatanTambahan: data['catatan_tambahan'] ?? '',
+      estimasiBiayaPerMitra: estimasiBiayaPerMitra,
+      estimasiBiayaTotal:
+          estimasiBiayaTotal > 0 ? estimasiBiayaTotal : estimasiBiayaPerMitra,
+      isOverride: data['is_override'] ?? false,
+      status: data['status'] ?? 'pending',
+      approvedBy: data['approved_by'],
+      approvedByName: data['approved_by_name'],
+      approvedAt: _parseTimestampOrNull(data['approved_at']),
+      spklGenerated: data['spkl_generated'] ?? false,
+      spklNomor: data['spkl_nomor'],
+      spklPath: data['spkl_path'],
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      checkInTime: _parseTimestampOrNull(data['check_in_time']),
+      checkOutTime: _parseTimestampOrNull(data['check_out_time']),
+      checkInFotoUrl: data['check_in_foto_url'] ?? data['absensi_foto_url'],
+      checkOutFotoUrl: data['check_out_foto_url'],
+      absensiStatus: data['absensi_status'],
+      absensiKeterlambatan: _parseMap(data['absensi_keterlambatan']),
+      keterlambatanAlasan: keterlambatanAlasan,
+      alasanTidakLembur: alasanTidakLembur,
+      confirmedAt: confirmedAt,
+      dibatalkanPada: _parseTimestampOrNull(data['dibatalkan_pada']),
+      dibatalkanOleh: data['dibatalkan_oleh'],
+      isRisky: data['is_risky'] ?? false,
+      risikoLevel: data['risiko_level'] ?? data['risk_level'],
+      risikoKategori: data['risiko_kategori'],
+      risikoDeskripsi: data['risiko_deskripsi'],
+      risikoMitigasi: _parseStringList(data['risiko_mitigasi']),
+      hsseStatus: data['hsse_status'] ?? 'pending',
+      hsseApprovedBy: data['hsse_approved_by'],
+      hsseApprovedByName: data['hsse_approved_by_name'],
+      hsseApprovedAt: _parseTimestampOrNull(data['hsse_approved_at']),
+      hsseRejectedBy: data['hsse_rejected_by'],
+      hsseRejectedByName: data['hsse_rejected_by_name'],
+      hsseRejectedAt: _parseTimestampOrNull(data['hsse_rejected_at']),
+      hsseAlasanPenolakan: data['hsse_alasan_penolakan'],
+      hsseReviewBy: data['hsse_review_by'],
+      hsseReviewByName: data['hsse_review_by_name'],
+      hsseReviewAt: _parseTimestampOrNull(data['hsse_review_at']),
+      hsseCatatanRevisi: data['hsse_catatan_revisi'],
+      hsseItemsRevisi: _parseStringList(data['hsse_items_revisi']),
+      hsseCatatan: data['hsse_catatan'],
+      hsseRekomendasi: data['hsse_rekomendasi'],
+      hsseDokumenPendukung: _parseStringList(data['hsse_dokumen_pendukung']),
+      hsseChecklist: _parseMap(data['hsse_checklist']),
+      hsseNeedEscalation: data['hsse_need_escalation'] ?? false,
+      hsseEscalationTo: data['hsse_escalation_to'],
+      hsseEscalationReason: data['hsse_escalation_reason'],
+      hsseEscalationAt: _parseTimestampOrNull(data['hsse_escalation_at']),
+      hsseEscalationBy: data['hsse_escalation_by'],
+      hsseEscalationByName: data['hsse_escalation_by_name'],
+      hsseSafetyBriefing: data['hsse_safety_briefing'] ?? false,
+      hsseSafetyBriefingDate:
+          _parseTimestampOrNull(data['hsse_safety_briefing_date']),
+      hsseSafetyBriefingBy: data['hsse_safety_briefing_by'],
+      hsseSafetyBriefingByName: data['hsse_safety_briefing_by_name'],
+      hsseSafetyBriefingCatatan: data['hsse_safety_briefing_catatan'],
+      hsseApprovalHistory: _parseMapList(data['hsse_approval_history']),
+      approvalChain: _parseMap(data['approval_chain']),
+      approvalLevel: data['approval_level']?.toString() ?? '',
+      maxApprovalLevel: data['max_approval_level'] ?? 1,
+      lastModifiedBy: data['last_modified_by'],
+      lastModifiedByName: data['last_modified_by_name'],
+      lastModifiedAt: _parseTimestampOrNull(data['last_modified_at']),
+      tags: _parseStringList(data['tags']),
+      metadata: _parseMap(data['metadata']),
+    );
+  }
 }
 
-/// ============================================================================
-/// ENUM: HSSE View Mode
-/// ============================================================================
+// ============================================================================
+// ENUM: HSSE View Mode
+// ============================================================================
 enum HSSEViewMode {
   all,
   needApproval,
   myHistory,
 }
 
-/// ============================================================================
-/// SERVICE: OvertimeHistoryService (CLEANED - No Absensi Operations)
-/// ============================================================================
+// ============================================================================
+// SERVICE: OvertimeHistoryService - FINAL VERSION V11
+// ============================================================================
 class OvertimeHistoryService {
-  static final OvertimeHistoryService _instance = OvertimeHistoryService._internal();
+  // ─── SINGLETON ───
+  static final OvertimeHistoryService _instance =
+      OvertimeHistoryService._internal();
   factory OvertimeHistoryService() => _instance;
   OvertimeHistoryService._internal();
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
-  static const String collectionPengajuan = 'pengajuan_lembur';
+  // ─── NAMA COLLECTION ───
   static const String collectionLemburMitra = 'lembur_mitra';
+  static const String collectionPengajuan = 'pengajuan_lembur';
+  static const String collectionUsers = 'users';
+  static const String collectionActivityLogs = 'activity_logs';
   static const String collectionHSSELogs = 'hsse_activity_logs';
   static const String collectionSafetyBriefing = 'safety_briefings';
-  static const String collectionActivityLogs = 'activity_logs';
-  
+
+  // ═══════════════════════════════════════════════════════════════
+  // STATUS KONSTANTA
+  // ═══════════════════════════════════════════════════════════════
+
+  static const List<String> allActiveStatuses = [
+    'pending', 'manager_approved', 'pending_hsse',
+    'manager_approval_pending_hsse', 'manager_approved_pending_hsse',
+  ];
+
+  static const List<String> finalStatuses = [
+    'disetujui', 'ditolak', 'dibatalkan', 'selesai', 'kadaluarsa',
+  ];
+
+  static const List<String> allDisplayStatuses = [
+    ...allActiveStatuses, ...finalStatuses,
+  ];
+
+  static const List<String> hssePendingStatuses = [
+    'pending_hsse', 'manager_approval_pending_hsse', 'manager_approved_pending_hsse',
+  ];
+
+  static const List<String> hsseResolvedStatuses = ['disetujui', 'ditolak'];
+
   static const int batasWaktuPembatalan = 3;
 
-  // =========================================================================
-  // 🔥 KONSTANTA STATUS HSSE
-  // =========================================================================
-  static const List<String> hssePendingStatuses = [
-    'pending_hsse',
-    'manager_approval_pending_hsse',
-    'manager_approved_pending_hsse',
-  ];
+  // ═══════════════════════════════════════════════════════════════
+  // HELPER METHODS
+  // ═══════════════════════════════════════════════════════════════
 
-  static const List<String> hsseResolvedStatuses = [
-    'disetujui',
-    'ditolak',
-  ];
-
-  // =========================================================================
-  // HELPERS
-  // =========================================================================
-  
   List<OvertimeHistory> _filterByBulan(List<OvertimeHistory> data, String? bulan) {
     if (bulan == null || bulan.isEmpty || bulan == 'semua') return data;
     return data.where((item) => item.tahunBulan == bulan).toList();
   }
 
-  List<OvertimeHistory> _removeDuplicates(List<OvertimeHistory> data) {
-    final seenIds = <String>{};
-    return data.where((item) => seenIds.add(item.id)).toList();
+  /// 🔥 GROUP BY group_id untuk menghindari duplikasi
+  List<OvertimeHistory> _groupByGroupId(List<OvertimeHistory> items) {
+    final Map<String, OvertimeHistory> uniqueMap = {};
+    for (var item in items) {
+      final key = item.groupId;
+      if (!uniqueMap.containsKey(key) || 
+          item.createdAt.isAfter(uniqueMap[key]!.createdAt)) {
+        uniqueMap[key] = item;
+      }
+    }
+    final result = uniqueMap.values.toList();
+    result.sort((a, b) => b.tanggal.compareTo(a.tanggal));
+    return result;
   }
 
   Future<DocumentSnapshot<Map<String, dynamic>>?> _findDocument(String documentId) async {
@@ -564,9 +888,28 @@ class OvertimeHistoryService {
     return null;
   }
 
-  // =========================================================================
-  // STREAMS UTAMA
-  // =========================================================================
+  double _parseDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is String) return double.tryParse(value) ?? 0.0;
+    return 0.0;
+  }
+
+  Future<String?> _getUserRole(String userId) async {
+    try {
+      final doc = await _firestore.collection(collectionUsers).doc(userId).get();
+      if (doc.exists) return doc.data()?['role'] as String?;
+      return null;
+    } catch (e) {
+      debugPrint('⚠️ Error getting user role: $e');
+      return null;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // STREAM UTAMA - DENGAN GROUP BY group_id
+  // ═══════════════════════════════════════════════════════════════
 
   Stream<List<OvertimeHistory>> getOvertimeHistoryStream({
     required String userRole,
@@ -578,18 +921,15 @@ class OvertimeHistoryService {
     if (userRole == 'manager' && userFungsi == 'hsse') {
       return _getHSSEManagerStream(bulan: bulan, statusFilter: statusFilter);
     }
-    
+    if (userFungsi == 'hsse') {
+      return _getHSSEStaffStream(bulan: bulan, statusFilter: statusFilter, hsseUserId: userId);
+    }
     switch (userRole) {
-      case 'mitra':
-        return _getMitraHistoryStream(mitraId: userId!, bulan: bulan, statusFilter: statusFilter);
-      case 'pengawas':
-        return _getPengawasHistoryStream(pengawasId: userId!, bulan: bulan, statusFilter: statusFilter);
-      case 'manager':
-        return _getManagerHistoryStream(fungsi: userFungsi, bulan: bulan, statusFilter: statusFilter);
-      case 'superadmin':
-        return _getAllHistoryStream(bulan: bulan, statusFilter: statusFilter);
-      default:
-        return Stream.value([]);
+      case 'mitra': return _getMitraHistoryStream(mitraId: userId!, bulan: bulan, statusFilter: statusFilter);
+      case 'pengawas': return _getPengawasHistoryStream(pengawasId: userId!, bulan: bulan, statusFilter: statusFilter);
+      case 'manager': return _getManagerHistoryStream(fungsi: userFungsi, bulan: bulan, statusFilter: statusFilter);
+      case 'superadmin': return _getAllHistoryStream(bulan: bulan, statusFilter: statusFilter);
+      default: return Stream.value([]);
     }
   }
 
@@ -598,19 +938,19 @@ class OvertimeHistoryService {
   }) {
     Query<Map<String, dynamic>> query = _firestore
         .collection(collectionLemburMitra)
-        .where('mitra_id', isEqualTo: mitraId);
+        .where('mitra_id', isEqualTo: mitraId)
+        .where('status', whereIn: allDisplayStatuses);
     if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
       query = query.where('tahun_bulan', isEqualTo: bulan);
     }
     if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
       query = query.where('status', isEqualTo: statusFilter);
     }
-    return query.orderBy('tanggal', descending: true).snapshots().map((snapshot) {
-      var docs = snapshot.docs
-          .map((doc) => OvertimeHistory.fromFirestore(doc))
-          .where((item) => item.mitraId == mitraId && item.tipeDokumen == 'lembur_mitra')
+    return query.orderBy('tanggal', descending: true).snapshots().map((snap) {
+      var docs = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc))
+          .where((item) => item.mitraId == mitraId)
           .toList();
-      return _filterByBulan(docs, bulan);
+      return _filterByBulan(_groupByGroupId(docs), bulan);
     });
   }
 
@@ -619,23 +959,26 @@ class OvertimeHistoryService {
   }) {
     Query<Map<String, dynamic>> query = _firestore
         .collection(collectionLemburMitra)
-        .where('diajukan_oleh_id', isEqualTo: pengawasId);
+        .where('diajukan_oleh_id', isEqualTo: pengawasId)
+        .where('status', whereIn: allDisplayStatuses);
     if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
       query = query.where('tahun_bulan', isEqualTo: bulan);
     }
     if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
       query = query.where('status', isEqualTo: statusFilter);
     }
-    return query.orderBy('tanggal', descending: true).snapshots().map((snapshot) {
-      var docs = snapshot.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      return _filterByBulan(docs, bulan);
+    return query.orderBy('tanggal', descending: true).snapshots().map((snap) {
+      var docs = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
+      return _filterByBulan(_groupByGroupId(docs), bulan);
     });
   }
 
   Stream<List<OvertimeHistory>> _getManagerHistoryStream({
     String? fungsi, String? bulan, String? statusFilter,
   }) {
-    Query<Map<String, dynamic>> query = _firestore.collection(collectionPengajuan);
+    Query<Map<String, dynamic>> query = _firestore
+        .collection(collectionLemburMitra)
+        .where('status', whereIn: allDisplayStatuses);
     if (fungsi != null && fungsi.isNotEmpty) {
       query = query.where('pengawas_fungsi', isEqualTo: fungsi);
     }
@@ -645,157 +988,71 @@ class OvertimeHistoryService {
     if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
       query = query.where('status', isEqualTo: statusFilter);
     }
-    return query.orderBy('created_at', descending: true).snapshots().map((snapshot) {
-      var docs = snapshot.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      return _filterByBulan(docs, bulan);
+    return query.orderBy('tanggal', descending: true).snapshots().map((snap) {
+      var docs = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
+      return _filterByBulan(_groupByGroupId(docs), bulan);
     });
   }
 
-  Stream<List<OvertimeHistory>> _getAllHistoryStream({String? bulan, String? statusFilter}) {
-    final controller = StreamController<List<OvertimeHistory>>();
-    StreamSubscription? pengajuanSub, mitraSub;
-    List<OvertimeHistory> lastPengajuan = [], lastMitra = [];
-
-    void emitMerged() {
-      var allData = [...lastPengajuan, ...lastMitra];
-      allData = _removeDuplicates(allData);
-      if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
-        allData = allData.where((item) => item.status == statusFilter).toList();
-      }
-      allData = _filterByBulan(allData, bulan);
-      allData.sort((a, b) => b.tanggal.compareTo(a.tanggal));
-      if (!controller.isClosed) controller.add(allData);
-    }
-
-    Query<Map<String, dynamic>> qp = _firestore.collection(collectionPengajuan);
-    Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra);
+  Stream<List<OvertimeHistory>> _getAllHistoryStream({
+    String? bulan, String? statusFilter,
+  }) {
+    Query<Map<String, dynamic>> query = _firestore
+        .collection(collectionLemburMitra)
+        .where('status', whereIn: allDisplayStatuses);
     if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-      qp = qp.where('tahun_bulan', isEqualTo: bulan);
-      qm = qm.where('tahun_bulan', isEqualTo: bulan);
+      query = query.where('tahun_bulan', isEqualTo: bulan);
     }
-
-    pengajuanSub = qp.orderBy('created_at', descending: true).snapshots()
-        .map((snap) => snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList())
-        .listen((data) { lastPengajuan = data; emitMerged(); });
-    mitraSub = qm.orderBy('tanggal', descending: true).snapshots()
-        .map((snap) => snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList())
-        .listen((data) { lastMitra = data; emitMerged(); });
-
-    controller.onCancel = () { pengajuanSub?.cancel(); mitraSub?.cancel(); };
-    return controller.stream;
+    return query.orderBy('tanggal', descending: true).snapshots().map((snap) {
+      var docs = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
+      if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
+        docs = docs.where((item) => item.status == statusFilter).toList();
+      }
+      return _filterByBulan(_groupByGroupId(docs), bulan);
+    });
   }
-
-  // =========================================================================
-  // HSSE STREAMS (Tetap ada, tidak terkait absensi)
-  // =========================================================================
 
   Stream<List<OvertimeHistory>> _getHSSEManagerStream({
     String? bulan, String? statusFilter, String? hsseStatus,
     String? risikoLevel, String? risikoKategori,
   }) {
-    Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra)
-        .where('status', whereIn: [...hssePendingStatuses, ...hsseResolvedStatuses]);
-    
-    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-      qm = qm.where('tahun_bulan', isEqualTo: bulan);
-    }
-    if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
-      qm = qm.where('status', isEqualTo: statusFilter);
-    }
-    if (risikoLevel != null && risikoLevel.isNotEmpty && risikoLevel != 'semua') {
-      qm = qm.where('risiko_level', isEqualTo: risikoLevel);
-    }
-    if (risikoKategori != null && risikoKategori.isNotEmpty && risikoKategori != 'semua') {
-      qm = qm.where('risiko_kategori', isEqualTo: risikoKategori);
-    }
-
+    Query<Map<String, dynamic>> qm = _firestore
+        .collection(collectionLemburMitra)
+        .where('status', whereIn: allDisplayStatuses);
+    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') qm = qm.where('tahun_bulan', isEqualTo: bulan);
+    if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') qm = qm.where('status', isEqualTo: statusFilter);
+    if (risikoLevel != null && risikoLevel.isNotEmpty && risikoLevel != 'semua') qm = qm.where('risiko_level', isEqualTo: risikoLevel);
+    if (risikoKategori != null && risikoKategori.isNotEmpty && risikoKategori != 'semua') qm = qm.where('risiko_kategori', isEqualTo: risikoKategori);
     return qm.orderBy('tanggal', descending: true).snapshots().map((snap) {
       var allData = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      
+      allData = _groupByGroupId(allData);
       if (hsseStatus != null && hsseStatus.isNotEmpty && hsseStatus != 'semua') {
         allData = allData.where((item) => item.hsseStatus == hsseStatus).toList();
       }
-      
       allData.sort((a, b) {
         if (a.hsseStatus == 'pending' && b.hsseStatus != 'pending') return -1;
         if (b.hsseStatus == 'pending' && a.hsseStatus != 'pending') return 1;
         final levelOrder = {'kritis': 0, 'tinggi': 1, 'sedang': 2, 'rendah': 3};
-        final aLevel = levelOrder[a.risikoLevel] ?? 4;
-        final bLevel = levelOrder[b.risikoLevel] ?? 4;
+        final aLevel = levelOrder[a.risikoLevel?.toLowerCase()] ?? 4;
+        final bLevel = levelOrder[b.risikoLevel?.toLowerCase()] ?? 4;
         if (aLevel != bLevel) return aLevel.compareTo(bLevel);
         return b.tanggal.compareTo(a.tanggal);
       });
-      
       return allData;
     });
   }
 
-  Stream<List<OvertimeHistory>> getHSSEApprovedByMeStream({
-    required String hsseUserId, String? bulan, String? statusFilter,
+  Stream<List<OvertimeHistory>> _getHSSEStaffStream({
+    String? bulan, String? statusFilter, String? hsseUserId,
   }) {
-    Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra)
-        .where('status', whereIn: hsseResolvedStatuses)
-        .where('hsse_validated', isEqualTo: true);
-    
-    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-      qm = qm.where('tahun_bulan', isEqualTo: bulan);
-    }
-
+    Query<Map<String, dynamic>> qm = _firestore
+        .collection(collectionLemburMitra)
+        .where('status', whereIn: allDisplayStatuses);
+    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') qm = qm.where('tahun_bulan', isEqualTo: bulan);
+    if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') qm = qm.where('status', isEqualTo: statusFilter);
     return qm.orderBy('tanggal', descending: true).snapshots().map((snap) {
       var allData = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      
-      allData = allData.where((item) {
-        return item.hsseApprovedBy == hsseUserId ||
-               item.hsseRejectedBy == hsseUserId ||
-               item.hsseReviewBy == hsseUserId;
-      }).toList();
-      
-      if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
-        allData = allData.where((item) => item.status == statusFilter).toList();
-      }
-      
-      allData.sort((a, b) {
-        final aDate = a.hsseApprovedAt ?? a.hsseRejectedAt ?? a.createdAt;
-        final bDate = b.hsseApprovedAt ?? b.hsseRejectedAt ?? b.createdAt;
-        return bDate.compareTo(aDate);
-      });
-      
-      return allData;
-    });
-  }
-
-  Stream<List<OvertimeHistory>> getHSSERiskyOvertimeStream({
-    String? bulan, String? statusFilter, String? risikoLevel,
-    String? risikoKategori, String? hsseStatus, String? hsseUserId,
-    HSSEViewMode? viewMode,
-  }) {
-    List<String> hsseStatusFilter;
-    if (hsseStatus != null && hsseStatus.isNotEmpty) {
-      hsseStatusFilter = [hsseStatus];
-    } else {
-      hsseStatusFilter = ['pending', 'disetujui', 'ditolak', 'perlu_revisi', 'dalam_review'];
-    }
-
-    Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra)
-        .where('status', whereIn: [...hssePendingStatuses, ...hsseResolvedStatuses])
-        .where('hsse_status', whereIn: hsseStatusFilter);
-
-    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-      qm = qm.where('tahun_bulan', isEqualTo: bulan);
-    }
-    if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
-      qm = qm.where('status', isEqualTo: statusFilter);
-    }
-    if (risikoLevel != null && risikoLevel.isNotEmpty) {
-      qm = qm.where('risiko_level', isEqualTo: risikoLevel);
-    }
-    if (risikoKategori != null && risikoKategori.isNotEmpty) {
-      qm = qm.where('risiko_kategori', isEqualTo: risikoKategori);
-    }
-
-    return qm.orderBy('tanggal', descending: true).snapshots().map((snap) {
-      var allData = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      
+      allData = _groupByGroupId(allData);
       if (hsseUserId != null && hsseUserId.isNotEmpty) {
         allData = allData.where((item) {
           if (item.hsseStatus == 'pending') return true;
@@ -805,15 +1062,66 @@ class OvertimeHistoryService {
           return false;
         }).toList();
       }
-      
       allData.sort((a, b) {
+        if (a.hsseStatus == 'pending' && b.hsseStatus != 'pending') return -1;
+        if (b.hsseStatus == 'pending' && a.hsseStatus != 'pending') return 1;
         final levelOrder = {'kritis': 0, 'tinggi': 1, 'sedang': 2, 'rendah': 3};
-        final aLevel = levelOrder[a.risikoLevel] ?? 4;
-        final bLevel = levelOrder[b.risikoLevel] ?? 4;
+        final aLevel = levelOrder[a.risikoLevel?.toLowerCase()] ?? 4;
+        final bLevel = levelOrder[b.risikoLevel?.toLowerCase()] ?? 4;
         if (aLevel != bLevel) return aLevel.compareTo(bLevel);
         return b.tanggal.compareTo(a.tanggal);
       });
-      
+      return allData;
+    });
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PUBLIC HSSE STREAMS
+  // ═══════════════════════════════════════════════════════════════
+
+  Stream<List<OvertimeHistory>> getHSSERiskyOvertimeStream({
+    String? bulan, String? statusFilter, String? risikoLevel,
+    String? risikoKategori, String? hsseStatus, String? hsseUserId,
+  }) {
+    return _getHSSEManagerStream(
+      bulan: bulan, statusFilter: statusFilter, hsseStatus: hsseStatus,
+      risikoLevel: risikoLevel, risikoKategori: risikoKategori,
+    ).map((data) {
+      return data.where((item) {
+        if (hssePendingStatuses.contains(item.status)) return true;
+        if (item.isRisky) return true;
+        if (item.risikoLevel != null &&
+            ['tinggi', 'high', 'kritis', 'critical', 'sedang', 'medium']
+                .contains(item.risikoLevel?.toLowerCase())) return true;
+        if (item.hsseStatus != 'pending') return true;
+        return false;
+      }).toList();
+    });
+  }
+
+  Stream<List<OvertimeHistory>> getHSSEApprovedByMeStream({
+    required String hsseUserId, String? bulan, String? statusFilter,
+  }) {
+    Query<Map<String, dynamic>> qm = _firestore
+        .collection(collectionLemburMitra)
+        .where('status', whereIn: hsseResolvedStatuses);
+    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') qm = qm.where('tahun_bulan', isEqualTo: bulan);
+    return qm.orderBy('tanggal', descending: true).snapshots().map((snap) {
+      var allData = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
+      allData = _groupByGroupId(allData);
+      allData = allData.where((item) {
+        return item.hsseApprovedBy == hsseUserId ||
+            item.hsseRejectedBy == hsseUserId ||
+            item.hsseReviewBy == hsseUserId;
+      }).toList();
+      if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
+        allData = allData.where((item) => item.status == statusFilter).toList();
+      }
+      allData.sort((a, b) {
+        final aDate = a.hsseApprovedAt ?? a.hsseRejectedAt ?? a.createdAt;
+        final bDate = b.hsseApprovedAt ?? b.hsseRejectedAt ?? b.createdAt;
+        return bDate.compareTo(aDate);
+      });
       return allData;
     });
   }
@@ -821,53 +1129,7 @@ class OvertimeHistoryService {
   Stream<List<OvertimeHistory>> getHSSEApprovalHistoryStream({
     required String hsseUserId, String? bulan, String? hsseStatus,
   }) {
-    List<String> statusFilter;
-    if (hsseStatus != null && hsseStatus.isNotEmpty) {
-      statusFilter = [hsseStatus];
-    } else {
-      statusFilter = ['disetujui', 'ditolak', 'perlu_revisi', 'dalam_review'];
-    }
-
-    Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra)
-        .where('status', whereIn: hsseResolvedStatuses)
-        .where('hsse_status', whereIn: statusFilter);
-
-    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-      qm = qm.where('tahun_bulan', isEqualTo: bulan);
-    }
-
-    return qm.orderBy('tanggal', descending: true).snapshots().map((snap) {
-      var allData = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      
-      allData = allData.where((item) {
-        return item.hsseApprovedBy == hsseUserId ||
-               item.hsseRejectedBy == hsseUserId ||
-               item.hsseReviewBy == hsseUserId ||
-               item.hsseEscalationBy == hsseUserId;
-      }).toList();
-      
-      allData.sort((a, b) {
-        final aDate = a.hsseApprovedAt ?? a.hsseRejectedAt ?? a.createdAt;
-        final bDate = b.hsseApprovedAt ?? b.hsseRejectedAt ?? b.createdAt;
-        return bDate.compareTo(aDate);
-      });
-      
-      return allData;
-    });
-  }
-
-  Stream<List<OvertimeHistory>> getHSSEEscalationStream({String? bulan}) {
-    Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra)
-        .where('hsse_need_escalation', isEqualTo: true);
-    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-      qm = qm.where('tahun_bulan', isEqualTo: bulan);
-    }
-
-    return qm.orderBy('tanggal', descending: true).snapshots().map((snap) {
-      var allData = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      allData.sort((a, b) => b.tanggal.compareTo(a.tanggal));
-      return allData;
-    });
+    return getHSSEApprovedByMeStream(hsseUserId: hsseUserId, bulan: bulan, statusFilter: hsseStatus);
   }
 
   Stream<List<OvertimeHistory>> getHSSEManagerHistoryStream({
@@ -875,160 +1137,130 @@ class OvertimeHistoryService {
     String? risikoLevel, String? risikoKategori,
   }) {
     return _getHSSEManagerStream(
-      bulan: bulan, statusFilter: statusFilter,
-      hsseStatus: hsseStatus, risikoLevel: risikoLevel, risikoKategori: risikoKategori,
+      bulan: bulan, statusFilter: statusFilter, hsseStatus: hsseStatus,
+      risikoLevel: risikoLevel, risikoKategori: risikoKategori,
     );
   }
 
-  // =========================================================================
-  // STATISTIK
-  // =========================================================================
-  
-  Future<Map<String, dynamic>> getHSSEManagerStats({
-    String? bulan, String? hsseStatus,
-  }) async {
-    try {
-      Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra)
-          .where('status', whereIn: [...hssePendingStatuses, ...hsseResolvedStatuses]);
-          
-      if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-        qm = qm.where('tahun_bulan', isEqualTo: bulan);
-      }
-      if (hsseStatus != null && hsseStatus.isNotEmpty && hsseStatus != 'semua') {
-        qm = qm.where('hsse_status', isEqualTo: hsseStatus);
-      }
-      
-      final allDocs = (await qm.get()).docs;
-      
-      int total = allDocs.length;
-      int pending = 0, approved = 0, rejected = 0, perluRevisi = 0, dalamReview = 0;
-      int kritis = 0, tinggi = 0, sedang = 0, rendah = 0;
-      Set<String> fungsiSet = {};
-      double totalBiaya = 0;
-      
-      for (var doc in allDocs) {
-        final overtime = OvertimeHistory.fromFirestore(doc);
-        switch (overtime.hsseStatus) {
-          case 'pending': pending++; break;
-          case 'disetujui': approved++; break;
-          case 'ditolak': rejected++; break;
-          case 'perlu_revisi': perluRevisi++; break;
-          case 'dalam_review': dalamReview++; break;
-        }
-        switch (overtime.risikoLevel) {
-          case 'kritis': kritis++; break;
-          case 'tinggi': tinggi++; break;
-          case 'sedang': sedang++; break;
-          case 'rendah': rendah++; break;
-        }
-        final fungsi = overtime.pengawasFungsi ?? overtime.fungsiMitra;
-        if (fungsi != null) fungsiSet.add(fungsi);
-        totalBiaya += overtime.estimasiBiayaTotal > 0 
-            ? overtime.estimasiBiayaTotal 
-            : overtime.estimasiBiayaPerMitra;
-      }
-      
-      return {
-        'total': total, 'pending': pending, 'approved': approved, 'rejected': rejected,
-        'perluRevisi': perluRevisi, 'dalamReview': dalamReview,
-        'kritis': kritis, 'tinggi': tinggi, 'sedang': sedang, 'rendah': rendah,
-        'fungsiTerkait': fungsiSet.toList(), 'totalBiaya': totalBiaya,
-        'approvalRate': total > 0 ? (approved / total * 100) : 0,
-        'rejectionRate': total > 0 ? (rejected / total * 100) : 0,
-      };
-    } catch (e) {
-      return {'total': 0, 'pending': 0, 'approved': 0, 'rejected': 0, 'perluRevisi': 0, 'dalamReview': 0, 'kritis': 0, 'tinggi': 0, 'sedang': 0, 'rendah': 0, 'fungsiTerkait': [], 'totalBiaya': 0, 'approvalRate': 0, 'rejectionRate': 0};
-    }
+  Stream<List<OvertimeHistory>> getHSSEEscalationStream({String? bulan}) {
+    Query<Map<String, dynamic>> qm = _firestore
+        .collection(collectionLemburMitra)
+        .where('hsse_need_escalation', isEqualTo: true);
+    if (bulan != null && bulan.isNotEmpty && bulan != 'semua') qm = qm.where('tahun_bulan', isEqualTo: bulan);
+    return qm.orderBy('tanggal', descending: true).snapshots().map((snap) {
+      var allData = snap.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
+      allData = _groupByGroupId(allData);
+      allData.sort((a, b) => b.tanggal.compareTo(a.tanggal));
+      return allData;
+    });
   }
+
+  // ═══════════════════════════════════════════════════════════════
+  // STATISTIK
+  // ═══════════════════════════════════════════════════════════════
 
   Future<Map<String, dynamic>> getOvertimeStats({
     required String userRole, String? userFungsi, String? userId, String? bulan,
   }) async {
     try {
-      List<QueryDocumentSnapshot<Map<String, dynamic>>> allDocs = [];
-      
-      if (userRole == 'manager' && userFungsi == 'hsse') {
-        Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra)
-            .where('status', whereIn: [...hssePendingStatuses, ...hsseResolvedStatuses]);
-        if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-          qm = qm.where('tahun_bulan', isEqualTo: bulan);
-        }
-        allDocs = (await qm.get()).docs.toList();
-      } else if (userRole == 'mitra') {
-        Query<Map<String, dynamic>> query = _firestore.collection(collectionLemburMitra);
-        if (userId != null && userId.isNotEmpty) query = query.where('mitra_id', isEqualTo: userId);
-        if (bulan != null && bulan.isNotEmpty && bulan != 'semua') query = query.where('tahun_bulan', isEqualTo: bulan);
-        allDocs = (await query.get()).docs.toList();
-      } else if (userRole == 'pengawas') {
-        Query<Map<String, dynamic>> query = _firestore.collection(collectionLemburMitra);
-        if (userId != null && userId.isNotEmpty) query = query.where('diajukan_oleh_id', isEqualTo: userId);
-        if (bulan != null && bulan.isNotEmpty && bulan != 'semua') query = query.where('tahun_bulan', isEqualTo: bulan);
-        allDocs = (await query.get()).docs.toList();
-      } else if (userRole == 'manager') {
-        Query<Map<String, dynamic>> query = _firestore.collection(collectionPengajuan);
-        if (userFungsi != null && userFungsi.isNotEmpty) query = query.where('pengawas_fungsi', isEqualTo: userFungsi);
-        if (bulan != null && bulan.isNotEmpty && bulan != 'semua') query = query.where('tahun_bulan', isEqualTo: bulan);
-        allDocs = (await query.get()).docs.toList();
-      } else {
-        Query<Map<String, dynamic>> qp = _firestore.collection(collectionPengajuan);
-        Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra);
-        if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-          qp = qp.where('tahun_bulan', isEqualTo: bulan);
-          qm = qm.where('tahun_bulan', isEqualTo: bulan);
-        }
-        final results = await Future.wait([qp.get(), qm.get()]);
-        allDocs = [...results[0].docs, ...results[1].docs];
+      Query<Map<String, dynamic>> queryMitra = _firestore.collection(collectionLemburMitra);
+      if (userRole == 'mitra' && userId != null && userId.isNotEmpty) {
+        queryMitra = queryMitra.where('mitra_id', isEqualTo: userId);
+      } else if (userRole == 'pengawas' && userId != null && userId.isNotEmpty) {
+        queryMitra = queryMitra.where('diajukan_oleh_id', isEqualTo: userId);
+      } else if (userRole == 'manager' && userFungsi != null && userFungsi.isNotEmpty) {
+        queryMitra = queryMitra.where('pengawas_fungsi', isEqualTo: userFungsi);
       }
-
-      int total = allDocs.length, pending = 0, approved = 0, completed = 0,
-          rejected = 0, expired = 0, cancelled = 0, riskyCount = 0;
-      double totalJam = 0, totalBiaya = 0;
-
+      if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
+        queryMitra = queryMitra.where('tahun_bulan', isEqualTo: bulan);
+      }
+      final allDocs = (await queryMitra.get()).docs;
+      final Map<String, Map<String, dynamic>> uniqueGroups = {};
       for (var doc in allDocs) {
         final data = doc.data();
-        final status = data['status'] ?? '';
-        switch (status) {
-          case 'pending': pending++; break;
-          case 'disetujui': approved++; break;
-          case 'selesai': completed++; totalJam += (data['total_jam_desimal'] ?? 0).toDouble(); totalBiaya += (data['estimasi_biaya_total'] ?? data['estimasi_biaya'] ?? 0).toDouble(); break;
-          case 'ditolak': rejected++; break;
-          case 'kadaluarsa': expired++; break;
-          case 'dibatalkan': cancelled++; break;
+        final String groupId = (data['group_id'] ?? doc.id).toString();
+        if (!uniqueGroups.containsKey(groupId)) uniqueGroups[groupId] = data;
+      }
+      int total = uniqueGroups.length;
+      int pending = 0, approved = 0, completed = 0, rejected = 0, cancelled = 0;
+      int needAbsensi = 0, riskyCount = 0;
+      double totalJam = 0, totalBiaya = 0;
+      double completedTotalJam = 0, completedTotalBiaya = 0;
+      final Set<String> uniqueMitraIds = {};
+
+      for (var entry in uniqueGroups.entries) {
+        final data = entry.value;
+        final String status = (data['status'] ?? '').toString().toLowerCase().trim();
+
+        if (allActiveStatuses.contains(status)) {
+          pending++;
+          if (hssePendingStatuses.contains(status)) riskyCount++;
+        } else if (status == 'disetujui' || status == 'approved') {
+          approved++;
+          final checkOutTime = data['check_out_time'];
+          final absensiStatus = data['absensi_status'] as String?;
+          if (checkOutTime == null && (absensiStatus == null || absensiStatus == 'belum_absen' || absensiStatus == 'check_in' || absensiStatus == 'sudah_absen')) {
+            needAbsensi++;
+          }
+        } else if (status == 'selesai' || status == 'completed') {
+          completed++;
+          totalJam += _parseDouble(data['total_jam_desimal']);
+          totalBiaya += _parseDouble(data['estimasi_biaya_total'] ?? data['estimasi_biaya']);
+          completedTotalJam += _parseDouble(data['total_jam_desimal']);
+          completedTotalBiaya += _parseDouble(data['estimasi_biaya_total'] ?? data['estimasi_biaya']);
+        } else if (status == 'ditolak' || status == 'rejected') {
+          rejected++;
+        } else if (status == 'dibatalkan' || status == 'cancelled') {
+          cancelled++;
         }
-        if (hssePendingStatuses.contains(status) || data['requires_hsse_approval'] == true) riskyCount++;
+
+        if (data['is_risky'] == true || data['requires_hsse_approval'] == true) riskyCount++;
+        final mitraId = data['mitra_id'] as String?;
+        if (mitraId != null && mitraId.isNotEmpty) uniqueMitraIds.add(mitraId);
+        final mitraIds = data['mitra_ids'] as List?;
+        if (mitraIds != null && mitraIds.isNotEmpty) {
+          for (var id in mitraIds) {
+            if (id != null && id.toString().isNotEmpty) uniqueMitraIds.add(id.toString());
+          }
+        }
       }
 
       return {
-        'total': total, 'pending': pending, 'approved': approved, 'completed': completed,
-        'rejected': rejected, 'expired': expired, 'cancelled': cancelled,
-        'totalJam': totalJam, 'totalBiaya': totalBiaya, 'riskyCount': riskyCount,
+        'total': total, 'pending': pending, 'approved': approved,
+        'completed': completed, 'rejected': rejected, 'cancelled': cancelled,
+        'needAbsensi': needAbsensi, 'totalJam': totalJam, 'totalBiaya': totalBiaya,
+        'completedTotalJam': completedTotalJam, 'completedTotalBiaya': completedTotalBiaya,
+        'riskyCount': riskyCount, 'totalMitra': uniqueMitraIds.length,
       };
     } catch (e) {
-      return {'total': 0, 'pending': 0, 'approved': 0, 'completed': 0, 'rejected': 0, 'expired': 0, 'cancelled': 0, 'totalJam': 0, 'totalBiaya': 0, 'riskyCount': 0};
+      debugPrint('❌ [getOvertimeStats] Error: $e');
+      return {
+        'total': 0, 'pending': 0, 'approved': 0, 'completed': 0,
+        'rejected': 0, 'cancelled': 0, 'needAbsensi': 0,
+        'totalJam': 0, 'totalBiaya': 0,
+        'completedTotalJam': 0, 'completedTotalBiaya': 0,
+        'riskyCount': 0, 'totalMitra': 0,
+      };
     }
   }
 
   Future<Map<String, dynamic>> getHSSEStats({String? bulan, String? hsseUserId}) async {
     try {
-      Query<Map<String, dynamic>> qm = _firestore.collection(collectionLemburMitra)
-          .where('status', whereIn: [...hssePendingStatuses, ...hsseResolvedStatuses]);
-      if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-        qm = qm.where('tahun_bulan', isEqualTo: bulan);
-      }
+      Query<Map<String, dynamic>> qm = _firestore
+          .collection(collectionLemburMitra)
+          .where('status', whereIn: allDisplayStatuses);
+      if (bulan != null && bulan.isNotEmpty && bulan != 'semua') qm = qm.where('tahun_bulan', isEqualTo: bulan);
       var allDocs = (await qm.get()).docs;
-
-      if (hsseUserId != null && hsseUserId.isNotEmpty) {
-        allDocs = allDocs.where((doc) {
-          final data = doc.data();
-          return data['hsse_status'] == 'pending' || data['hsse_approved_by'] == hsseUserId || data['hsse_rejected_by'] == hsseUserId;
-        }).toList();
-      }
-
-      int totalRisky = allDocs.length, pendingHSSE = 0, approvedHSSE = 0, rejectedHSSE = 0,
-          perluRevisi = 0, dalamReview = 0, escalated = 0;
-      double totalBiaya = 0;
+      allDocs = allDocs.where((doc) {
+        final data = doc.data();
+        return data['is_risky'] == true || data['requires_hsse_approval'] == true ||
+            hssePendingStatuses.contains(data['status']) || data['hsse_validated'] == true;
+      }).toList();
+      int totalRisky = allDocs.length;
+      int pendingHSSE = 0, approvedHSSE = 0, rejectedHSSE = 0;
+      int perluRevisi = 0, dalamReview = 0, escalated = 0;
+      double totalBiaya = 0, completedTotalBiaya = 0;
       Set<String> fungsiSet = {};
-
       for (var doc in allDocs) {
         final overtime = OvertimeHistory.fromFirestore(doc);
         switch (overtime.hsseStatus) {
@@ -1039,73 +1271,396 @@ class OvertimeHistoryService {
           case 'dalam_review': dalamReview++; break;
         }
         if (overtime.hsseNeedEscalation) escalated++;
-        totalBiaya += overtime.estimasiBiayaTotal > 0 ? overtime.estimasiBiayaTotal : overtime.estimasiBiayaPerMitra;
+        final biaya = overtime.estimasiBiayaTotal > 0 ? overtime.estimasiBiayaTotal : overtime.estimasiBiayaPerMitra;
+        totalBiaya += biaya;
+        if (overtime.status == 'selesai' || overtime.status == 'completed') completedTotalBiaya += biaya;
         final fungsi = overtime.pengawasFungsi ?? overtime.fungsiMitra;
         if (fungsi != null) fungsiSet.add(fungsi);
       }
-
       return {
-        'totalRisky': totalRisky, 'pendingHSSE': pendingHSSE, 'approvedHSSE': approvedHSSE,
-        'rejectedHSSE': rejectedHSSE, 'perluRevisi': perluRevisi, 'dalamReview': dalamReview,
-        'escalated': escalated, 'totalBiaya': totalBiaya, 'fungsiTerkait': fungsiSet.toList(),
+        'totalRisky': totalRisky, 'pendingHSSE': pendingHSSE,
+        'approvedHSSE': approvedHSSE, 'rejectedHSSE': rejectedHSSE,
+        'perluRevisi': perluRevisi, 'dalamReview': dalamReview, 'escalated': escalated,
+        'totalBiaya': totalBiaya, 'completedTotalBiaya': completedTotalBiaya,
+        'fungsiTerkait': fungsiSet.toList(),
         'approvalRate': totalRisky > 0 ? (approvedHSSE / totalRisky * 100) : 0,
         'rejectionRate': totalRisky > 0 ? (rejectedHSSE / totalRisky * 100) : 0,
       };
     } catch (e) {
-      return {'totalRisky': 0, 'pendingHSSE': 0, 'approvedHSSE': 0, 'rejectedHSSE': 0, 'perluRevisi': 0, 'dalamReview': 0, 'escalated': 0, 'totalBiaya': 0, 'fungsiTerkait': [], 'approvalRate': 0, 'rejectionRate': 0};
+      debugPrint('❌ [getHSSEStats] Error: $e');
+      return {
+        'totalRisky': 0, 'pendingHSSE': 0, 'approvedHSSE': 0, 'rejectedHSSE': 0,
+        'perluRevisi': 0, 'dalamReview': 0, 'escalated': 0,
+        'totalBiaya': 0, 'completedTotalBiaya': 0, 'fungsiTerkait': [],
+        'approvalRate': 0, 'rejectionRate': 0,
+      };
     }
   }
 
   Future<Map<String, dynamic>> getHSSEQuickStats() async {
     try {
-      final mitraSnapshot = await _firestore.collection(collectionLemburMitra)
+      final mitraSnapshot = await _firestore
+          .collection(collectionLemburMitra)
           .where('status', whereIn: hssePendingStatuses)
           .where('hsse_status', isEqualTo: 'pending')
           .get();
       final pendingCount = mitraSnapshot.docs.length;
       int kritisCount = 0;
       for (var doc in mitraSnapshot.docs) {
-        if (doc.data()['risiko_level'] == 'kritis') kritisCount++;
+        final riskLevel = (doc.data()['risiko_level'] ?? doc.data()['risk_level'] ?? '').toString().toLowerCase();
+        if (riskLevel == 'kritis' || riskLevel == 'critical') kritisCount++;
       }
-      return {'pendingTotal': pendingCount, 'kritisCount': kritisCount, 'needsAttention': kritisCount > 0 || pendingCount > 5};
+      return {
+        'pendingTotal': pendingCount, 'kritisCount': kritisCount,
+        'needsAttention': kritisCount > 0 || pendingCount > 5,
+      };
     } catch (e) {
       return {'pendingTotal': 0, 'kritisCount': 0, 'needsAttention': false};
     }
   }
 
-  // =========================================================================
-  // CRUD & PEMBATALAN
-  // =========================================================================
-  
-  Future<Map<String, dynamic>> batalkanPengajuan({required String documentId, required String userId}) async {
+  // ═══════════════════════════════════════════════════════════════
+  // 🔥🔥🔥 METHOD UNTUK LEMBUR_MITRA (BUKAN PENGAJUAN)
+  // ═══════════════════════════════════════════════════════════════
+
+  /// Get overtime stats dari collection lembur_mitra (bukan pengajuan)
+  /// Ini adalah source of truth untuk data lembur yang sudah disetujui
+  Future<Map<String, dynamic>> getOvertimeStatsLemburMitra({
+    required String userRole,
+    String? userFungsi,
+    String? userId,
+    String? bulan,
+  }) async {
     try {
-      final docSnapshot = await _findDocument(documentId);
-      if (docSnapshot == null) return {'success': false, 'message': 'Data pengajuan tidak ditemukan'};
+      Query<Map<String, dynamic>> query = _firestore.collection(collectionLemburMitra);
       
+      // Filter berdasarkan role
+      if (userRole == 'mitra' && userId != null && userId.isNotEmpty) {
+        query = query.where('mitra_id', isEqualTo: userId);
+      } else if (userRole == 'pengawas' && userId != null && userId.isNotEmpty) {
+        query = query.where('diajukan_oleh_id', isEqualTo: userId);
+      } else if (userRole == 'manager' && userFungsi != null && userFungsi.isNotEmpty) {
+        query = query.where('pengawas_fungsi', isEqualTo: userFungsi);
+      }
+      
+      // Filter bulan
+      if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
+        query = query.where('tahun_bulan', isEqualTo: bulan);
+      }
+      
+      final snapshot = await query.get();
+      final docs = snapshot.docs;
+      
+      // 🔥 Group by group_id untuk menghindari duplikasi
+      final Map<String, Map<String, dynamic>> uniqueGroups = {};
+      for (var doc in docs) {
+        final data = doc.data();
+        final String groupId = (data['group_id'] ?? doc.id).toString();
+        if (!uniqueGroups.containsKey(groupId)) {
+          uniqueGroups[groupId] = data;
+        }
+      }
+      
+      int total = uniqueGroups.length;
+      int pending = 0;
+      int approved = 0;
+      int completed = 0;
+      int rejected = 0;
+      int cancelled = 0;
+      int needAbsensi = 0;
+      int riskyCount = 0;
+      double totalJam = 0;
+      double totalBiaya = 0;
+      double completedTotalJam = 0;
+      double completedTotalBiaya = 0;
+      final Set<String> uniqueMitraIds = {};
+      
+      for (var entry in uniqueGroups.entries) {
+        final data = entry.value;
+        final String status = (data['status'] ?? '').toString().toLowerCase().trim();
+        
+        // 🔥 Ambil total jam
+        final jam = _parseDouble(data['total_jam_desimal']);
+        final biaya = _parseDouble(data['estimasi_biaya_total'] ?? data['estimasi_biaya']);
+        
+        // 🔥 Count berdasarkan status
+        if (status == 'pending' || status == 'menunggu') {
+          pending++;
+        } else if (status == 'disetujui' || status == 'approved') {
+          approved++;
+          // Cek perlu absensi
+          final checkOutTime = data['check_out_time'];
+          final absensiStatus = data['absensi_status'] as String?;
+          if (checkOutTime == null && 
+              (absensiStatus == null || 
+               absensiStatus == 'belum_absen' || 
+               absensiStatus == 'check_in' || 
+               absensiStatus == 'sudah_absen')) {
+            needAbsensi++;
+          }
+        } else if (status == 'selesai' || status == 'completed') {
+          completed++;
+          totalJam += jam;
+          totalBiaya += biaya;
+          completedTotalJam += jam;
+          completedTotalBiaya += biaya;
+        } else if (status == 'ditolak' || status == 'rejected') {
+          rejected++;
+        } else if (status == 'dibatalkan' || status == 'cancelled') {
+          cancelled++;
+        }
+        
+        // 🔥 Risky check
+        if (data['is_risky'] == true || data['requires_hsse_approval'] == true) {
+          riskyCount++;
+        }
+        
+        // 🔥 Kumpulkan mitra unik
+        final mitraId = data['mitra_id'] as String?;
+        if (mitraId != null && mitraId.isNotEmpty) {
+          uniqueMitraIds.add(mitraId);
+        }
+        final mitraIds = data['mitra_ids'] as List?;
+        if (mitraIds != null && mitraIds.isNotEmpty) {
+          for (var id in mitraIds) {
+            if (id != null && id.toString().isNotEmpty) {
+              uniqueMitraIds.add(id.toString());
+            }
+          }
+        }
+      }
+      
+      return {
+        'total': total,
+        'pending': pending,
+        'approved': approved,
+        'completed': completed,
+        'rejected': rejected,
+        'cancelled': cancelled,
+        'needAbsensi': needAbsensi,
+        'totalJam': totalJam,
+        'totalBiaya': totalBiaya,
+        'completedTotalJam': completedTotalJam,
+        'completedTotalBiaya': completedTotalBiaya,
+        'riskyCount': riskyCount,
+        'totalMitra': uniqueMitraIds.length,
+      };
+    } catch (e) {
+      debugPrint('❌ [getOvertimeStatsLemburMitra] Error: $e');
+      return {
+        'total': 0,
+        'pending': 0,
+        'approved': 0,
+        'completed': 0,
+        'rejected': 0,
+        'cancelled': 0,
+        'needAbsensi': 0,
+        'totalJam': 0,
+        'totalBiaya': 0,
+        'completedTotalJam': 0,
+        'completedTotalBiaya': 0,
+        'riskyCount': 0,
+        'totalMitra': 0,
+      };
+    }
+  }
+
+  /// Get HSSE stats dari collection lembur_mitra
+  Future<Map<String, dynamic>> getHSSEStatsLemburMitra({
+    String? bulan,
+    String? hsseUserId,
+  }) async {
+    try {
+      Query<Map<String, dynamic>> qm = _firestore
+          .collection(collectionLemburMitra)
+          .where('status', whereIn: allDisplayStatuses);
+      
+      if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
+        qm = qm.where('tahun_bulan', isEqualTo: bulan);
+      }
+      
+      var allDocs = (await qm.get()).docs;
+      
+      // Filter untuk HSSE
+      allDocs = allDocs.where((doc) {
+        final data = doc.data();
+        return data['is_risky'] == true || 
+               data['requires_hsse_approval'] == true ||
+               hssePendingStatuses.contains(data['status']) || 
+               data['hsse_validated'] == true;
+      }).toList();
+      
+      // Group by group_id
+      final Map<String, Map<String, dynamic>> uniqueGroups = {};
+      for (var doc in allDocs) {
+        final data = doc.data();
+        final String groupId = (data['group_id'] ?? doc.id).toString();
+        if (!uniqueGroups.containsKey(groupId)) {
+          uniqueGroups[groupId] = data;
+        }
+      }
+      
+      int totalRisky = uniqueGroups.length;
+      int pendingHSSE = 0;
+      int approvedHSSE = 0;
+      int rejectedHSSE = 0;
+      int perluRevisi = 0;
+      int dalamReview = 0;
+      int escalated = 0;
+      double totalBiaya = 0;
+      double completedTotalBiaya = 0;
+      Set<String> fungsiSet = {};
+      
+      for (var entry in uniqueGroups.entries) {
+        final data = entry.value;
+        final id = entry.key;
+        
+        // 🔥🔥🔥 V11: Gunakan OvertimeHistory.fromMap langsung
+        final overtime = OvertimeHistory.fromMap(data, id);
+        
+        switch (overtime.hsseStatus) {
+          case 'pending': pendingHSSE++; break;
+          case 'disetujui': approvedHSSE++; break;
+          case 'ditolak': rejectedHSSE++; break;
+          case 'perlu_revisi': perluRevisi++; break;
+          case 'dalam_review': dalamReview++; break;
+        }
+        
+        if (overtime.hsseNeedEscalation) escalated++;
+        
+        final biaya = overtime.estimasiBiayaTotal > 0 
+            ? overtime.estimasiBiayaTotal 
+            : overtime.estimasiBiayaPerMitra;
+        totalBiaya += biaya;
+        
+        if (overtime.status == 'selesai' || overtime.status == 'completed') {
+          completedTotalBiaya += biaya;
+        }
+        
+        final fungsi = overtime.pengawasFungsi ?? overtime.fungsiMitra;
+        if (fungsi != null && fungsi.isNotEmpty) {
+          fungsiSet.add(fungsi);
+        }
+      }
+      
+      return {
+        'totalRisky': totalRisky,
+        'pendingHSSE': pendingHSSE,
+        'approvedHSSE': approvedHSSE,
+        'rejectedHSSE': rejectedHSSE,
+        'perluRevisi': perluRevisi,
+        'dalamReview': dalamReview,
+        'escalated': escalated,
+        'totalBiaya': totalBiaya,
+        'completedTotalBiaya': completedTotalBiaya,
+        'fungsiTerkait': fungsiSet.toList(),
+        'approvalRate': totalRisky > 0 ? (approvedHSSE / totalRisky * 100) : 0,
+        'rejectionRate': totalRisky > 0 ? (rejectedHSSE / totalRisky * 100) : 0,
+      };
+    } catch (e) {
+      debugPrint('❌ [getHSSEStatsLemburMitra] Error: $e');
+      return {
+        'totalRisky': 0,
+        'pendingHSSE': 0,
+        'approvedHSSE': 0,
+        'rejectedHSSE': 0,
+        'perluRevisi': 0,
+        'dalamReview': 0,
+        'escalated': 0,
+        'totalBiaya': 0,
+        'completedTotalBiaya': 0,
+        'fungsiTerkait': [],
+        'approvalRate': 0,
+        'rejectionRate': 0,
+      };
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // CRUD & GET BY ID
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<OvertimeHistory?> getOvertimeById(String id) async {
+    try {
+      final doc = await _findDocument(id);
+      return doc != null ? OvertimeHistory.fromFirestore(doc) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  Future<List<OvertimeHistory>> getOvertimeByGroupId(String groupId) async {
+    try {
+      final mitraDocs = await _firestore
+          .collection(collectionLemburMitra)
+          .where('group_id', isEqualTo: groupId)
+          .get();
+      return _groupByGroupId(
+        mitraDocs.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList()
+      );
+    } catch (e) {
+      return [];
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PEMBATALAN PENGAJUAN
+  // ═══════════════════════════════════════════════════════════════
+
+  Future<Map<String, dynamic>> batalkanPengajuan({
+    required String documentId,
+    required String userId,
+  }) async {
+    try {
+      final userRole = await _getUserRole(userId);
+      if (userRole != 'pengawas') {
+        return {'success': false, 'message': 'Hanya pengawas yang dapat membatalkan pengajuan'};
+      }
+
+      final docSnapshot = await _findDocument(documentId);
+      if (docSnapshot == null) {
+        return {'success': false, 'message': 'Data pengajuan tidak ditemukan'};
+      }
+
       final data = docSnapshot.data()!;
       final status = data['status'] as String?;
       final createdAt = (data['created_at'] as Timestamp?)?.toDate();
-      
+      final diajukanOlehId = data['diajukan_oleh_id'] as String?;
+
+      if (diajukanOlehId != userId) {
+        return {'success': false, 'message': 'Anda hanya dapat membatalkan pengajuan yang Anda buat sendiri'};
+      }
       if (status != 'pending' && status != 'disetujui') {
-        return {'success': false, 'message': 'Hanya pengajuan dengan status pending atau disetujui yang bisa dibatalkan'};
+        return {'success': false, 'message': 'Hanya pengajuan dengan status menunggu atau disetujui yang bisa dibatalkan'};
       }
-      if (createdAt != null && DateTime.now().difference(createdAt).inDays < batasWaktuPembatalan) {
-        return {'success': false, 'message': 'Pengajuan belum bisa dibatalkan (minimal $batasWaktuPembatalan hari)'};
+      if (createdAt != null && DateTime.now().difference(createdAt).inDays > batasWaktuPembatalan) {
+        return {'success': false, 'message': 'Batas waktu pembatalan sudah lewat (maksimal $batasWaktuPembatalan hari)'};
       }
-      
+
       final updateData = <String, dynamic>{
-        'status': 'dibatalkan', 'dibatalkan_pada': FieldValue.serverTimestamp(),
-        'dibatalkan_oleh': userId, 'updated_at': FieldValue.serverTimestamp(),
+        'status': 'dibatalkan',
+        'dibatalkan_pada': FieldValue.serverTimestamp(),
+        'dibatalkan_oleh': userId,
+        'updated_at': FieldValue.serverTimestamp(),
       };
+
       await docSnapshot.reference.update(updateData);
-      
+
       final groupId = data['group_id'] as String?;
       if (groupId != null && groupId.isNotEmpty) {
-        final otherCollection = docSnapshot.reference.parent.id == collectionLemburMitra ? collectionPengajuan : collectionLemburMitra;
-        final otherDocs = await _firestore.collection(otherCollection).where('group_id', isEqualTo: groupId).get();
-        for (var doc in otherDocs.docs) { await doc.reference.update(updateData); }
+        try {
+          final mitraDocs = await _firestore
+              .collection(collectionLemburMitra)
+              .where('group_id', isEqualTo: groupId)
+              .get();
+          for (var doc in mitraDocs.docs) {
+            await doc.reference.update(updateData);
+          }
+        } catch (e) {
+          debugPrint('⚠️ Gagal sinkronisasi group: $e');
+        }
       }
-      
+
       await _logActivity(action: 'batalkan_pengajuan', documentId: documentId, userId: userId, details: 'Membatalkan pengajuan lembur');
       return {'success': true, 'message': 'Pengajuan berhasil dibatalkan'};
     } catch (e) {
@@ -1121,270 +1676,131 @@ class OvertimeHistoryService {
       final status = data['status'] as String?;
       final createdAt = (data['created_at'] as Timestamp?)?.toDate();
       if (status != 'pending' && status != 'disetujui') return false;
-      if (createdAt != null) return DateTime.now().difference(createdAt).inDays >= batasWaktuPembatalan;
+      if (createdAt != null) return DateTime.now().difference(createdAt).inDays <= batasWaktuPembatalan;
       return false;
-    } catch (e) { return false; }
-  }
-
-  Future<Map<String, dynamic>> batalkanPengajuanByGroup({required String groupId, required String userId}) async {
-    try {
-      int cancelledCount = 0;
-      final errors = <String>[];
-      final pengajuanDocs = await _firestore.collection(collectionPengajuan).where('group_id', isEqualTo: groupId).get();
-      final mitraDocs = await _firestore.collection(collectionLemburMitra).where('group_id', isEqualTo: groupId).get();
-      for (var doc in [...pengajuanDocs.docs, ...mitraDocs.docs]) {
-        final result = await batalkanPengajuan(documentId: doc.id, userId: userId);
-        if (result['success'] == true) { cancelledCount++; } else { errors.add('${doc.id}: ${result['message']}'); }
-      }
-      return {
-        'success': errors.isEmpty,
-        'message': errors.isEmpty ? 'Berhasil membatalkan $cancelledCount pengajuan' : 'Berhasil membatalkan $cancelledCount pengajuan, gagal: ${errors.join(', ')}',
-        'cancelledCount': cancelledCount, 'totalCount': pengajuanDocs.docs.length + mitraDocs.docs.length, 'errors': errors,
-      };
     } catch (e) {
-      return {'success': false, 'message': 'Gagal: ${e.toString()}', 'cancelledCount': 0, 'totalCount': 0, 'errors': [e.toString()]};
+      return false;
     }
   }
 
-  Future<OvertimeHistory?> getOvertimeById(String id) async {
-    try {
-      final doc = await _findDocument(id);
-      return doc != null ? OvertimeHistory.fromFirestore(doc) : null;
-    } catch (e) { return null; }
-  }
+  // ═══════════════════════════════════════════════════════════════
+  // UPDATE OVERTIME STATUS
+  // ═══════════════════════════════════════════════════════════════
 
-  Future<List<OvertimeHistory>> getOvertimeByGroupId(String groupId) async {
-    try {
-      final results = await Future.wait([
-        _firestore.collection(collectionPengajuan).where('group_id', isEqualTo: groupId).get(),
-        _firestore.collection(collectionLemburMitra).where('group_id', isEqualTo: groupId).get(),
-      ]);
-      return [...results[0].docs, ...results[1].docs].map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-    } catch (e) { return []; }
-  }
-
-  // =========================================================================
-  // HSSE APPROVAL OPERATIONS
-  // =========================================================================
-
-  Future<Map<String, dynamic>> approveByHSSe({
-    required String documentId, required String hssId, String? hssName,
-    String? catatan, String? rekomendasi, Map<String, dynamic>? checklist,
-    bool requireSafetyBriefing = false,
+  Future<Map<String, dynamic>> updateOvertimeStatus({
+    required String docId, required String status, String? note,
   }) async {
     try {
-      final docSnapshot = await _findDocument(documentId);
-      if (docSnapshot == null) return {'success': false, 'message': 'Dokumen tidak ditemukan'};
-      final data = docSnapshot.data()!;
-      
-      if (!hssePendingStatuses.contains(data['status'])) {
-        return {'success': false, 'message': 'Dokumen ini bukan pengajuan yang menunggu validasi HSSE'};
-      }
+      final doc = await _findDocument(docId);
+      if (doc == null) return {'success': false, 'message': 'Dokumen tidak ditemukan'};
 
-      List<Map<String, dynamic>> approvalHistory = data['hsse_approval_history'] != null
-          ? List<Map<String, dynamic>>.from(data['hsse_approval_history']) : [];
-      approvalHistory.add({'action': 'disetujui', 'by': hssId, 'name': hssName, 'at': FieldValue.serverTimestamp(), 'catatan': catatan, 'rekomendasi': rekomendasi});
-
-      final updateData = <String, dynamic>{
-        'hsse_status': 'disetujui', 'hsse_approved_by': hssId, 'hsse_approved_by_name': hssName,
-        'hsse_approved_at': FieldValue.serverTimestamp(), 'hsse_catatan': catatan,
-        'hsse_rekomendasi': rekomendasi, 'hsse_checklist': checklist,
-        'hsse_safety_briefing': requireSafetyBriefing, 'hsse_approval_history': approvalHistory,
-        'updated_at': FieldValue.serverTimestamp(), 'last_modified_by': hssId,
-        'last_modified_by_name': hssName, 'last_modified_at': FieldValue.serverTimestamp(),
-      };
-      await docSnapshot.reference.update(updateData);
-
+      final data = doc.data()!;
       final groupId = data['group_id'] as String?;
+      final updateData = <String, dynamic>{
+        'status': status, 'updated_at': FieldValue.serverTimestamp(), 'last_modified_at': FieldValue.serverTimestamp(),
+      };
+      if (status == 'disetujui') {
+        updateData['approved_at'] = FieldValue.serverTimestamp();
+        updateData['approved_by'] = 'system';
+        updateData['approved_by_name'] = 'System (Superadmin)';
+      } else if (status == 'ditolak' && note != null) {
+        updateData['rejected_reason'] = note;
+        updateData['rejected_at'] = FieldValue.serverTimestamp();
+      } else if (status == 'selesai') {
+        updateData['completed_at'] = FieldValue.serverTimestamp();
+      }
+
+      await doc.reference.update(updateData);
       if (groupId != null && groupId.isNotEmpty) {
-        final otherCollection = docSnapshot.reference.parent.id == collectionLemburMitra ? collectionPengajuan : collectionLemburMitra;
-        final otherDocs = await _firestore.collection(otherCollection).where('group_id', isEqualTo: groupId).get();
-        for (var doc in otherDocs.docs) { await doc.reference.update(updateData); }
+        try {
+          final mitraDocs = await _firestore.collection(collectionLemburMitra).where('group_id', isEqualTo: groupId).get();
+          for (var mitraDoc in mitraDocs.docs) await mitraDoc.reference.update(updateData);
+        } catch (e) { debugPrint('⚠️ Gagal sinkronisasi: $e'); }
       }
-
-      await _logHSSEActivity(action: 'approve', documentId: documentId, userId: hssId, userName: hssName, details: 'Menyetujui pengajuan lembur berisiko', catatan: catatan);
-      if (requireSafetyBriefing) await _createSafetyBriefing(documentId: documentId, groupId: groupId, hssId: hssId, hssName: hssName);
-      return {'success': true, 'message': 'Pengajuan berisiko berhasil disetujui oleh HSSE'};
+      await _logActivity(action: 'update_status', documentId: docId, userId: 'system', details: 'Status: $status');
+      return {'success': true, 'message': 'Status berhasil diupdate'};
     } catch (e) {
-      return {'success': false, 'message': 'Gagal menyetujui pengajuan: ${e.toString()}'};
+      return {'success': false, 'message': 'Gagal: ${e.toString()}'};
     }
   }
 
-  Future<Map<String, dynamic>> rejectByHSSe({
-    required String documentId, required String hssId, String? hssName, String? alasanPenolakan,
-  }) async {
-    try {
-      final docSnapshot = await _findDocument(documentId);
-      if (docSnapshot == null) return {'success': false, 'message': 'Dokumen tidak ditemukan'};
-      final data = docSnapshot.data()!;
-      
-      if (!hssePendingStatuses.contains(data['status'])) {
-        return {'success': false, 'message': 'Dokumen ini bukan pengajuan yang menunggu validasi HSSE'};
-      }
+  // ═══════════════════════════════════════════════════════════════
+  // UTILITY
+  // ═══════════════════════════════════════════════════════════════
 
-      List<Map<String, dynamic>> approvalHistory = data['hsse_approval_history'] != null
-          ? List<Map<String, dynamic>>.from(data['hsse_approval_history']) : [];
-      approvalHistory.add({'action': 'ditolak', 'by': hssId, 'name': hssName, 'at': FieldValue.serverTimestamp(), 'alasan': alasanPenolakan});
-
-      final updateData = <String, dynamic>{
-        'hsse_status': 'ditolak', 'status': 'ditolak', 'hsse_rejected_by': hssId,
-        'hsse_rejected_by_name': hssName, 'hsse_rejected_at': FieldValue.serverTimestamp(),
-        'hsse_alasan_penolakan': alasanPenolakan, 'hsse_approval_history': approvalHistory,
-        'updated_at': FieldValue.serverTimestamp(), 'last_modified_by': hssId,
-        'last_modified_by_name': hssName, 'last_modified_at': FieldValue.serverTimestamp(),
-      };
-      await docSnapshot.reference.update(updateData);
-
-      final groupId = data['group_id'] as String?;
-      if (groupId != null && groupId.isNotEmpty) {
-        final otherCollection = docSnapshot.reference.parent.id == collectionLemburMitra ? collectionPengajuan : collectionLemburMitra;
-        final otherDocs = await _firestore.collection(otherCollection).where('group_id', isEqualTo: groupId).get();
-        for (var doc in otherDocs.docs) { await doc.reference.update(updateData); }
-      }
-
-      await _logHSSEActivity(action: 'reject', documentId: documentId, userId: hssId, userName: hssName, details: 'Menolak pengajuan lembur berisiko', catatan: alasanPenolakan);
-      return {'success': true, 'message': 'Pengajuan berisiko berhasil ditolak oleh HSSE'};
-    } catch (e) {
-      return {'success': false, 'message': 'Gagal menolak pengajuan: ${e.toString()}'};
+  String getStatusText(String status) {
+    switch (status) {
+      case 'pending': return 'Menunggu Manager';
+      case 'manager_approved': return 'Disetujui Manager';
+      case 'pending_hsse': case 'manager_approval_pending_hsse':
+      case 'manager_approved_pending_hsse': return 'Menunggu HSSE';
+      case 'disetujui': return 'Disetujui'; case 'ditolak': return 'Ditolak';
+      case 'selesai': return 'Selesai'; case 'kadaluarsa': return 'Kadaluarsa';
+      case 'dibatalkan': return 'Dibatalkan'; default: return status;
     }
   }
 
-  Future<Map<String, dynamic>> requestRevisionByHSSe({
-    required String documentId, required String hssId, String? hssName,
-    String? catatanRevisi, List<String>? itemsToRevise,
-  }) async {
-    try {
-      final docSnapshot = await _findDocument(documentId);
-      if (docSnapshot == null) return {'success': false, 'message': 'Dokumen tidak ditemukan'};
-
-      final updateData = <String, dynamic>{
-        'hsse_status': 'perlu_revisi', 'hsse_catatan_revisi': catatanRevisi,
-        'hsse_items_revisi': itemsToRevise, 'hsse_review_by': hssId,
-        'hsse_review_by_name': hssName, 'hsse_review_at': FieldValue.serverTimestamp(),
-        'updated_at': FieldValue.serverTimestamp(), 'last_modified_by': hssId,
-        'last_modified_by_name': hssName, 'last_modified_at': FieldValue.serverTimestamp(),
-      };
-      await docSnapshot.reference.update(updateData);
-      await _logHSSEActivity(action: 'request_revision', documentId: documentId, userId: hssId, userName: hssName, details: 'Meminta revisi pengajuan lembur berisiko', catatan: catatanRevisi);
-      return {'success': true, 'message': 'Permintaan revisi berhasil dikirim'};
-    } catch (e) {
-      return {'success': false, 'message': 'Gagal meminta revisi: ${e.toString()}'};
+  Color getStatusColor(String status) {
+    switch (status) {
+      case 'pending': return Colors.orange;
+      case 'manager_approved': return Colors.blue.shade400;
+      case 'pending_hsse': case 'manager_approval_pending_hsse':
+      case 'manager_approved_pending_hsse': return Colors.deepOrange;
+      case 'disetujui': return Colors.green; case 'ditolak': return Colors.red;
+      case 'selesai': return Colors.blue; case 'kadaluarsa': return Colors.grey;
+      case 'dibatalkan': return Colors.red.shade300; default: return Colors.grey;
     }
   }
 
-  Future<Map<String, dynamic>> escalateByHSSe({
-    required String documentId, required String hssId, String? hssName,
-    required String escalateTo, String? reason,
-  }) async {
-    try {
-      final docSnapshot = await _findDocument(documentId);
-      if (docSnapshot == null) return {'success': false, 'message': 'Dokumen tidak ditemukan'};
-      final updateData = <String, dynamic>{
-        'hsse_need_escalation': true, 'hsse_escalation_to': escalateTo,
-        'hsse_escalation_reason': reason, 'hsse_escalation_at': FieldValue.serverTimestamp(),
-        'hsse_escalation_by': hssId, 'hsse_escalation_by_name': hssName,
-        'updated_at': FieldValue.serverTimestamp(),
-      };
-      await docSnapshot.reference.update(updateData);
-      final data = docSnapshot.data()!;
-      final groupId = data['group_id'] as String?;
-      if (groupId != null && groupId.isNotEmpty) {
-        final otherCollection = docSnapshot.reference.parent.id == collectionLemburMitra ? collectionPengajuan : collectionLemburMitra;
-        final otherDocs = await _firestore.collection(otherCollection).where('group_id', isEqualTo: groupId).get();
-        for (var doc in otherDocs.docs) { await doc.reference.update(updateData); }
-      }
-      await _logHSSEActivity(action: 'escalate', documentId: documentId, userId: hssId, userName: hssName, details: 'Mengeskalasi pengajuan ke $escalateTo', catatan: reason);
-      return {'success': true, 'message': 'Pengajuan berhasil dieskalasi ke $escalateTo'};
-    } catch (e) {
-      return {'success': false, 'message': 'Gagal mengeskalasi: ${e.toString()}'};
-    }
+  String formatRupiah(dynamic value) {
+    final number = (value is num) ? value : 0;
+    return NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(number);
   }
 
-  Future<Map<String, dynamic>> completeSafetyBriefing({
-    required String documentId, required String hssId, String? hssName, String? catatan,
-  }) async {
-    try {
-      final updateData = <String, dynamic>{
-        'hsse_safety_briefing': true, 'hsse_safety_briefing_date': FieldValue.serverTimestamp(),
-        'hsse_safety_briefing_by': hssId, 'hsse_safety_briefing_by_name': hssName,
-        'hsse_safety_briefing_catatan': catatan, 'updated_at': FieldValue.serverTimestamp(),
-      };
-      await _firestore.collection(collectionPengajuan).doc(documentId).update(updateData);
-      await _logHSSEActivity(action: 'complete_safety_briefing', documentId: documentId, userId: hssId, userName: hssName, details: 'Menyelesaikan safety briefing', catatan: catatan);
-      return {'success': true, 'message': 'Safety briefing berhasil dicatat'};
-    } catch (e) {
-      return {'success': false, 'message': 'Gagal mencatat safety briefing: ${e.toString()}'};
-    }
-  }
+  // ═══════════════════════════════════════════════════════════════
+  // EXPORT CSV
+  // ═══════════════════════════════════════════════════════════════
 
-  // =========================================================================
-  // EXPORT
-  // =========================================================================
-  
   Future<String> exportToCsv({
     required String userRole, String? userFungsi, String? userId,
     String? bulan, String? statusFilter, bool includeHSSE = false,
   }) async {
     try {
-      List<OvertimeHistory> allData = [];
-      if (userRole == 'mitra' && userId != null) {
-        allData = (await _firestore.collection(collectionLemburMitra).where('mitra_id', isEqualTo: userId).get()).docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      } else if (userRole == 'pengawas' && userId != null) {
-        allData = (await _firestore.collection(collectionLemburMitra).where('diajukan_oleh_id', isEqualTo: userId).get()).docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      } else if (userRole == 'manager') {
-        Query<Map<String, dynamic>> query = _firestore.collection(collectionPengajuan);
-        if (userFungsi != null && userFungsi.isNotEmpty) query = query.where('pengawas_fungsi', isEqualTo: userFungsi);
-        allData = (await query.get()).docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      } else {
-        final results = await Future.wait([_firestore.collection(collectionPengajuan).get(), _firestore.collection(collectionLemburMitra).get()]);
-        allData = _removeDuplicates([...results[0].docs.map((doc) => OvertimeHistory.fromFirestore(doc)), ...results[1].docs.map((doc) => OvertimeHistory.fromFirestore(doc))]);
-      }
+      Query<Map<String, dynamic>> query = _firestore.collection(collectionLemburMitra);
+      if (userRole == 'mitra' && userId != null) query = query.where('mitra_id', isEqualTo: userId);
+      else if (userRole == 'pengawas' && userId != null) query = query.where('diajukan_oleh_id', isEqualTo: userId);
+      else if (userRole == 'manager' && userFungsi != null && userFungsi.isNotEmpty) query = query.where('pengawas_fungsi', isEqualTo: userFungsi);
+      if (bulan != null && bulan.isNotEmpty && bulan != 'semua') query = query.where('tahun_bulan', isEqualTo: bulan);
+      var allData = (await query.get()).docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
       allData = _filterByBulan(allData, bulan);
       if (statusFilter != null && statusFilter.isNotEmpty && statusFilter != 'semua') {
         allData = allData.where((item) => item.status == statusFilter).toList();
       }
+      allData = _groupByGroupId(allData);
       allData.sort((a, b) => b.tanggal.compareTo(a.tanggal));
       final csvBuffer = StringBuffer();
-      List<String> headers = ['No', 'Tanggal', 'Nama', 'Jam Mulai', 'Jam Selesai', 'Total Jam', 'Status', 'Biaya', 'Fungsi', 'Jenis Lembur', 'Urgensi'];
+      List<String> headers = ['No', 'Tanggal', 'Nama Mitra', 'Jam Mulai', 'Jam Selesai', 'Total Jam', 'Status', 'Biaya', 'Fungsi', 'Jenis Lembur', 'Urgensi'];
       if (includeHSSE) headers.addAll(['HSSE Status', 'Risiko Level', 'Risiko Kategori', 'HSSE Oleh', 'HSSE Catatan']);
       csvBuffer.writeln(headers.join(','));
       for (var i = 0; i < allData.length; i++) {
         final item = allData[i];
-        csvBuffer.writeln([
-          i + 1, DateFormat('dd/MM/yyyy').format(item.tanggal),
-          '"${item.namaMitra ?? item.namaPengawas ?? '-'}"', item.jamMulai, item.jamSelesai,
-          item.totalJam.toStringAsFixed(1), item.status.toUpperCase(),
+        List<String> row = [
+          (i + 1).toString(), DateFormat('dd/MM/yyyy').format(item.tanggal),
+          '"${item.namaMitra ?? '-'}"', item.jamMulai, item.jamSelesai,
+          item.totalJam.toStringAsFixed(1), item.statusLabel,
           (item.estimasiBiayaTotal > 0 ? item.estimasiBiayaTotal : item.estimasiBiayaPerMitra).toStringAsFixed(0),
           item.pengawasFungsi ?? '-', item.jenisLembur, item.urgensi,
-          if (includeHSSE) ...[item.hsseStatus.toUpperCase(), item.risikoLevel ?? '-', item.risikoKategori ?? '-', item.hsseApprovedByName ?? item.hsseRejectedByName ?? '-', '"${item.hsseCatatan ?? '-'}"'],
-        ].join(','));
+        ];
+        if (includeHSSE) {
+          row.addAll([item.hsseStatusLabel, item.risikoLevel ?? '-', item.risikoKategori ?? '-', item.hsseApprovedByName ?? item.hsseRejectedByName ?? '-', '"${item.hsseCatatan ?? '-'}"']);
+        }
+        csvBuffer.writeln(row.join(','));
       }
       return csvBuffer.toString();
-    } catch (e) { rethrow; }
+    } catch (e) {
+      rethrow;
+    }
   }
-
-  Future<String> exportHSSEToCsv({String? bulan, String? hsseStatus}) async {
-    try {
-      final mitraDocs = await _firestore.collection(collectionLemburMitra)
-          .where('status', whereIn: [...hssePendingStatuses, ...hsseResolvedStatuses])
-          .get();
-      var allData = mitraDocs.docs.map((doc) => OvertimeHistory.fromFirestore(doc)).toList();
-      allData = _filterByBulan(allData, bulan);
-      if (hsseStatus != null && hsseStatus.isNotEmpty) allData = allData.where((item) => item.hsseStatus == hsseStatus).toList();
-      allData.sort((a, b) => b.tanggal.compareTo(a.tanggal));
-      final csvBuffer = StringBuffer();
-      csvBuffer.writeln('No,Tanggal,Pengaju,Fungsi,Risiko Level,Kategori,Status,HSSE Status,Biaya,Disetujui Oleh,Tanggal Persetujuan,Catatan HSSE');
-      for (var i = 0; i < allData.length; i++) {
-        final item = allData[i];
-        csvBuffer.writeln([i + 1, DateFormat('dd/MM/yyyy').format(item.tanggal), '"${item.namaPengaju}"', item.pengawasFungsi ?? '-', item.risikoLevelLabel, item.risikoKategori ?? '-', item.status.toUpperCase(), item.hsseStatus.toUpperCase(), item.estimasiBiayaTotal, item.hsseApprovedByName ?? '-', item.hsseApprovedAt != null ? DateFormat('dd/MM/yyyy HH:mm').format(item.hsseApprovedAt!) : '-', '"${item.hsseCatatan ?? '-'}"'].join(','));
-      }
-      return csvBuffer.toString();
-    } catch (e) { rethrow; }
-  }
-
-  // =========================================================================
-  // HSSE ACTIVITY LOGS STREAM
-  // =========================================================================
 
   Stream<List<Map<String, dynamic>>> getHSSEActivityLogs({String? userId, int limit = 50}) {
     Query<Map<String, dynamic>> query = _firestore.collection(collectionHSSELogs).orderBy('timestamp', descending: true).limit(limit);
@@ -1395,136 +1811,17 @@ class OvertimeHistoryService {
     }).toList());
   }
 
-  // =========================================================================
-  // LOGGING HELPERS
-  // =========================================================================
-  
-  Future<void> _logActivity({required String action, required String documentId, required String userId, String? details}) async {
+  Future<void> _logActivity({
+    required String action, required String documentId,
+    required String userId, String? details,
+  }) async {
     try {
       await _firestore.collection(collectionActivityLogs).add({
-        'action': action, 'document_id': documentId, 'user_id': userId,
-        'timestamp': FieldValue.serverTimestamp(), 'details': details,
+        'action': action, 'document_id': documentId,
+        'user_id': userId, 'timestamp': FieldValue.serverTimestamp(), 'details': details,
       });
-    } catch (e) { debugPrint('⚠️ Error logging activity: $e'); }
-  }
-
-  Future<void> _logHSSEActivity({required String action, required String documentId, required String userId, String? userName, String? details, String? catatan}) async {
-    try {
-      await _firestore.collection(collectionHSSELogs).add({
-        'action': action, 'document_id': documentId, 'user_id': userId,
-        'user_name': userName, 'timestamp': FieldValue.serverTimestamp(),
-        'details': details, 'catatan': catatan,
-      });
-    } catch (e) { debugPrint('⚠️ Error logging HSSE activity: $e'); }
-  }
-
-  Future<void> _createSafetyBriefing({required String documentId, String? groupId, required String hssId, String? hssName}) async {
-    try {
-      await _firestore.collection(collectionSafetyBriefing).add({
-        'document_id': documentId, 'group_id': groupId, 'created_by': hssId,
-        'created_by_name': hssName, 'status': 'pending', 'created_at': FieldValue.serverTimestamp(),
-      });
-    } catch (e) { debugPrint('⚠️ Error creating safety briefing: $e'); }
-  }
-
-  // =========================================================================
-// 🔥 METHOD UNTUK REPORT PAGE - TAMBAHKAN INI!
-// =========================================================================
-
-/// Get status label untuk display
-String getStatusText(String status) {
-  switch (status) {
-    case 'pending': return 'Pending';
-    case 'disetujui': return 'Disetujui';
-    case 'ditolak': return 'Ditolak';
-    case 'selesai': return 'Selesai';
-    case 'dibatalkan': return 'Dibatalkan';
-    case 'kadaluarsa': return 'Kadaluarsa';
-    default: return status;
-  }
-}
-
-/// Get status color untuk UI
-Color getStatusColor(String status) {
-  switch (status) {
-    case 'pending': return Colors.orange;
-    case 'disetujui': return Colors.green;
-    case 'selesai': return Colors.blue;
-    case 'ditolak': return Colors.red;
-    case 'dibatalkan': return Colors.grey;
-    case 'kadaluarsa': return Colors.redAccent;
-    default: return Colors.grey;
-  }
-}
-
-/// Format Rupiah dengan aman
-String formatRupiah(dynamic value) {
-  final number = (value is num) ? value : 0;
-  final formatter = NumberFormat.currency(
-    locale: 'id_ID',
-    symbol: 'Rp ',
-    decimalDigits: 0,
-  );
-  return formatter.format(number);
-}
-
-/// Update status overtime (approve/reject)
-Future<Map<String, dynamic>> updateOvertimeStatus({
-  required String docId,
-  required String status,
-  String? note,
-}) async {
-  try {
-    final doc = await _findDocument(docId);
-    if (doc == null) {
-      return {'success': false, 'message': 'Dokumen tidak ditemukan'};
+    } catch (e) {
+      debugPrint('⚠️ Error logging activity: $e');
     }
-
-    final updateData = <String, dynamic>{
-      'status': status,
-      'updated_at': FieldValue.serverTimestamp(),
-      'last_modified_at': FieldValue.serverTimestamp(),
-    };
-
-    if (status == 'disetujui') {
-      updateData['approved_at'] = FieldValue.serverTimestamp();
-      updateData['approved_by'] = 'system';
-      updateData['approved_by_name'] = 'System';
-    } else if (status == 'ditolak' && note != null) {
-      updateData['rejected_reason'] = note;
-      updateData['rejected_at'] = FieldValue.serverTimestamp();
-      updateData['rejected_by'] = 'system';
-      updateData['rejected_by_name'] = 'System';
-    }
-
-    await doc.reference.update(updateData);
-
-    // Sync ke group jika ada
-    final data = doc.data()!;
-    final groupId = data['group_id'] as String?;
-    if (groupId != null && groupId.isNotEmpty) {
-      final otherCollection = doc.reference.parent.id == collectionLemburMitra 
-          ? collectionPengajuan 
-          : collectionLemburMitra;
-      final otherDocs = await _firestore
-          .collection(otherCollection)
-          .where('group_id', isEqualTo: groupId)
-          .get();
-      for (var d in otherDocs.docs) {
-        await d.reference.update(updateData);
-      }
-    }
-
-    await _logActivity(
-      action: 'update_status',
-      documentId: docId,
-      userId: 'system',
-      details: 'Status diubah menjadi $status${note != null ? ' - $note' : ''}',
-    );
-
-    return {'success': true, 'message': 'Status berhasil diupdate'};
-  } catch (e) {
-    return {'success': false, 'message': 'Gagal update status: ${e.toString()}'};
   }
-}
 }

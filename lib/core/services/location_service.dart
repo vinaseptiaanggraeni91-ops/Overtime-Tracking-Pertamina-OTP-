@@ -1,4 +1,6 @@
 // lib/core/services/location_service.dart
+// 🔥 FINAL VERSION - DILENGKAPI NETWORK MONITORING
+
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,9 +8,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import '/core/services/network_service.dart'; // 🔥 NETWORK SERVICE
 
 /// Service untuk mengelola lokasi
 /// Mendukung: GPS, Nominatim geocoding, riwayat lokasi, deteksi fake GPS
+/// 🔥 Dilengkapi network monitoring
 class LocationService {
   // ==================== KONSTANTA KANTOR ====================
   
@@ -31,12 +35,35 @@ class LocationService {
   // ==================== DEPENDENCIES ====================
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   static final FirebaseAuth _auth = FirebaseAuth.instance;
+  
+  // 🔥 NETWORK SERVICE
+  static final NetworkService _networkService = NetworkService();
 
   // ==================== KONSTANTA API ====================
   static const String _nominatimBaseUrl = 'https://nominatim.openstreetmap.org';
   static const String _userAgent = 'OvertimeApp-PGE/1.0';
   static const Duration _apiTimeout = Duration(seconds: 10);
   static const Duration _gpsTimeout = Duration(seconds: 15);
+
+  // ==================== 🔥 NETWORK CHECK HELPERS ====================
+
+  /// Cek koneksi sync
+  static bool _checkConnection(String operationName) {
+    if (!_networkService.isOnline) {
+      debugPrint('⚠️ [$operationName] Dibatalkan - Tidak ada koneksi internet');
+      return false;
+    }
+    return true;
+  }
+
+  /// Cek koneksi async
+  static Future<bool> _checkConnectionAsync(String operationName) async {
+    final isConnected = await _networkService.checkConnection();
+    if (!isConnected) {
+      debugPrint('⚠️ [$operationName] Dibatalkan - Tidak ada koneksi internet');
+    }
+    return isConnected;
+  }
 
   // ==================== GET CURRENT POSITION ====================
 
@@ -68,7 +95,7 @@ class LocationService {
         throw Exception('GPS/Lokasi tidak aktif. Nyalakan GPS terlebih dahulu.');
       }
       
-      // Dapatkan posisi
+      // Dapatkan posisi (GPS tidak butuh internet)
       return await Geolocator.getCurrentPosition(
         locationSettings: LocationSettings(
           accuracy: highAccuracy 
@@ -169,7 +196,7 @@ class LocationService {
     double lng,
   ) async {
     try {
-      // Cek dulu apakah ini lokasi kantor
+      // Cek dulu apakah ini lokasi kantor (tidak butuh API)
       if (isKantorLocation(lat, lng)) {
         return {
           'address': alamatKantor,
@@ -179,6 +206,21 @@ class LocationService {
           'is_kantor': true,
           'distance_from_kantor': getDistanceFromKantor(lat, lng),
           'name': namaKantor,
+        };
+      }
+
+      // 🔥 Cek koneksi sebelum panggil API Nominatim
+      if (!_checkConnection('reverseGeocode')) {
+        // Return basic info tanpa alamat detail
+        return {
+          'address': 'Alamat tidak tersedia (offline)',
+          'lat': lat,
+          'lng': lng,
+          'is_proyek': true,
+          'is_kantor': false,
+          'distance_from_kantor': getDistanceFromKantor(lat, lng),
+          'distance_from_kantor_km': getDistanceFromKantorKm(lat, lng),
+          'offline': true,
         };
       }
 
@@ -211,6 +253,18 @@ class LocationService {
       }
     } catch (e) {
       debugPrint('❌ Error reverse geocoding: $e');
+      
+      // 🔥 Return basic info saat error
+      return {
+        'address': 'Gagal mendapatkan alamat',
+        'lat': lat,
+        'lng': lng,
+        'is_proyek': true,
+        'is_kantor': false,
+        'distance_from_kantor': getDistanceFromKantor(lat, lng),
+        'distance_from_kantor_km': getDistanceFromKantorKm(lat, lng),
+        'error': e.toString(),
+      };
     }
     return null;
   }
@@ -220,7 +274,7 @@ class LocationService {
     if (query.trim().isEmpty) return [];
     
     try {
-      // 1. Cek apakah mencari kantor
+      // 1. Cek apakah mencari kantor (tidak butuh API)
       if (query.toLowerCase().contains('kantor') || 
           query.toLowerCase().contains('pge') ||
           query.toLowerCase().contains('kamojang')) {
@@ -238,21 +292,32 @@ class LocationService {
         }];
       }
 
-      // 2. Cari dari riwayat/rekomendasi dulu (lebih cepat)
-      final recommendations = await getRecommendedLocations();
-      final matchedRecommendations = recommendations.where((loc) {
-        final name = (loc['name'] ?? '').toString().toLowerCase();
-        final address = (loc['address'] ?? '').toString().toLowerCase();
-        final searchQuery = query.toLowerCase();
-        return name.contains(searchQuery) || address.contains(searchQuery);
-      }).toList();
-      
-      if (matchedRecommendations.isNotEmpty) {
-        debugPrint('📍 Found ${matchedRecommendations.length} results from recommendations');
-        return matchedRecommendations;
+      // 2. Cari dari riwayat/rekomendasi dulu (Firestore)
+      if (_checkConnection('searchLocation_recommendations')) {
+        try {
+          final recommendations = await getRecommendedLocations();
+          final matchedRecommendations = recommendations.where((loc) {
+            final name = (loc['name'] ?? '').toString().toLowerCase();
+            final address = (loc['address'] ?? '').toString().toLowerCase();
+            final searchQuery = query.toLowerCase();
+            return name.contains(searchQuery) || address.contains(searchQuery);
+          }).toList();
+          
+          if (matchedRecommendations.isNotEmpty) {
+            debugPrint('📍 Found ${matchedRecommendations.length} results from recommendations');
+            return matchedRecommendations;
+          }
+        } catch (e) {
+          debugPrint('⚠️ Gagal cari dari rekomendasi: $e');
+        }
       }
 
-      // 3. Cari dari Nominatim API
+      // 3. Cari dari Nominatim API (butuh internet)
+      if (!_checkConnection('searchLocation_nominatim')) {
+        debugPrint('⚠️ Offline - hanya menampilkan hasil lokal');
+        return [];
+      }
+
       debugPrint('🔍 Searching Nominatim for: $query');
       final url = Uri.parse(
         '$_nominatimBaseUrl/search'
@@ -306,6 +371,9 @@ class LocationService {
   /// Mendapatkan rekomendasi lokasi berdasarkan riwayat
   static Future<List<Map<String, dynamic>>> getRecommendedLocations() async {
     try {
+      // 🔥 Cek koneksi
+      if (!_checkConnection('getRecommendedLocations')) return [];
+      
       final currentUser = _auth.currentUser;
       if (currentUser == null) {
         debugPrint('⚠️ No current user for recommendations');
@@ -385,6 +453,9 @@ class LocationService {
     int limit = 20,
   }) async {
     try {
+      // 🔥 Cek koneksi
+      if (!_checkConnection('getRecentLocations')) return [];
+      
       final currentUser = _auth.currentUser;
       if (currentUser == null) return [];
 
@@ -446,6 +517,12 @@ class LocationService {
     String? rw,
   }) async {
     try {
+      // 🔥 Cek koneksi
+      if (!_checkConnection('saveLocationToHistory')) {
+        debugPrint('⚠️ Offline - lokasi tidak disimpan ke Firestore');
+        return;
+      }
+      
       final currentUser = _auth.currentUser;
       if (currentUser == null) return;
 
@@ -483,6 +560,7 @@ class LocationService {
   /// Deteksi fake GPS / mock location
   static Future<Map<String, dynamic>> detectFakeGPS() async {
     try {
+      // GPS check tidak butuh internet
       final position = await Geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.bestForNavigation, 

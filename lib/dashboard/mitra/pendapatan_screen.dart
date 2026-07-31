@@ -1,23 +1,6 @@
-// lib/dashboard/mitra/pendapatan_screen.dart
-// ============================================================================
-// PENDAPATAN SCREEN - Estimasi Pendapatan Mitra
-// ============================================================================
-//
-// Screen untuk menampilkan estimasi pendapatan mitra berdasarkan lembur
-// yang sudah selesai (check-in & check-out).
-//
-// Fitur:
-// - Stream real-time dari Firestore
-// - Filter berdasarkan bulan
-// - Header card dengan ringkasan
-// - List item dengan staggered animation
-// - Detail bottom sheet
-// - Empty state dengan tips
-// - Error handling dengan retry
-// - Pull-to-refresh
-// - Lifecycle aware (auto-refresh saat resume)
-// ============================================================================
-
+// lib/screens/pendapatan_screen.dart
+// 🔥 VERSION 3.0 - FIXED INFINITE LOOP & FLICKERING
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -30,6 +13,98 @@ import '/widgets/pendapatan/pendapatan_list_item.dart';
 import '/widgets/pendapatan/pendapatan_detail_sheet.dart';
 import '/widgets/bottom_nav/mitra_bottom_nav.dart';
 
+// ============================================================
+// 📊 RINGKASAN DATA CLASS
+// ============================================================
+class PendapatanRingkasan {
+  final double totalPendapatan;
+  final int totalLembur;
+  final double totalJam;
+  final int tepatWaktu;
+  final int terlambat;
+  final int sudahDibayar;
+  final int belumDibayar;
+  final double totalDibayar;
+  final double totalBelumDibayar;
+
+  const PendapatanRingkasan({
+    this.totalPendapatan = 0,
+    this.totalLembur = 0,
+    this.totalJam = 0,
+    this.tepatWaktu = 0,
+    this.terlambat = 0,
+    this.sudahDibayar = 0,
+    this.belumDibayar = 0,
+    this.totalDibayar = 0,
+    this.totalBelumDibayar = 0,
+  });
+
+  factory PendapatanRingkasan.fromItems(List<PendapatanItem> items) {
+    double total = 0;
+    double totalJam = 0;
+    int tepat = 0;
+    int lambat = 0;
+    int sudah = 0;
+    int belum = 0;
+    double dibayar = 0;
+    double blm = 0;
+
+    for (var item in items) {
+      total += item.estimasiPendapatan;
+      totalJam += item.totalJam;
+      if (item.statusAbsensi == 'selesai') {
+        tepat++;
+      } else if (item.statusAbsensi == 'selesai_terlambat') {
+        lambat++;
+      }
+      if (item.isPaid) {
+        sudah++;
+        dibayar += item.estimasiPendapatan;
+      } else {
+        belum++;
+        blm += item.estimasiPendapatan;
+      }
+    }
+
+    return PendapatanRingkasan(
+      totalPendapatan: total,
+      totalLembur: items.length,
+      totalJam: totalJam,
+      tepatWaktu: tepat,
+      terlambat: lambat,
+      sudahDibayar: sudah,
+      belumDibayar: belum,
+      totalDibayar: dibayar,
+      totalBelumDibayar: blm,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is PendapatanRingkasan &&
+        other.totalPendapatan == totalPendapatan &&
+        other.totalLembur == totalLembur &&
+        other.totalJam == totalJam &&
+        other.tepatWaktu == tepatWaktu &&
+        other.terlambat == terlambat &&
+        other.sudahDibayar == sudahDibayar &&
+        other.belumDibayar == belumDibayar &&
+        other.totalDibayar == totalDibayar &&
+        other.totalBelumDibayar == totalBelumDibayar;
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    totalPendapatan, totalLembur, totalJam,
+    tepatWaktu, terlambat, sudahDibayar, belumDibayar,
+    totalDibayar, totalBelumDibayar,
+  );
+}
+
+// ============================================================
+// 📱 MAIN SCREEN
+// ============================================================
 class PendapatanScreen extends StatefulWidget {
   const PendapatanScreen({super.key});
 
@@ -42,19 +117,23 @@ class _PendapatanScreenState extends State<PendapatanScreen>
   final PendapatanService _pendapatanService = PendapatanService();
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
+  // State
   String? _userId;
   String _userName = 'Mitra';
   String _selectedBulan = DateFormat('yyyy-MM').format(DateTime.now());
   bool _isInitialLoad = true;
-
-  // Ringkasan
-  double _totalPendapatan = 0;
-  int _totalLembur = 0;
-  double _totalJam = 0;
-  int _tepatWaktu = 0;
-  int _terlambat = 0;
-  bool _isLoadingRingkasan = true;
   String? _errorMessage;
+
+  // 🔥 RINGKASAN - dengan ValueNotifier untuk menghindari rebuild
+  final ValueNotifier<PendapatanRingkasan> _ringkasanNotifier = 
+      ValueNotifier(const PendapatanRingkasan());
+
+  // 🔥 Stream subscription untuk kontrol
+  StreamSubscription<List<PendapatanItem>>? _subscription;
+  
+  // 🔥 Flag untuk mencegah reload berlebihan
+  bool _isRefreshing = false;
+  bool _isDisposed = false;
 
   @override
   void initState() {
@@ -65,40 +144,43 @@ class _PendapatanScreenState extends State<PendapatanScreen>
 
   @override
   void dispose() {
+    _isDisposed = true;
     WidgetsBinding.instance.removeObserver(this);
+    _subscription?.cancel();
+    _ringkasanNotifier.dispose();
     _pendapatanService.clearCache();
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // Refresh data saat app resume dari background
-    if (state == AppLifecycleState.resumed && _userId != null) {
-      if (mounted) {
-        setState(() {
-          _isLoadingRingkasan = true;
-        });
-      }
+    // 🔥 FIX: Hanya refresh jika benar-benar diperlukan dan tidak sedang loading
+    if (state == AppLifecycleState.resumed && 
+        _userId != null && 
+        !_isRefreshing && 
+        !_isDisposed) {
+      _refreshDataSilent();
     }
   }
 
- 
+  // ============================================================
   // LOAD USER DATA
- 
+  // ============================================================
   Future<void> _loadUserData() async {
+    if (_isDisposed) return;
+    
     try {
       final user = _auth.currentUser;
       if (user == null) {
-        if (mounted) {
+        if (mounted && !_isDisposed) {
           setState(() {
             _errorMessage = 'User tidak terautentikasi. Silakan login ulang.';
-            _isLoadingRingkasan = false;
+            _isInitialLoad = false;
           });
         }
         return;
       }
 
-      // Ambil nama lengkap dari Firestore
       String? namaLengkap;
       try {
         final userDoc = await FirebaseFirestore.instance
@@ -110,37 +192,94 @@ class _PendapatanScreenState extends State<PendapatanScreen>
         debugPrint('⚠️ Gagal load user data dari Firestore: $e');
       }
 
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         setState(() {
           _userId = user.uid;
           _userName = namaLengkap ?? user.displayName ?? 'Mitra';
           _isInitialLoad = false;
         });
+        // Mulai stream setelah user ID didapat
+        _startStream();
       }
     } catch (e) {
       debugPrint('❌ Error loading user data: $e');
-      if (mounted) {
+      if (mounted && !_isDisposed) {
         setState(() {
           _errorMessage = 'Gagal memuat data pengguna: $e';
-          _isLoadingRingkasan = false;
           _isInitialLoad = false;
         });
       }
     }
   }
 
- 
+  // ============================================================
+  // 🔥 STREAM MANAGEMENT
+  // ============================================================
+  void _startStream() {
+    if (_userId == null || _isDisposed) return;
+    
+    _subscription?.cancel();
+    _subscription = _pendapatanService
+        .getPendapatanStream(
+          mitraId: _userId!,
+          bulan: _selectedBulan,
+        )
+        .listen((items) {
+          if (_isDisposed || !mounted) return;
+          
+          // 🔥 Update ringkasan
+          final ringkasanBaru = PendapatanRingkasan.fromItems(items);
+          if (_ringkasanNotifier.value != ringkasanBaru) {
+            _ringkasanNotifier.value = ringkasanBaru;
+          }
+          
+          // Update UI hanya jika data berubah
+          setState(() {});
+        }, onError: (e) {
+          if (_isDisposed || !mounted) return;
+          debugPrint('❌ Stream error: $e');
+          setState(() {
+            _errorMessage = 'Gagal memuat data: $e';
+          });
+        });
+  }
+
+  // 🔥 Silent refresh - tanpa mengubah key
+  Future<void> _refreshDataSilent() async {
+    if (_isRefreshing || _isDisposed) return;
+    _isRefreshing = true;
+    
+    _pendapatanService.clearCache();
+    _startStream(); // Restart stream
+    
+    await Future.delayed(const Duration(milliseconds: 100));
+    _isRefreshing = false;
+  }
+
+  // 🔥 Refresh dengan indicator
+  Future<void> _refreshData() async {
+    if (_isRefreshing || _isDisposed) return;
+    _isRefreshing = true;
+    
+    _pendapatanService.clearCache();
+    _startStream();
+    
+    await Future.delayed(const Duration(milliseconds: 200));
+    _isRefreshing = false;
+  }
+
+  // ============================================================
   // BUILD
- 
+  // ============================================================
   @override
   Widget build(BuildContext context) {
-    // SAFEGUARD: Kalau initial load gagal total, tampilkan error screen
+    // Error State
     if (_errorMessage != null && _userId == null) {
       return Scaffold(
         backgroundColor: const Color(0xFFF5F7FA),
         appBar: AppBar(
           title: Text(
-            'Pendapatan Saya',
+            'Pendapatan',
             style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
           ),
           backgroundColor: const Color(0xFF1B5E20),
@@ -153,7 +292,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
           onRetry: () {
             setState(() {
               _errorMessage = null;
-              _isLoadingRingkasan = true;
               _isInitialLoad = true;
             });
             _loadUserData();
@@ -162,7 +300,7 @@ class _PendapatanScreenState extends State<PendapatanScreen>
       );
     }
 
-    // Loading screen awal
+    // Initial Loading
     if (_isInitialLoad || _userId == null) {
       return Scaffold(
         backgroundColor: const Color(0xFFF5F7FA),
@@ -173,9 +311,7 @@ class _PendapatanScreenState extends State<PendapatanScreen>
               _buildLoadingIndicator(),
               const SizedBox(height: 20),
               Text(
-                _isInitialLoad
-                    ? 'Memuat data pengguna...'
-                    : 'Mohon tunggu...',
+                _isInitialLoad ? 'Memuat data pengguna...' : 'Mohon tunggu...',
                 style: GoogleFonts.poppins(
                   fontSize: 14,
                   color: Colors.grey.shade600,
@@ -201,9 +337,9 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     );
   }
 
- 
+  // ============================================================
   // APP BAR
- 
+  // ============================================================
   PreferredSizeWidget _buildAppBar() {
     final displayBulan = _formatBulanDisplay(_selectedBulan);
 
@@ -212,7 +348,7 @@ class _PendapatanScreenState extends State<PendapatanScreen>
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Pendapatan Saya',
+            'Pendapatan',
             style: GoogleFonts.poppins(
               fontWeight: FontWeight.w700,
               fontSize: 20,
@@ -257,13 +393,11 @@ class _PendapatanScreenState extends State<PendapatanScreen>
         ),
       ),
       actions: [
-        // Tombol refresh
         IconButton(
           icon: const Icon(Icons.refresh_rounded, size: 22),
           onPressed: _refreshData,
           tooltip: 'Refresh Data',
         ),
-        // Month picker button
         Container(
           margin: const EdgeInsets.only(right: 12),
           decoration: BoxDecoration(
@@ -280,9 +414,9 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     );
   }
 
- 
-  // MAIN CONTENT
- 
+  // ============================================================
+  // MAIN CONTENT - USING VALUE LISTENABLE BUILDER
+  // ============================================================
   Widget _buildContent() {
     return StreamBuilder<List<PendapatanItem>>(
       stream: _pendapatanService.getPendapatanStream(
@@ -290,13 +424,12 @@ class _PendapatanScreenState extends State<PendapatanScreen>
         bulan: _selectedBulan,
       ),
       builder: (context, snapshot) {
-        // ─── LOADING STATE ────────────────────────────
-        if (snapshot.connectionState == ConnectionState.waiting &&
-            _isLoadingRingkasan) {
+        // LOADING STATE
+        if (snapshot.connectionState == ConnectionState.waiting) {
           return _buildLoadingContent();
         }
 
-        // ─── ERROR STATE ──────────────────────────────
+        // ERROR STATE
         if (snapshot.hasError) {
           return _buildErrorScreen(
             icon: Icons.cloud_off_rounded,
@@ -308,19 +441,21 @@ class _PendapatanScreenState extends State<PendapatanScreen>
           );
         }
 
-        // ─── DATA STATE ───────────────────────────────
+        // DATA STATE
         final items = snapshot.data ?? [];
-        _isLoadingRingkasan = false;
+        
+        // 🔥 Update ringkasan tanpa setState
+        final ringkasanBaru = PendapatanRingkasan.fromItems(items);
+        if (_ringkasanNotifier.value != ringkasanBaru) {
+          _ringkasanNotifier.value = ringkasanBaru;
+        }
 
-        // Update ringkasan
-        _updateRingkasan(items);
-
-        // ─── EMPTY STATE ──────────────────────────────
+        // EMPTY STATE
         if (items.isEmpty) {
           return _buildEmptyState();
         }
 
-        // ─── CONTENT WITH DATA ────────────────────────
+        // CONTENT WITH DATA
         return RefreshIndicator(
           onRefresh: _refreshData,
           color: const Color(0xFF1B5E20),
@@ -330,29 +465,47 @@ class _PendapatanScreenState extends State<PendapatanScreen>
               parent: BouncingScrollPhysics(),
             ),
             slivers: [
-              // Header Card
+              // Header Card - menggunakan ValueListenableBuilder
               SliverToBoxAdapter(
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween(begin: 0.0, end: 1.0),
-                  duration: const Duration(milliseconds: 500),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, value, child) {
-                    return Opacity(
-                      opacity: value,
-                      child: Transform.translate(
-                        offset: Offset(0, 30 * (1 - value)),
-                        child: child,
+                child: ValueListenableBuilder<PendapatanRingkasan>(
+                  valueListenable: _ringkasanNotifier,
+                  builder: (context, ringkasan, _) {
+                    return TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0.0, end: 1.0),
+                      duration: const Duration(milliseconds: 500),
+                      curve: Curves.easeOutCubic,
+                      builder: (context, value, child) {
+                        return Opacity(
+                          opacity: value,
+                          child: Transform.translate(
+                            offset: Offset(0, 30 * (1 - value)),
+                            child: child,
+                          ),
+                        );
+                      },
+                      child: PendapatanHeaderCard(
+                        totalPendapatan: ringkasan.totalPendapatan,
+                        totalLembur: ringkasan.totalLembur,
+                        totalJam: ringkasan.totalJam,
+                        bulan: _selectedBulan,
+                        tepatWaktu: ringkasan.tepatWaktu,
+                        terlambat: ringkasan.terlambat,
                       ),
                     );
                   },
-                  child: PendapatanHeaderCard(
-                    totalPendapatan: _totalPendapatan,
-                    totalLembur: _totalLembur,
-                    totalJam: _totalJam,
-                    bulan: _selectedBulan,
-                    tepatWaktu: _tepatWaktu,
-                    terlambat: _terlambat,
-                  ),
+                ),
+              ),
+
+              // Payment Status Card
+              SliverToBoxAdapter(
+                child: ValueListenableBuilder<PendapatanRingkasan>(
+                  valueListenable: _ringkasanNotifier,
+                  builder: (context, ringkasan, _) {
+                    if (ringkasan.totalLembur > 0) {
+                      return _buildPaymentStatusCard(ringkasan);
+                    }
+                    return const SizedBox.shrink();
+                  },
                 ),
               ),
 
@@ -363,44 +516,43 @@ class _PendapatanScreenState extends State<PendapatanScreen>
 
               // Section Header
               SliverToBoxAdapter(
-                child: _buildSectionHeader(count: items.length),
+                child: ValueListenableBuilder<PendapatanRingkasan>(
+                  valueListenable: _ringkasanNotifier,
+                  builder: (context, ringkasan, _) {
+                    return _buildSectionHeader(
+                      count: items.length,
+                      totalPendapatan: ringkasan.totalPendapatan,
+                    );
+                  },
+                ),
               ),
 
-              // List Items dengan staggered animation
+              // List Items
               SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, index) {
                     final item = items[index];
-                    return TweenAnimationBuilder<double>(
-                      tween: Tween(begin: 0.0, end: 1.0),
-                      duration: Duration(milliseconds: 350 + (index * 60)),
-                      curve: Curves.easeOutCubic,
-                      builder: (context, value, child) {
-                        return Opacity(
-                          opacity: value.clamp(0.0, 1.0),
-                          child: Transform.translate(
-                            offset: Offset(40 * (1 - value), 0),
-                            child: child,
-                          ),
-                        );
-                      },
-                      child: PendapatanListItem(
-                        item: item,
-                        onTap: () => PendapatanDetailSheet.show(context, item),
-                      ),
-                    );
+                    return _buildListItem(item, index);
                   },
                   childCount: items.length,
+                  addAutomaticKeepAlives: true,
+                  addRepaintBoundaries: true,
                 ),
               ),
 
               // Bottom Summary
               SliverToBoxAdapter(
-                child: _buildBottomSummary(),
+                child: ValueListenableBuilder<PendapatanRingkasan>(
+                  valueListenable: _ringkasanNotifier,
+                  builder: (context, ringkasan, _) {
+                    return _buildBottomSummary(ringkasan);
+                  },
+                ),
               ),
 
-              // Bottom padding untuk safe area
-              const SliverToBoxAdapter(child: SizedBox(height: 24)),
+              const SliverToBoxAdapter(
+                child: SizedBox(height: 24),
+              ),
             ],
           ),
         );
@@ -408,61 +560,269 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     );
   }
 
- 
-  // LOADING CONTENT
- 
-  Widget _buildLoadingContent() {
-    return Center(
+  // ============================================================
+  // LIST ITEM
+  // ============================================================
+  Widget _buildListItem(PendapatanItem item, int index) {
+    final shouldAnimate = index < 20;
+
+    if (!shouldAnimate) {
+      return PendapatanListItem(
+        item: item,
+        onTap: () => PendapatanDetailSheet.show(context, item),
+      );
+    }
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: Duration(milliseconds: 300 + (index * 40)),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return Opacity(
+          opacity: value.clamp(0.0, 1.0),
+          child: Transform.translate(
+            offset: Offset(30 * (1 - value), 0),
+            child: child,
+          ),
+        );
+      },
+      child: PendapatanListItem(
+        item: item,
+        onTap: () => PendapatanDetailSheet.show(context, item),
+      ),
+    );
+  }
+
+  // ============================================================
+  // PAYMENT STATUS CARD
+  // ============================================================
+  Widget _buildPaymentStatusCard(PendapatanRingkasan ringkasan) {
+    final persentase = ringkasan.totalLembur > 0
+        ? (ringkasan.sudahDibayar / ringkasan.totalLembur * 100)
+        : 0.0;
+    final isComplete = persentase >= 100;
+
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          _buildLoadingIndicator(),
-          const SizedBox(height: 20),
-          Text(
-            'Memuat data pendapatan...',
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              color: Colors.grey.shade600,
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: isComplete ? Colors.green.shade50 : Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  isComplete ? Icons.check_circle_rounded : Icons.payments_rounded,
+                  size: 24,
+                  color: isComplete ? Colors.green.shade700 : Colors.orange.shade700,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Status Pembayaran',
+                      style: GoogleFonts.poppins(
+                        fontSize: 15,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.grey.shade800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isComplete
+                          ? 'Semua gaji sudah dibayarkan 🎉'
+                          : '${ringkasan.belumDibayar} laporan belum dibayar',
+                      style: GoogleFonts.poppins(
+                        fontSize: 11,
+                        color: isComplete ? Colors.green.shade600 : Colors.orange.shade600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: isComplete ? Colors.green.shade50 : Colors.orange.shade50,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isComplete ? Colors.green.shade200 : Colors.orange.shade200,
+                  ),
+                ),
+                child: Text(
+                  '${persentase.toStringAsFixed(0)}%',
+                  style: GoogleFonts.poppins(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w800,
+                    color: isComplete ? Colors.green.shade700 : Colors.orange.shade700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: persentase / 100,
+              backgroundColor: Colors.grey.shade100,
+              valueColor: AlwaysStoppedAnimation(
+                isComplete ? Colors.green : Colors.orange,
+              ),
+              minHeight: 10,
             ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            _formatBulanDisplay(_selectedBulan),
-            style: GoogleFonts.poppins(
-              fontSize: 12,
-              color: Colors.grey.shade400,
-            ),
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.green.shade100),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const BoxDecoration(
+                              color: Colors.green,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Sudah Dibayar',
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              color: Colors.green.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${ringkasan.sudahDibayar} laporan',
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.green.shade800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _formatRupiah(ringkasan.totalDibayar),
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.green.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.shade50,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.orange.shade100),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 10,
+                            height: 10,
+                            decoration: const BoxDecoration(
+                              color: Colors.orange,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Belum Dibayar',
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              color: Colors.orange.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '${ringkasan.belumDibayar} laporan',
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.orange.shade800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _formatRupiah(ringkasan.totalBelumDibayar),
+                        style: GoogleFonts.poppins(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Colors.orange.shade700,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
- 
-  // DISCLAIMER WIDGET
- 
+  // ============================================================
+  // DISCLAIMER
+  // ============================================================
   Widget _buildDisclaimer() {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            Colors.orange.shade50,
-            Colors.orange.shade100,
-          ],
+          colors: [Colors.orange.shade50, Colors.orange.shade100],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.orange.shade200),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.orange.shade100.withOpacity(0.3),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
-          ),
-        ],
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -494,8 +854,8 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Pendapatan ini hanya ESTIMASI berdasarkan tarif lembur per jam. '
-                  'Nominal final ditentukan oleh bagian keuangan.',
+                  'Pendapatan ini adalah ESTIMASI berdasarkan data lembur. '
+                  'Status pembayaran diperbarui oleh admin secara berkala.',
                   style: GoogleFonts.poppins(
                     fontSize: 11,
                     color: Colors.orange.shade800,
@@ -510,10 +870,10 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     );
   }
 
- 
+  // ============================================================
   // SECTION HEADER
- 
-  Widget _buildSectionHeader({required int count}) {
+  // ============================================================
+  Widget _buildSectionHeader({required int count, required double totalPendapatan}) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 6),
       child: Row(
@@ -559,10 +919,10 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     );
   }
 
- 
+  // ============================================================
   // BOTTOM SUMMARY
- 
-  Widget _buildBottomSummary() {
+  // ============================================================
+  Widget _buildBottomSummary(PendapatanRingkasan ringkasan) {
     return Container(
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(18),
@@ -580,17 +940,12 @@ class _PendapatanScreenState extends State<PendapatanScreen>
       ),
       child: Column(
         children: [
-          // Total Pendapatan
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
-                  Icon(
-                    Icons.payments_rounded,
-                    size: 18,
-                    color: Colors.grey.shade500,
-                  ),
+                  Icon(Icons.payments_rounded, size: 18, color: Colors.grey.shade500),
                   const SizedBox(width: 8),
                   Text(
                     'Total Pendapatan',
@@ -603,7 +958,7 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 ],
               ),
               Text(
-                _formatRupiah(_totalPendapatan),
+                _formatRupiah(ringkasan.totalPendapatan),
                 style: GoogleFonts.poppins(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -612,39 +967,95 @@ class _PendapatanScreenState extends State<PendapatanScreen>
               ),
             ],
           ),
-
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 14),
             child: Divider(height: 1),
           ),
-
-          // Stats row
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.check_circle_rounded, size: 16, color: Colors.green.shade600),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Sudah Dibayar',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                _formatRupiah(ringkasan.totalDibayar),
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.green.shade700,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Icon(Icons.pending_rounded, size: 16, color: Colors.orange.shade600),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Belum Dibayar',
+                    style: GoogleFonts.poppins(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: Colors.grey.shade700,
+                    ),
+                  ),
+                ],
+              ),
+              Text(
+                _formatRupiah(ringkasan.totalBelumDibayar),
+                style: GoogleFonts.poppins(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.orange.shade700,
+                ),
+              ),
+            ],
+          ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: 14),
+            child: Divider(height: 1),
+          ),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _buildSummaryItem(
                 icon: Icons.work_history_rounded,
                 label: 'Total Lembur',
-                value: '${_totalLembur}x',
+                value: '${ringkasan.totalLembur}x',
               ),
-              _buildSummaryDivider(),
+              _buildSummarySeparator(),
               _buildSummaryItem(
                 icon: Icons.timer_rounded,
                 label: 'Total Jam',
-                value: _formatJam(_totalJam),
+                value: _formatJam(ringkasan.totalJam),
               ),
-              _buildSummaryDivider(),
+              _buildSummarySeparator(),
               _buildSummaryItem(
                 icon: Icons.check_circle_rounded,
                 label: 'Tepat Waktu',
-                value: '$_tepatWaktu',
+                value: '${ringkasan.tepatWaktu}',
               ),
-              if (_terlambat > 0) ...[
-                _buildSummaryDivider(),
+              if (ringkasan.terlambat > 0) ...[
+                _buildSummarySeparator(),
                 _buildSummaryItem(
                   icon: Icons.warning_amber_rounded,
                   label: 'Terlambat',
-                  value: '$_terlambat',
+                  value: '${ringkasan.terlambat}',
                   isWarning: true,
                 ),
               ],
@@ -684,9 +1095,40 @@ class _PendapatanScreenState extends State<PendapatanScreen>
           Text(
             label,
             textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey.shade500),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummarySeparator() {
+    return Container(width: 1, height: 50, color: Colors.grey.shade200);
+  }
+
+  // ============================================================
+  // LOADING CONTENT
+  // ============================================================
+  Widget _buildLoadingContent() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          _buildLoadingIndicator(),
+          const SizedBox(height: 20),
+          Text(
+            'Memuat data pendapatan...',
             style: GoogleFonts.poppins(
-              fontSize: 10,
-              color: Colors.grey.shade500,
+              fontSize: 14,
+              color: Colors.grey.shade600,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            _formatBulanDisplay(_selectedBulan),
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              color: Colors.grey.shade400,
             ),
           ),
         ],
@@ -694,17 +1136,33 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     );
   }
 
-  Widget _buildSummaryDivider() {
+  // ============================================================
+  // LOADING INDICATOR
+  // ============================================================
+  Widget _buildLoadingIndicator() {
     return Container(
-      width: 1,
-      height: 50,
-      color: Colors.grey.shade200,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: const CircularProgressIndicator(
+        color: Color(0xFF1B5E20),
+        strokeWidth: 3,
+      ),
     );
   }
 
- 
-  // ERROR SCREEN (FIXED - NO fontFamily PARAMETER)
- 
+  // ============================================================
+  // ERROR SCREEN
+  // ============================================================
   Widget _buildErrorScreen({
     required IconData icon,
     required String title,
@@ -718,7 +1176,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Error icon
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -732,15 +1189,9 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                   ),
                 ],
               ),
-              child: Icon(
-                icon,
-                size: 72,
-                color: Colors.red.shade300,
-              ),
+              child: Icon(icon, size: 72, color: Colors.red.shade300),
             ),
             const SizedBox(height: 24),
-
-            // Title
             Text(
               title,
               style: GoogleFonts.poppins(
@@ -750,8 +1201,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
               ),
             ),
             const SizedBox(height: 10),
-
-            // Message
             Text(
               message,
               textAlign: TextAlign.center,
@@ -761,8 +1210,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 height: 1.6,
               ),
             ),
-
-            // Error detail (jika ada)
             if (errorDetail != null && errorDetail.isNotEmpty) ...[
               const SizedBox(height: 16),
               Container(
@@ -787,10 +1234,7 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 ),
               ),
             ],
-
             const SizedBox(height: 28),
-
-            // Retry button
             ElevatedButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded, size: 18),
@@ -798,14 +1242,9 @@ class _PendapatanScreenState extends State<PendapatanScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF1B5E20),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 28,
-                  vertical: 14,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
                 elevation: 2,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
               ),
             ),
           ],
@@ -814,13 +1253,13 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     );
   }
 
- 
+  // ============================================================
   // EMPTY STATE
- 
+  // ============================================================
   Widget _buildEmptyState() {
     final displayBulan = _formatBulanDisplay(_selectedBulan);
-    final isCurrentMonth = _selectedBulan ==
-        DateFormat('yyyy-MM').format(DateTime.now());
+    final isCurrentMonth =
+        _selectedBulan == DateFormat('yyyy-MM').format(DateTime.now());
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -831,25 +1270,18 @@ class _PendapatanScreenState extends State<PendapatanScreen>
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              // Animasi icon
               TweenAnimationBuilder<double>(
                 tween: Tween(begin: 0.0, end: 1.0),
                 duration: const Duration(milliseconds: 700),
                 curve: Curves.elasticOut,
                 builder: (context, value, child) {
-                  return Transform.scale(
-                    scale: value,
-                    child: child,
-                  );
+                  return Transform.scale(scale: value, child: child);
                 },
                 child: Container(
                   padding: const EdgeInsets.all(28),
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: [
-                        Colors.green.shade50,
-                        Colors.green.shade100,
-                      ],
+                      colors: [Colors.green.shade50, Colors.green.shade100],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
@@ -870,12 +1302,8 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 ),
               ),
               const SizedBox(height: 28),
-
-              // Title
               Text(
-                isCurrentMonth
-                    ? 'Belum Ada Pendapatan'
-                    : 'Tidak Ada Data',
+                isCurrentMonth ? 'Belum Ada Pendapatan' : 'Tidak Ada Data',
                 style: GoogleFonts.poppins(
                   fontSize: 22,
                   fontWeight: FontWeight.w700,
@@ -883,8 +1311,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 ),
               ),
               const SizedBox(height: 10),
-
-              // Message
               Text(
                 isCurrentMonth
                     ? 'Pendapatan akan muncul setelah Anda\n'
@@ -901,8 +1327,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 ),
               ),
               const SizedBox(height: 36),
-
-              // Tips card (hanya untuk bulan ini)
               if (isCurrentMonth) ...[
                 Container(
                   width: double.infinity,
@@ -928,10 +1352,7 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
                               gradient: LinearGradient(
-                                colors: [
-                                  Colors.amber.shade100,
-                                  Colors.amber.shade200,
-                                ],
+                                colors: [Colors.amber.shade100, Colors.amber.shade200],
                               ),
                               borderRadius: BorderRadius.circular(12),
                             ),
@@ -955,33 +1376,19 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                         ],
                       ),
                       const SizedBox(height: 18),
-                      _buildTipItem(
-                        '1',
-                        'Terima jadwal lembur dari pengawas',
-                        Icons.assignment_turned_in_rounded,
-                      ),
-                      _buildTipItem(
-                        '2',
-                        'Lakukan absensi check-in tepat waktu',
-                        Icons.login_rounded,
-                      ),
-                      _buildTipItem(
-                        '3',
-                        'Selesaikan lembur & lakukan check-out',
-                        Icons.logout_rounded,
-                      ),
-                      _buildTipItem(
-                        '4',
-                        'Pendapatan akan otomatis terhitung',
-                        Icons.auto_graph_rounded,
-                      ),
+                      _buildTipItem('1', 'Terima jadwal lembur dari pengawas',
+                          Icons.assignment_turned_in_rounded),
+                      _buildTipItem('2', 'Lakukan absensi check-in tepat waktu',
+                          Icons.login_rounded),
+                      _buildTipItem('3', 'Selesaikan lembur & lakukan check-out',
+                          Icons.logout_rounded),
+                      _buildTipItem('4', 'Pendapatan akan otomatis terhitung',
+                          Icons.auto_graph_rounded),
                     ],
                   ),
                 ),
                 const SizedBox(height: 20),
               ],
-
-              // Tombol pilih bulan
               OutlinedButton.icon(
                 onPressed: _showMonthPicker,
                 icon: const Icon(Icons.calendar_month_rounded, size: 18),
@@ -992,17 +1399,10 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 style: OutlinedButton.styleFrom(
                   foregroundColor: const Color(0xFF1B5E20),
                   side: const BorderSide(color: Color(0xFF1B5E20), width: 1.5),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 14,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(14),
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 ),
               ),
-
-              // Bottom spacing
               const SizedBox(height: 40),
             ],
           ),
@@ -1016,7 +1416,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
       padding: const EdgeInsets.only(top: 10),
       child: Row(
         children: [
-          // Icon
           Container(
             width: 32,
             height: 32,
@@ -1029,14 +1428,9 @@ class _PendapatanScreenState extends State<PendapatanScreen>
               ),
               borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(
-              icon,
-              size: 15,
-              color: const Color(0xFF1B5E20).withOpacity(0.7),
-            ),
+            child: Icon(icon, size: 15, color: const Color(0xFF1B5E20).withOpacity(0.7)),
           ),
           const SizedBox(width: 12),
-          // Number
           Container(
             width: 22,
             height: 22,
@@ -1056,7 +1450,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
             ),
           ),
           const SizedBox(width: 10),
-          // Text
           Expanded(
             child: Text(
               text,
@@ -1072,86 +1465,9 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     );
   }
 
- 
-  // LOADING INDICATOR
- 
-  Widget _buildLoadingIndicator() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: const CircularProgressIndicator(
-        color: Color(0xFF1B5E20),
-        strokeWidth: 3,
-      ),
-    );
-  }
-
- 
-  // UPDATE RINGKASAN
- 
-  void _updateRingkasan(List<PendapatanItem> items) {
-    double total = 0;
-    double totalJam = 0;
-    int tepat = 0;
-    int lambat = 0;
-
-    for (var item in items) {
-      total += item.estimasiPendapatan;
-      totalJam += item.totalJam;
-      if (item.statusAbsensi == 'selesai') {
-        tepat++;
-      } else if (item.statusAbsensi == 'selesai_terlambat') {
-        lambat++;
-      }
-    }
-
-    // Update state hanya jika ada perubahan (optimasi rebuild)
-    if (total != _totalPendapatan ||
-        items.length != _totalLembur ||
-        totalJam != _totalJam ||
-        tepat != _tepatWaktu ||
-        lambat != _terlambat) {
-      if (mounted) {
-        setState(() {
-          _totalPendapatan = total;
-          _totalLembur = items.length;
-          _totalJam = totalJam;
-          _tepatWaktu = tepat;
-          _terlambat = lambat;
-        });
-      }
-    }
-  }
-
- 
-  // REFRESH DATA
- 
-  Future<void> _refreshData() async {
-    if (!mounted) return;
-
-    setState(() {
-      _isLoadingRingkasan = true;
-    });
-
-    _pendapatanService.clearCache();
-
-    // Biarkan stream update otomatis
-    await Future.delayed(const Duration(milliseconds: 600));
-  }
-
- 
+  // ============================================================
   // MONTH PICKER
- 
+  // ============================================================
   void _showMonthPicker() async {
     final currentDate = DateTime.parse('$_selectedBulan-01');
 
@@ -1163,9 +1479,7 @@ class _PendapatanScreenState extends State<PendapatanScreen>
         return StatefulBuilder(
           builder: (context, setDialogState) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-              ),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               title: Row(
                 children: [
                   Container(
@@ -1174,19 +1488,13 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                       color: const Color(0xFF1B5E20).withOpacity(0.1),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(
-                      Icons.calendar_month_rounded,
-                      size: 22,
-                      color: Color(0xFF1B5E20),
-                    ),
+                    child: const Icon(Icons.calendar_month_rounded,
+                        size: 22, color: Color(0xFF1B5E20)),
                   ),
                   const SizedBox(width: 12),
                   Text(
                     'Pilih Bulan',
-                    style: GoogleFonts.poppins(
-                      fontWeight: FontWeight.w700,
-                      fontSize: 18,
-                    ),
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 18),
                   ),
                 ],
               ),
@@ -1196,7 +1504,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    // Navigasi tahun
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8),
                       decoration: BoxDecoration(
@@ -1209,16 +1516,11 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                           IconButton(
                             icon: const Icon(Icons.chevron_left_rounded),
                             onPressed: selectedDate!.year > 2024
-                                ? () {
-                                    setDialogState(() {
+                                ? () => setDialogState(() {
                                       selectedDate = DateTime(
-                                        selectedDate!.year - 1,
-                                        selectedDate!.month,
-                                      );
-                                    });
-                                  }
+                                          selectedDate!.year - 1, selectedDate!.month);
+                                    })
                                 : null,
-                            tooltip: 'Tahun Sebelumnya',
                           ),
                           Text(
                             '${selectedDate!.year}',
@@ -1231,28 +1533,20 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                           IconButton(
                             icon: const Icon(Icons.chevron_right_rounded),
                             onPressed: selectedDate!.year < 2030
-                                ? () {
-                                    setDialogState(() {
+                                ? () => setDialogState(() {
                                       selectedDate = DateTime(
-                                        selectedDate!.year + 1,
-                                        selectedDate!.month,
-                                      );
-                                    });
-                                  }
+                                          selectedDate!.year + 1, selectedDate!.month);
+                                    })
                                 : null,
-                            tooltip: 'Tahun Berikutnya',
                           ),
                         ],
                       ),
                     ),
                     const SizedBox(height: 16),
-
-                    // Grid bulan
                     Expanded(
                       child: GridView.builder(
                         physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate:
-                            const SliverGridDelegateWithFixedCrossAxisCount(
+                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                           crossAxisCount: 3,
                           childAspectRatio: 2.5,
                           crossAxisSpacing: 10,
@@ -1264,39 +1558,33 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                           final date = DateTime(selectedDate!.year, month);
                           final isSelected = month == currentDate.month &&
                               selectedDate!.year == currentDate.year;
-                          final isCurrentMonth =
-                              month == DateTime.now().month &&
-                                  selectedDate!.year == DateTime.now().year;
+                          final isCurrentMonth = month == DateTime.now().month &&
+                              selectedDate!.year == DateTime.now().year;
                           final isDisabled = date.isAfter(DateTime.now());
 
                           return GestureDetector(
-                            onTap: isDisabled
-                                ? null
-                                : () => Navigator.pop(context, date),
+                            onTap: isDisabled ? null : () => Navigator.pop(context, date),
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 200),
                               decoration: BoxDecoration(
                                 color: isSelected
                                     ? const Color(0xFF1B5E20)
                                     : isCurrentMonth
-                                        ? const Color(0xFF1B5E20)
-                                            .withOpacity(0.08)
+                                        ? const Color(0xFF1B5E20).withOpacity(0.08)
                                         : Colors.grey.shade100,
                                 borderRadius: BorderRadius.circular(14),
                                 border: isSelected
                                     ? null
                                     : Border.all(
                                         color: isCurrentMonth
-                                            ? const Color(0xFF1B5E20)
-                                                .withOpacity(0.25)
+                                            ? const Color(0xFF1B5E20).withOpacity(0.25)
                                             : Colors.grey.shade300,
                                         width: isCurrentMonth ? 1.5 : 1,
                                       ),
                                 boxShadow: isSelected
                                     ? [
                                         BoxShadow(
-                                          color: const Color(0xFF1B5E20)
-                                              .withOpacity(0.3),
+                                          color: const Color(0xFF1B5E20).withOpacity(0.3),
                                           blurRadius: 8,
                                           offset: const Offset(0, 3),
                                         ),
@@ -1308,9 +1596,7 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                                   DateFormat('MMM', 'id_ID').format(date),
                                   style: GoogleFonts.poppins(
                                     fontSize: 14,
-                                    fontWeight: isSelected
-                                        ? FontWeight.w700
-                                        : FontWeight.w500,
+                                    fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                                     color: isSelected
                                         ? Colors.white
                                         : isDisabled
@@ -1333,25 +1619,17 @@ class _PendapatanScreenState extends State<PendapatanScreen>
                   child: Text(
                     'Batal',
                     style: GoogleFonts.poppins(
-                      color: Colors.grey.shade600,
-                      fontWeight: FontWeight.w500,
-                    ),
+                        color: Colors.grey.shade600, fontWeight: FontWeight.w500),
                   ),
                 ),
                 FilledButton(
-                  onPressed: () {
-                    Navigator.pop(context, DateTime.now());
-                  },
+                  onPressed: () => Navigator.pop(context, DateTime.now()),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF1B5E20),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   ),
-                  child: Text(
-                    'Bulan Ini',
-                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
-                  ),
+                  child: Text('Bulan Ini',
+                      style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
                 ),
               ],
             );
@@ -1360,26 +1638,25 @@ class _PendapatanScreenState extends State<PendapatanScreen>
       },
     );
 
-    if (result != null && mounted) {
+    if (result != null && mounted && !_isDisposed) {
       setState(() {
         _selectedBulan = DateFormat('yyyy-MM').format(result);
-        _isLoadingRingkasan = true;
+        _ringkasanNotifier.value = const PendapatanRingkasan();
       });
+      _startStream(); // Restart stream with new month
     }
   }
 
- 
+  // ============================================================
   // FORMATTING HELPERS
- 
-
+  // ============================================================
   String _formatRupiah(double amount) {
     if (amount == 0) return 'Rp 0';
-    final formatter = NumberFormat.currency(
+    return NumberFormat.currency(
       locale: 'id_ID',
       symbol: 'Rp ',
       decimalDigits: 0,
-    );
-    return formatter.format(amount);
+    ).format(amount);
   }
 
   String _formatJam(double hours) {
@@ -1387,7 +1664,6 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     final totalMinutes = (hours * 60).round();
     final h = totalMinutes ~/ 60;
     final m = totalMinutes % 60;
-
     if (h == 0 && m == 0) return '0 mnt';
     if (h == 0) return '$m mnt';
     if (m == 0) return '$h jam';
@@ -1398,12 +1674,9 @@ class _PendapatanScreenState extends State<PendapatanScreen>
     try {
       final parts = tahunBulan.split('-');
       if (parts.length != 2) return tahunBulan;
-
       final year = int.parse(parts[0]);
       final month = int.parse(parts[1]);
-
-      final date = DateTime(year, month);
-      return DateFormat('MMMM yyyy', 'id_ID').format(date);
+      return DateFormat('MMMM yyyy', 'id_ID').format(DateTime(year, month));
     } catch (e) {
       return tahunBulan;
     }

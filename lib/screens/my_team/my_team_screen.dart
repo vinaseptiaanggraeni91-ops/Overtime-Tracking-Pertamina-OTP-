@@ -1,3 +1,5 @@
+// lib/features/my_team/my_team_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -155,7 +157,7 @@ class _MyTeamScreenState extends State<MyTeamScreen>
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Tim Saya', style: GoogleFonts.poppins(
+                Text('Tim', style: GoogleFonts.poppins(
                   color: Colors.white, fontSize: 22, fontWeight: FontWeight.w700,
                 )),
                 const SizedBox(height: 2),
@@ -382,7 +384,11 @@ class _MyTeamScreenState extends State<MyTeamScreen>
         sorted.sort((a, b) => a.namaLengkap.compareTo(b.namaLengkap));
         break;
       case 'status':
-        sorted.sort((a, b) => (b.isActive ? 1 : 0).compareTo(a.isActive ? 1 : 0));
+        sorted.sort((a, b) {
+          final aOnline = _isMemberOnline(a);
+          final bOnline = _isMemberOnline(b);
+          return (bOnline ? 1 : 0).compareTo(aOnline ? 1 : 0);
+        });
         break;
       case 'recent':
         sorted.sort((a, b) {
@@ -395,9 +401,25 @@ class _MyTeamScreenState extends State<MyTeamScreen>
     return sorted;
   }
 
+  // 🔥 PERBAIKAN: Cek status online berdasarkan last_active
+  bool _isMemberOnline(TeamMember member) {
+    // Jika ada lastLogin dan dalam 10 menit terakhir, anggap online
+    if (member.lastLogin != null) {
+      final diff = DateTime.now().difference(member.lastLogin!);
+      if (diff.inMinutes < 10) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   // ========== MEMBER CARD ==========
 
   Widget _buildMemberCard(TeamMember member) {
+    final isOnline = _isMemberOnline(member);
+    final statusColor = isOnline ? const Color(0xFF00C853) : Colors.grey;
+    final statusText = isOnline ? 'Online' : 'Offline';
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 14),
       child: Material(
@@ -411,22 +433,48 @@ class _MyTeamScreenState extends State<MyTeamScreen>
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                // Avatar
-                Container(
-                  width: 58, height: 58,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: member.isActive
-                          ? [const Color(0xFF1976D2), const Color(0xFF1565C0)]
-                          : [Colors.grey.shade400, Colors.grey.shade500],
+                // Avatar dengan status indicator
+                Stack(
+                  children: [
+                    Container(
+                      width: 58, height: 58,
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: isOnline
+                              ? [const Color(0xFF1976D2), const Color(0xFF1565C0)]
+                              : [Colors.grey.shade400, Colors.grey.shade500],
+                        ),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Center(
+                        child: Text(member.inisial, style: GoogleFonts.poppins(
+                          color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20,
+                        )),
+                      ),
                     ),
-                    borderRadius: BorderRadius.circular(18),
-                  ),
-                  child: Center(
-                    child: Text(member.inisial, style: GoogleFonts.poppins(
-                      color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20,
-                    )),
-                  ),
+                    // 🔥 Status dot di pojok
+                    Positioned(
+                      bottom: 2,
+                      right: 2,
+                      child: Container(
+                        width: 16,
+                        height: 16,
+                        decoration: BoxDecoration(
+                          color: isOnline ? const Color(0xFF00C853) : Colors.grey.shade400,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white, width: 2.5),
+                          boxShadow: [
+                            if (isOnline)
+                              BoxShadow(
+                                color: const Color(0xFF00C853).withOpacity(0.4),
+                                blurRadius: 8,
+                                spreadRadius: 2,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(width: 14),
                 // Info
@@ -443,7 +491,7 @@ class _MyTeamScreenState extends State<MyTeamScreen>
                             ),
                           ),
                           const SizedBox(width: 8),
-                          _statusBadge(member.isActive),
+                          _statusBadge(isOnline, statusText, statusColor),
                         ],
                       ),
                       const SizedBox(height: 8),
@@ -453,7 +501,8 @@ class _MyTeamScreenState extends State<MyTeamScreen>
                       const SizedBox(height: 8),
                       Row(
                         children: [
-                          Text('Login terakhir: ${member.lastLoginFormatted}',
+                          Text(
+                            member.lastLoginFormatted,
                             style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey),
                           ),
                           if (member.role != null) ...[
@@ -487,18 +536,32 @@ class _MyTeamScreenState extends State<MyTeamScreen>
     );
   }
 
-  Widget _statusBadge(bool isActive) {
+  Widget _statusBadge(bool isOnline, String text, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: isActive ? const Color(0xFF00C853).withOpacity(0.12) : Colors.grey.withOpacity(0.12),
+        color: color.withOpacity(0.12),
         borderRadius: BorderRadius.circular(20),
       ),
-      child: Text(isActive ? 'Aktif' : 'Nonaktif',
-        style: GoogleFonts.poppins(
-          fontSize: 10, fontWeight: FontWeight.w600,
-          color: isActive ? const Color(0xFF00C853) : Colors.grey,
-        ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 4),
+          Text(text,
+            style: GoogleFonts.poppins(
+              fontSize: 10, fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -517,7 +580,7 @@ class _MyTeamScreenState extends State<MyTeamScreen>
     );
   }
 
-  // ========== NAVIGATE (✅ UDAH DIBENERIN) ==========
+  // ========== NAVIGATE ==========
 
   void _navigateToMemberDetail(TeamMember member) {
     Navigator.push(
@@ -525,7 +588,7 @@ class _MyTeamScreenState extends State<MyTeamScreen>
       MaterialPageRoute(
         builder: (context) => MemberDetailScreen(
           member: member,
-          userRole: _userRole ?? 'karyawan', // ← KIRIM role user yang login
+          userRole: _userRole ?? 'karyawan',
         ),
       ),
     );

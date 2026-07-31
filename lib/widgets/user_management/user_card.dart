@@ -119,9 +119,10 @@ class UserCard extends StatelessWidget {
             ],
           ),
         ),
+        const SizedBox(width: 8),
         // Status Badge
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
           decoration: BoxDecoration(
             color: statusColor.withOpacity(0.1),
             borderRadius: BorderRadius.circular(12),
@@ -131,20 +132,20 @@ class UserCard extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Container(
-                width: 7,
-                height: 7,
+                width: 6,
+                height: 6,
                 decoration: BoxDecoration(
                   color: statusColor,
                   shape: BoxShape.circle,
                   boxShadow: [BoxShadow(color: statusColor, blurRadius: 4)],
                 ),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 5),
               Text(
                 UserHelpers.statusLabel(status),
                 style: GoogleFonts.inter(
                   color: statusColor,
-                  fontSize: 11,
+                  fontSize: 10,
                   fontWeight: FontWeight.w600,
                 ),
               ),
@@ -155,28 +156,49 @@ class UserCard extends StatelessWidget {
     );
   }
 
+  // ✅ PERBAIKAN: Middle row dengan Wrap untuk menghindari overflow
   Widget _buildMiddleRow(String role, String fungsi, String phone, Color roleColor) {
     return Row(
       children: [
-        _InfoChip(
-          icon: Icons.shield_rounded,
-          text: UserHelpers.roleLabel(role),
-          color: roleColor,
+        // Info chips dibungkus Flexible agar tidak overflow
+        Flexible(
+          child: Wrap(
+            spacing: 8,
+            runSpacing: 4,
+            children: [
+              _InfoChip(
+                icon: Icons.shield_rounded,
+                text: UserHelpers.roleLabel(role),
+                color: roleColor,
+              ),
+              _InfoChip(
+                icon: Icons.business_rounded,
+                text: UserHelpers.fungsiLabel(fungsi),
+                color: UserHelpers.fungsiColor(fungsi),
+              ),
+            ],
+          ),
         ),
         const SizedBox(width: 8),
-        _InfoChip(
-          icon: Icons.business_rounded,
-          text: UserHelpers.fungsiLabel(fungsi),
-          color: UserHelpers.fungsiColor(fungsi),
-        ),
-        const Spacer(),
-        Icon(Icons.phone_rounded, size: 14, color: UserHelpers.textLight),
-        const SizedBox(width: 4),
-        Text(
-          phone.isNotEmpty && phone.length >= 8
-              ? '${phone.substring(0, 4)}...${phone.substring(phone.length - 4)}'
-              : phone,
-          style: GoogleFonts.inter(fontSize: 11, color: UserHelpers.textLight),
+        // Phone number dengan Flexible dan overflow ellipsis
+        Flexible(
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.phone_rounded, size: 14, color: UserHelpers.textLight),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  phone.isNotEmpty && phone.length >= 8
+                      ? '${phone.substring(0, 4)}...${phone.substring(phone.length - 4)}'
+                      : phone,
+                  style: GoogleFonts.inter(fontSize: 11, color: UserHelpers.textLight),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          ),
         ),
       ],
     );
@@ -186,33 +208,41 @@ class UserCard extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          '🕐 ${UserHelpers.formatDate(user['created_at'])}',
-          style: GoogleFonts.inter(fontSize: 11, color: UserHelpers.textLight),
+        Flexible(
+          child: Text(
+            '🕐 ${UserHelpers.formatDate(user['created_at'])}',
+            style: GoogleFonts.inter(fontSize: 11, color: UserHelpers.textLight),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ),
-        Row(
-          children: [
-            if (canEdit && !isCurrentUser)
-              _ActionButton(
-                icon: Icons.edit_rounded,
-                color: UserHelpers.headerBlue,
-                onTap: onEdit,
-              ),
-            if (canEdit && !isCurrentUser) const SizedBox(width: 8),
-            if (!isCurrentUser)
-              _ActionButton(
-                icon: status == 'active' ? Icons.block_rounded : Icons.check_circle_rounded,
-                color: status == 'active' ? UserHelpers.accentOrange : UserHelpers.accentGreen,
-                onTap: onToggleStatus,
-              ),
-            if (canDelete && !isCurrentUser) const SizedBox(width: 8),
-            if (canDelete && !isCurrentUser)
-              _ActionButton(
-                icon: Icons.delete_rounded,
-                color: UserHelpers.accentRed,
-                onTap: onDelete,
-              ),
-          ],
+        // Action buttons dibungkus Wrap untuk mengantisipasi banyak tombol
+        Flexible(
+          child: Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            alignment: WrapAlignment.end,
+            children: [
+              if (canEdit && !isCurrentUser)
+                _ActionButton(
+                  icon: Icons.edit_rounded,
+                  color: UserHelpers.headerBlue,
+                  onTap: onEdit,
+                ),
+              if (!isCurrentUser)
+                _ActionButton(
+                  icon: status == 'active' ? Icons.block_rounded : Icons.check_circle_rounded,
+                  color: status == 'active' ? UserHelpers.accentOrange : UserHelpers.accentGreen,
+                  onTap: onToggleStatus,
+                ),
+              if (canDelete && !isCurrentUser)
+                _ActionButton(
+                  icon: Icons.delete_rounded,
+                  color: UserHelpers.accentRed,
+                  onTap: onDelete,
+                ),
+            ],
+          ),
         ),
       ],
     );
@@ -240,9 +270,13 @@ class _InfoChip extends StatelessWidget {
         children: [
           Icon(icon, size: 12, color: color),
           const SizedBox(width: 5),
-          Text(
-            text,
-            style: GoogleFonts.inter(color: color, fontSize: 10, fontWeight: FontWeight.w600),
+          Flexible(
+            child: Text(
+              text,
+              style: GoogleFonts.inter(color: color, fontSize: 10, fontWeight: FontWeight.w600),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),

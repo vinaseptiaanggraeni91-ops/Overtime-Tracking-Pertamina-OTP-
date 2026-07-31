@@ -34,7 +34,6 @@ class OvertimeHelpers {
   static Color getFungsiColor(String? fungsi) {
     switch (fungsi?.toLowerCase()) {
       case 'operation': return const Color(0xFF1976D2);
-      case 'lab': return const Color(0xFF4CAF50);
       case 'maintenance': return const Color(0xFFFF9800);
       case 'hsse': return const Color(0xFF9C27B0);
       case 'gpr': return const Color(0xFFF44336);

@@ -1,7 +1,6 @@
 // lib/core/routes/app_router_extension.dart
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import '/core/services/faq_model_service.dart';
 
 extension AppRouterExtension on BuildContext {
   // Auth Navigation
@@ -30,39 +29,6 @@ extension AppRouterExtension on BuildContext {
       default:
         go('/login');
     }
-  }
-
-  // FAQ Navigation
-  void goToFAQ({bool isSuperAdmin = false}) {
-    go('/faq', extra: {'isSuperAdmin': isSuperAdmin});
-  }
-
-  void goToFAQDetail({
-    required FAQModel faqData,
-    bool isSuperAdmin = false,
-  }) {
-    go('/faq/detail/${faqData.id}', extra: {
-      'faqData': faqData,
-      'isSuperAdmin': isSuperAdmin,
-    });
-  }
-
-  void goToAddFAQ() => go('/faq/add');
-  
-  void goToEditFAQ(FAQModel faqData) {
-    go('/faq/edit/${faqData.id}', extra: {'faqToEdit': faqData});
-  }
-
-  // Chat Navigation
-  void goToChatList() => go('/chat');
-  
-  void goToChatRoom({
-    required String chatRoomId,
-    String? chatRoomName,
-  }) {
-    go('/chat/$chatRoomId', extra: {
-      'chatRoomName': chatRoomName,
-    });
   }
 
   // Manager Navigation

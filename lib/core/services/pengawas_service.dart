@@ -29,11 +29,11 @@ class PengawasService {
   }
 
   String getTimeAgo(dynamic timestamp) {
-    if (timestamp == null) return 'baru saja';
+    if (timestamp == null) return '--';
     DateTime time;
     if (timestamp is Timestamp) time = timestamp.toDate();
     else if (timestamp is DateTime) time = timestamp;
-    else return 'baru saja';
+    else return '--';
     final diff = DateTime.now().difference(time);
     if (diff.inDays > 30) return '${(diff.inDays / 30).floor()} bln';
     if (diff.inDays > 0) return '${diff.inDays} hr';
@@ -60,11 +60,14 @@ class PengawasService {
       case 'disetujui':
       case 'approved':
       case 'check_in':
+      case 'normal':
         return Colors.green;
       case 'pending':
+      case 'warning':
         return Colors.orange;
       case 'ditolak':
       case 'rejected':
+      case 'darurat':
         return Colors.red;
       case 'check_out':
       case 'selesai':
@@ -91,7 +94,6 @@ class PengawasService {
   }
 
   // ==================== FIELD EXTRACTION HELPERS ====================
-  /// Extract nama lengkap dari document dengan multiple fallback
   String _extractFullName(Map<String, dynamic> data) {
     return (data['nama_lengkap']?.toString() ?? '')
         .isNotEmpty
@@ -117,7 +119,6 @@ class PengawasService {
                                 : 'Unknown';
   }
 
-  /// Extract email dari document dengan multiple fallback
   String _extractEmail(Map<String, dynamic> data) {
     return (data['email']?.toString() ?? '')
         .isNotEmpty
@@ -131,7 +132,6 @@ class PengawasService {
                 : '-';
   }
 
-  /// Extract phone dari document dengan multiple fallback
   String _extractPhone(Map<String, dynamic> data) {
     return (data['phone']?.toString() ?? '')
         .isNotEmpty
@@ -151,7 +151,6 @@ class PengawasService {
                         : '-';
   }
 
-  /// Extract role dari document dengan multiple fallback
   String _extractRole(Map<String, dynamic> data) {
     return (data['role']?.toString() ?? '')
         .isNotEmpty
@@ -168,7 +167,6 @@ class PengawasService {
                     : 'mitra';
   }
 
-  /// Extract status akun dari document dengan multiple fallback
   String _extractStatus(Map<String, dynamic> data) {
     return (data['status_akun']?.toString() ?? '')
         .isNotEmpty
@@ -182,7 +180,6 @@ class PengawasService {
                 : 'active';
   }
 
-  /// Extract photo URL dari document dengan multiple fallback
   String? _extractPhotoUrl(Map<String, dynamic> data) {
     return (data['photo_url']?.toString() ?? '')
         .isNotEmpty
@@ -199,7 +196,6 @@ class PengawasService {
                     : null;
   }
 
-  /// Extract isOnline dari document dengan multiple fallback
   bool _extractIsOnline(Map<String, dynamic> data) {
     if (data.containsKey('isOnline')) return data['isOnline'] == true;
     if (data.containsKey('is_online')) return data['is_online'] == true;
@@ -208,7 +204,6 @@ class PengawasService {
     return false;
   }
 
-  /// Extract fungsi dari document dengan multiple fallback
   String _extractFungsi(Map<String, dynamic> data, String defaultFungsi) {
     return (data['fungsi']?.toString() ?? '')
         .isNotEmpty
@@ -222,10 +217,15 @@ class PengawasService {
                 : defaultFungsi;
   }
 
-  /// Extract total lembur dari document dengan multiple fallback
   double _extractTotalLembur(Map<String, dynamic> data) {
     if (data.containsKey('totalLemburBulanIni')) {
       return (data['totalLemburBulanIni'] ?? 0).toDouble();
+    }
+    if (data.containsKey('total_lembur_bulanan')) {
+      return (data['total_lembur_bulanan'] ?? 0).toDouble();
+    }
+    if (data.containsKey('total_lembur_bulan_ini')) {
+      return (data['total_lembur_bulan_ini'] ?? 0).toDouble();
     }
     if (data.containsKey('total_lembur')) {
       return (data['total_lembur'] ?? 0).toDouble();
@@ -239,7 +239,6 @@ class PengawasService {
     return 0.0;
   }
 
-  /// Extract last location dari document dengan multiple fallback
   Map<String, dynamic>? _extractLastLocation(Map<String, dynamic> data) {
     if (data.containsKey('lastLocation') && data['lastLocation'] != null) {
       return Map<String, dynamic>.from(data['lastLocation']);
@@ -250,7 +249,6 @@ class PengawasService {
     if (data.containsKey('current_location') && data['current_location'] != null) {
       return Map<String, dynamic>.from(data['current_location']);
     }
-    // Coba construct dari lat/lng terpisah
     final lat = data['latitude'] ?? data['lat'];
     final lng = data['longitude'] ?? data['lng'];
     if (lat != null && lng != null) {
@@ -264,10 +262,12 @@ class PengawasService {
     return null;
   }
 
-  // ==================== DASHBOARD DATA ====================
+  // ==================== DASHBOARD DATA (REAL DATA - OPTIMIZED) ====================
   Future<PengawasDashboardData> loadDashboardData() async {
     final user = _auth.currentUser;
     if (user == null) throw Exception('Not logged in');
+
+    logger.i('🔄 Loading dashboard data for user: ${user.uid}');
 
     final userDoc = await _firestore.collection('users').doc(user.uid).get();
     if (!userDoc.exists) throw Exception('User not found');
@@ -279,53 +279,90 @@ class PengawasService {
     final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
     final startOfMonth = DateTime(today.year, today.month, 1);
 
-    // 🔥 LEMBUR DATA (dari koleksi lembur_mitra)
-    final lemburSnapshot = await _firestore
+    logger.i('📅 Period: Day=$startOfDay, Week=$startOfWeek, Month=$startOfMonth');
+
+    final fungsi = _extractFungsi(userData, 'operation');
+    logger.i('🏢 Fungsi pengawas: $fungsi');
+
+    // ==================== QUERY LEMBUR - OPTIMIZED ====================
+    final myLemburSnapshot = await _firestore
         .collection('lembur_mitra')
         .where('diajukan_oleh_id', isEqualTo: user.uid)
+        .orderBy('created_at', descending: true)
+        .limit(200)
+        .get();
+
+    final teamPendingSnapshot = await _firestore
+        .collection('lembur_mitra')
+        .where('fungsi', isEqualTo: fungsi)
+        .where('status', isEqualTo: 'pending')
         .orderBy('created_at', descending: true)
         .limit(50)
         .get();
 
+    logger.i('📊 Lembur pribadi: ${myLemburSnapshot.docs.length} docs');
+    logger.i('📊 Pending tim: ${teamPendingSnapshot.docs.length} docs');
+
+    // ==================== PROCESS LEMBUR DATA ====================
     List<Map<String, dynamic>> pending = [];
     List<Map<String, dynamic>> recent = [];
     int todayCount = 0;
     int weekCount = 0;
     int monthCount = 0;
+    int todayPendingCount = 0;
+    int todayApprovedCount = 0;  // 🔥 NEW
+    int rejectedCount = 0;        // 🔥 NEW
     Map<String, dynamic>? activeLembur;
+    
+    final Set<String> processedIds = {};
 
-    for (var doc in lemburSnapshot.docs) {
+    // Process lembur pribadi
+    for (var doc in myLemburSnapshot.docs) {
       final data = Map<String, dynamic>.from(doc.data());
       data['id'] = doc.id;
+      processedIds.add(doc.id);
 
-      final tanggal =
-          (data['tanggal'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final tanggal = (data['tanggal'] as Timestamp?)?.toDate() ?? DateTime.now();
+      final createdAt = (data['created_at'] as Timestamp?)?.toDate();
+      final approvedAt = (data['approved_at'] as Timestamp?)?.toDate();
       final status = (data['status'] ?? 'pending').toString().toLowerCase();
 
-      // ✅ HANYA HITUNG JIKA STATUS DISETUJUI
+      // Hitung approved
       if (status == 'disetujui' || status == 'approved') {
-        if (tanggal.isAfter(startOfDay) ||
-            DateUtils.isSameDay(tanggal, startOfDay)) {
+        if (tanggal.isAfter(startOfDay) || DateUtils.isSameDay(tanggal, startOfDay)) {
           todayCount++;
         }
-        if (tanggal.isAfter(startOfWeek) ||
-            DateUtils.isSameDay(tanggal, startOfWeek)) {
+        if (tanggal.isAfter(startOfWeek) || DateUtils.isSameDay(tanggal, startOfWeek)) {
           weekCount++;
         }
-        if (tanggal.isAfter(startOfMonth) ||
-            DateUtils.isSameDay(tanggal, startOfMonth)) {
+        if (tanggal.isAfter(startOfMonth) || DateUtils.isSameDay(tanggal, startOfMonth)) {
           monthCount++;
+        }
+        
+        // 🔥 NEW: Disetujui hari ini
+        if (approvedAt != null && 
+            (approvedAt.isAfter(startOfDay) || DateUtils.isSameDay(approvedAt, startOfDay))) {
+          todayApprovedCount++;
         }
       }
 
-      // Pengelompokan pending / recent
+      // Pending
       if (status == 'pending') {
         pending.add(data);
+        if (createdAt != null && 
+            (createdAt.isAfter(startOfDay) || DateUtils.isSameDay(createdAt, startOfDay))) {
+          todayPendingCount++;
+        }
       } else {
         recent.add(data);
       }
 
-      // Lembur aktif (disetujui & sedang check‑in)
+      // 🔥 NEW: Ditolak
+      if (status == 'ditolak' || status == 'rejected') {
+        rejectedCount++;
+      }
+
+      // Active lembur
       if ((status == 'disetujui' || status == 'approved') &&
           data['check_in'] != null &&
           data['check_out'] == null) {
@@ -333,8 +370,28 @@ class PengawasService {
       }
     }
 
-    // 🔥 TEAM MEMBERS
-    final fungsi = _extractFungsi(userData, 'operation');
+    // Process pending tim
+    for (var doc in teamPendingSnapshot.docs) {
+      if (processedIds.contains(doc.id)) continue;
+      
+      final data = Map<String, dynamic>.from(doc.data());
+      data['id'] = doc.id;
+      
+      final createdAt = (data['created_at'] as Timestamp?)?.toDate();
+      
+      pending.add(data);
+      
+      if (createdAt != null && 
+          (createdAt.isAfter(startOfDay) || DateUtils.isSameDay(createdAt, startOfDay))) {
+        todayPendingCount++;
+      }
+    }
+
+    logger.i('✅ Lembur - Today: $todayCount | Week: $weekCount | Month: $monthCount');
+    logger.i('✅ Pending: ${pending.length} total, $todayPendingCount today');
+    logger.i('✅ Today Approved: $todayApprovedCount | Rejected: $rejectedCount');
+
+    // ==================== TEAM MEMBERS ====================
     final teamSnapshot = await _firestore
         .collection('users')
         .where('role', isEqualTo: 'mitra')
@@ -346,9 +403,8 @@ class PengawasService {
       final d = doc.data();
       return {
         'id': doc.id,
-        // ✅ PERBAIKAN UTAMA: Gunakan extractor dengan multiple fallback
         'nama_lengkap': _extractFullName(d),
-        'nama': _extractFullName(d), // Backup field untuk kompatibilitas
+        'nama': _extractFullName(d),
         'role': _extractRole(d),
         'email': _extractEmail(d),
         'phone': _extractPhone(d),
@@ -357,18 +413,16 @@ class PengawasService {
         'lastLocation': _extractLastLocation(d),
         'fungsi': _extractFungsi(d, fungsi),
         'totalLembur': _extractTotalLembur(d),
-        'photo_url': _extractPhotoUrl(d), // Tambahan untuk avatar
+        'photo_url': _extractPhotoUrl(d),
       };
     }).toList();
 
-    final onlineMembers =
-        teamMembers.where((m) => m['isOnline'] == true).length;
+    final onlineMembers = teamMembers.where((m) => m['isOnline'] == true).length;
 
-    // 🔥 UNREAD NOTIFICATIONS
-    final int unreadNotifications =
-        await _notifService.getUnreadCount(user.uid);
+    // ==================== UNREAD NOTIFICATIONS ====================
+    final int unreadNotifications = await _notifService.getUnreadCount(user.uid);
 
-    // 🔥 RECENT ACTIVITIES (system_logs & activity_logs)
+    // ==================== RECENT ACTIVITIES ====================
     List<Map<String, dynamic>> activities = [];
     try {
       final logSnapshot = await _firestore
@@ -382,13 +436,14 @@ class PengawasService {
         return {
           'type': d['type'] ?? 'system',
           'description': d['description'] ?? '',
-          'timestamp':
-              (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          'timestamp': (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
           'user': d['user'] ?? 'System',
           'userRole': 'system',
         };
       }).toList());
-    } catch (_) {}
+    } catch (e) {
+      logger.w('⚠️ Error loading system_logs: $e');
+    }
 
     try {
       final activitySnapshot = await _firestore
@@ -402,76 +457,77 @@ class PengawasService {
         return {
           'type': d['action'] ?? 'activity',
           'description': d['description'] ?? '',
-          'timestamp':
-              (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          'timestamp': (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
           'user': d['user'] ?? 'System',
           'userRole': d['role'] ?? 'system',
         };
       }).toList());
-    } catch (_) {}
+    } catch (e) {
+      logger.w('⚠️ Error loading activity_logs: $e');
+    }
 
-    activities.sort((a, b) =>
-        (b['timestamp'] as DateTime).compareTo(a['timestamp'] as DateTime));
+    activities.sort((a, b) => (b['timestamp'] as DateTime).compareTo(a['timestamp'] as DateTime));
     activities = activities.take(15).toList();
 
-    // 🔥 SYSTEM HEALTH
-    Map<String, dynamic> systemHealth = {
-      'database': 98,
-      'api': 95,
-      'storage': 76,
-      'memory': 82,
-    };
+    // ==================== SYSTEM HEALTH ====================
+    Map<String, dynamic> systemHealth = {};
     try {
-      final healthDoc =
-          await _firestore.collection('health_check').doc('current').get();
+      final healthDoc = await _firestore.collection('health_check').doc('current').get();
       if (healthDoc.exists) {
         systemHealth = Map<String, dynamic>.from(healthDoc.data()!);
       }
-    } catch (_) {}
+    } catch (e) {
+      logger.w('⚠️ Error loading health_check: $e');
+    }
 
-    // 🔥 LOCATIONS
+    // ==================== LOCATIONS ====================
     List<Map<String, dynamic>> locations = [];
     try {
-      final locSnapshot =
-          await _firestore.collection('locations').limit(50).get();
+      final locSnapshot = await _firestore.collection('live_locations').limit(50).get();
       locations = locSnapshot.docs.map((doc) {
         final d = doc.data();
+        double lat = 0, lng = 0;
+        final geo = d['coordinates'];
+        if (geo is GeoPoint) {
+          lat = geo.latitude;
+          lng = geo.longitude;
+        } else {
+          lat = (d['latitude'] as num?)?.toDouble() ?? 0;
+          lng = (d['longitude'] as num?)?.toDouble() ?? 0;
+        }
+        
         return {
           'id': doc.id,
-          'name': d['name'] ?? 'Unknown',
-          'lat': (d['latitude'] ?? 0).toDouble(),
-          'lng': (d['longitude'] ?? 0).toDouble(),
+          'name': d['user_name'] ?? d['name'] ?? 'Unknown',
+          'lat': lat,
+          'lng': lng,
           'status': d['status'] ?? 'Normal',
           'color': getStatusColor(d['status'] ?? 'Normal'),
           'address': d['address'] ?? '',
-          'workers': d['workers'] ?? 0,
-          'lastUpdate':
-              (d['lastUpdate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          'workers': d['workers'] ?? 1,
+          'battery': d['battery'] ?? 100,
+          'signal': d['signal'] ?? '--',
+          'lastUpdate': (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
         };
       }).toList();
-    } catch (_) {}
-
-    // 🔥 LOGGING DEBUG
-    logger.i('=== DASHBOARD DATA LOADED ===');
-    logger.i('Team members count: ${teamMembers.length}');
-    logger.i('Online members: $onlineMembers');
-    logger.i('Total lembur today (approved): $todayCount');
-    logger.i('Total lembur week (approved): $weekCount');
-    logger.i('Total lembur month (approved): $monthCount');
-    logger.i('Pending approvals: ${pending.length}');
-    logger.i('Active lembur: ${activeLembur != null}');
-    logger.i('Unread notifications: $unreadNotifications');
-    logger.i('Locations count: ${locations.length}');
-    logger.i('Activities count: ${activities.length}');
-    
-    // Debug: Print first 3 team members untuk verifikasi
-    if (teamMembers.isNotEmpty) {
-      logger.i('=== SAMPLE TEAM MEMBERS ===');
-      for (var i = 0; i < min(3, teamMembers.length); i++) {
-        logger.i('Member $i: ${teamMembers[i]}');
-      }
+    } catch (e) {
+      logger.w('⚠️ Error loading locations: $e');
     }
-    logger.i('==============================');
+
+    // ==================== FINAL LOG SUMMARY ====================
+    logger.i('========================================');
+    logger.i('=== 📊 DASHBOARD DATA LOADED ===');
+    logger.i('========================================');
+    logger.i('👤 User: ${_extractFullName(userData)} (${user.email})');
+    logger.i('🏢 Fungsi: $fungsi');
+    logger.i('👥 Team: ${teamMembers.length} total, $onlineMembers online');
+    logger.i('📋 Lembur Today: $todayCount | Week: $weekCount | Month: $monthCount');
+    logger.i('✅ Today Approved: $todayApprovedCount');
+    logger.i('❌ Rejected: $rejectedCount');
+    logger.i('⏳ Pending: ${pending.length} total, $todayPendingCount today');
+    logger.i('🔴 Active Lembur: ${activeLembur != null ? "YES" : "NO"}');
+    logger.i('🔔 Unread Notifications: $unreadNotifications');
+    logger.i('========================================');
 
     return PengawasDashboardData(
       userData: userData,
@@ -483,6 +539,9 @@ class PengawasService {
       totalLemburWeek: weekCount,
       totalLemburMonth: monthCount,
       pendingApproval: pending.length,
+      todayPending: todayPendingCount,
+      todayApproved: todayApprovedCount,  // 🔥 NEW
+      rejected: rejectedCount,            // 🔥 NEW
       teamMembers: teamMembers,
       onlineMembers: onlineMembers,
       totalTeamMembers: teamMembers.length,
@@ -553,8 +612,7 @@ class PengawasService {
       'lastActive': FieldValue.serverTimestamp(),
     });
 
-    await logActivity(
-        'check_out', 'Check-out lembur $lemburId, total $totalJam jam');
+    await logActivity('check_out', 'Check-out lembur $lemburId, total $totalJam jam');
   }
 
   // ==================== ACTIVITY LOGGING ====================
@@ -625,24 +683,31 @@ class PengawasService {
   // ==================== LOCATIONS ====================
   Future<List<Map<String, dynamic>>> getLocations() async {
     try {
-      final snapshot =
-          await _firestore.collection('locations').limit(50).get();
+      final snapshot = await _firestore.collection('live_locations').limit(50).get();
       return snapshot.docs.map((doc) {
         final d = doc.data();
+        double lat = 0, lng = 0;
+        final geo = d['coordinates'];
+        if (geo is GeoPoint) {
+          lat = geo.latitude;
+          lng = geo.longitude;
+        } else {
+          lat = (d['latitude'] as num?)?.toDouble() ?? 0;
+          lng = (d['longitude'] as num?)?.toDouble() ?? 0;
+        }
+        
         return {
           'id': doc.id,
-          'name': d['name'] ?? 'Unknown',
-          'lat': (d['latitude'] ?? 0).toDouble(),
-          'lng': (d['longitude'] ?? 0).toDouble(),
+          'name': d['user_name'] ?? d['name'] ?? 'Unknown',
+          'lat': lat,
+          'lng': lng,
           'status': d['status'] ?? 'Normal',
           'color': getStatusColor(d['status'] ?? 'Normal'),
           'address': d['address'] ?? '',
-          'workers': d['workers'] ?? 0,
+          'workers': d['workers'] ?? 1,
           'battery': d['battery'] ?? 100,
-          'signal': d['signal'] ?? '4G',
-          'cctv': d['cctv'] ?? 0,
-          'lastUpdate':
-              (d['lastUpdate'] as Timestamp?)?.toDate() ?? DateTime.now(),
+          'signal': d['signal'] ?? '--',
+          'lastUpdate': (d['timestamp'] as Timestamp?)?.toDate() ?? DateTime.now(),
         };
       }).toList();
     } catch (e) {
@@ -653,25 +718,15 @@ class PengawasService {
 
   Future<Map<String, dynamic>> getSystemHealth() async {
     try {
-      final doc =
-          await _firestore.collection('health_check').doc('current').get();
+      final doc = await _firestore.collection('health_check').doc('current').get();
       if (doc.exists) return doc.data()!;
     } catch (_) {}
-    return {
-      'database': 98,
-      'api': 95,
-      'storage': 76,
-      'memory': 82,
-      'cpu': 23,
-      'network': 45,
-      'uptime': 15,
-    };
+    return {};
   }
 
   Future<List<Map<String, dynamic>>> getFAQ() async {
     try {
-      final snapshot =
-          await _firestore.collection('faq').orderBy('createdAt').limit(20).get();
+      final snapshot = await _firestore.collection('faq').orderBy('createdAt').limit(20).get();
       return snapshot.docs.map((doc) {
         final d = doc.data();
         return {
@@ -695,7 +750,7 @@ class PengawasService {
           .get();
       if (doc.exists) return doc.data()!;
     } catch (_) {}
-    return {'max_jam_per_bulan': 60};
+    return {};
   }
 
   // ==================== GREETING & PROFILE ====================
@@ -705,10 +760,8 @@ class PengawasService {
     final profile = await getUserProfile();
     final name = _extractFullName(profile) != 'Unknown'
         ? _extractFullName(profile)
-        : user.displayName ??
-            user.email?.split('@')[0] ??
-            'Pengawas';
-    return '${getGreeting()}, $name! 👋';
+        : user.displayName ?? user.email?.split('@')[0] ?? 'Pengawas';
+    return '${getGreeting()}, $name! ${getGreetingEmoji()}';
   }
 
   Future<String> getGreetingMotivation() async {
@@ -782,6 +835,9 @@ class PengawasDashboardData {
   final int totalLemburWeek;
   final int totalLemburMonth;
   final int pendingApproval;
+  final int todayPending;
+  final int todayApproved;   // 🔥 NEW
+  final int rejected;         // 🔥 NEW
   final List<Map<String, dynamic>> teamMembers;
   final int onlineMembers;
   final int totalTeamMembers;
@@ -800,6 +856,9 @@ class PengawasDashboardData {
     required this.totalLemburWeek,
     required this.totalLemburMonth,
     required this.pendingApproval,
+    required this.todayPending,
+    required this.todayApproved,  // 🔥 NEW
+    required this.rejected,        // 🔥 NEW
     required this.teamMembers,
     required this.onlineMembers,
     required this.totalTeamMembers,
@@ -810,4 +869,9 @@ class PengawasDashboardData {
   });
 
   bool get isCheckedIn => activeLembur != null;
+  bool get hasPendingApprovals => pendingApproval > 0;
+  bool get hasTodayPending => todayPending > 0;
+  bool get hasActiveLembur => activeLembur != null;
+  bool get hasRejected => rejected > 0;
+  int get totalLemburBulanIni => totalLemburMonth;
 }

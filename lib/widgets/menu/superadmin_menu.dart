@@ -35,72 +35,47 @@ class AdminMenu extends StatelessWidget {
                 : 0.95;
 
     final menuItems = [
-      // 🔥 =============== MENU #1: MASTER DATA PEKERJA ===============
       _MenuItem(
         title: 'Master Data\nPekerja',
         icon: Icons.badge_rounded,
-        count: data.totalWorkers ?? 0,
-        countColor: const Color(0xFF1B5E20),
         route: '/superadmin/master-pekerja',
         color: const Color(0xFF2E7D32),
       ),
-      // ================================================================
-
       _MenuItem(
         title: 'Persetujuan\nLembur',
         icon: Icons.approval_rounded,
-        count: data.pendingApprovals,
-        countColor: const Color(0xFFFF3B30),
         route: '/admin/approval',
         color: const Color(0xFF00B4D8),
       ),
       _MenuItem(
+        title: 'Jadwal\nLembur',
+        icon: Icons.schedule_rounded,
+        route: '/jadwal-lembur',
+        color: const Color(0xFF9B59B6),
+      ),
+      _MenuItem(
         title: 'Riwayat\nLembur',
         icon: Icons.work_history_rounded,
-        count: data.pendingApprovals,
-        countColor: const Color(0xFFE65100),
         route: '/overtime-data',
         color: const Color(0xFFFF6B35),
       ),
       _MenuItem(
         title: 'Riwayat\nAbsensi',
         icon: Icons.fact_check_rounded,
-        count: 0,
-        countColor: const Color(0xFF1565C0),
         route: '/riwayat-absensi',
         color: const Color(0xFF4A90D9),
       ),
       _MenuItem(
-        title: 'Monitoring\nLokasi',
+        title: 'Pemantauan\nLokasi',
         icon: Icons.location_on_rounded,
-        count: 0,
-        countColor: const Color(0xFFD32F2F),
         route: '/location-monitoring',
         color: const Color(0xFFE74C3C),
       ),
       _MenuItem(
-        title: 'Laporan',
+        title: 'Laporan\nLembur',
         icon: Icons.assessment_rounded,
-        count: data.recentActivities.length,
-        countColor: const Color(0xFF6A1B9A),
         route: '/reports',
         color: const Color(0xFF7C3AED),
-      ),
-      _MenuItem(
-        title: 'Jadwal\nLembur',
-        icon: Icons.schedule_rounded,
-        count: 0,
-        countColor: const Color(0xFF4A148C),
-        route: '/jadwal-lembur',
-        color: const Color(0xFF9B59B6),
-      ),
-      _MenuItem(
-        title: 'FAQ',
-        icon: Icons.help_center_rounded,
-        count: 0,
-        countColor: const Color(0xFF37474F),
-        route: '/faq',
-        color: const Color(0xFF5C6BC0),
       ),
     ];
 
@@ -222,7 +197,7 @@ class _AnimatedMenuCardState
         ),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 200),
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(12), // 🔥 14 -> 12
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
@@ -232,23 +207,24 @@ class _AnimatedMenuCardState
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(22),
+            borderRadius: BorderRadius.circular(20), // 🔥 22 -> 20
             boxShadow: [
               BoxShadow(
                 color: item.color.withValues(alpha: 0.22),
-                blurRadius: 14,
-                offset: const Offset(0, 8),
+                blurRadius: 12, // 🔥 14 -> 12
+                offset: const Offset(0, 6), // 🔥 8 -> 6
               ),
             ],
           ),
           child: Stack(
             children: [
+              // Background decoration
               Positioned(
-                right: -18,
-                top: -18,
+                right: -15, // 🔥 -18 -> -15
+                top: -15, // 🔥 -18 -> -15
                 child: Container(
-                  width: 70,
-                  height: 70,
+                  width: 60, // 🔥 70 -> 60
+                  height: 60, // 🔥 70 -> 60
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.08),
                     shape: BoxShape.circle,
@@ -256,98 +232,68 @@ class _AnimatedMenuCardState
                 ),
               ),
               Positioned(
-                left: -15,
-                bottom: -20,
+                left: -12, // 🔥 -15 -> -12
+                bottom: -15, // 🔥 -20 -> -15
                 child: Container(
-                  width: 50,
-                  height: 50,
+                  width: 40, // 🔥 50 -> 40
+                  height: 40, // 🔥 50 -> 40
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.05),
                     shape: BoxShape.circle,
                   ),
                 ),
               ),
+              // 🔥 FIX: Main content dengan mainAxisSize: min
               Column(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min, // 🔥 TAMBAHKAN INI
                 children: [
+                  // Icon
+                  Container(
+                    padding: const EdgeInsets.all(8), // 🔥 10 -> 8
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.18),
+                      borderRadius: BorderRadius.circular(12), // 🔥 14 -> 12
+                    ),
+                    child: Icon(
+                      item.icon,
+                      color: Colors.white,
+                      size: 20, // 🔥 24 -> 20
+                    ),
+                  ),
+                  const SizedBox(height: 6), // 🔥 10 -> 6
+                  // Title
+                  Text(
+                    item.title,
+                    style: const TextStyle(
+                      fontSize: 10, // 🔥 12 -> 10
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                      height: 1.2, // 🔥 1.3 -> 1.2
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4), // 🔥 6 -> 4
+                  // "Open" indicator
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.18),
-                          borderRadius: BorderRadius.circular(14),
-                        ),
-                        child: Icon(
-                          item.icon,
-                          color: Colors.white,
-                          size: 22,
+                        width: 4, // 🔥 5 -> 4
+                        height: 4, // 🔥 5 -> 4
+                        decoration: const BoxDecoration(
+                          color: Colors.white70,
+                          shape: BoxShape.circle,
                         ),
                       ),
-                      if (item.count > 0)
-                        Container(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 7,
-                            vertical: 3,
-                          ),
-                          decoration: BoxDecoration(
-                            color: item.countColor,
-                            borderRadius: BorderRadius.circular(30),
-                            boxShadow: [
-                              BoxShadow(
-                                color: item.countColor.withValues(alpha: 0.3),
-                                blurRadius: 4,
-                                offset: const Offset(0, 2),
-                              ),
-                            ],
-                          ),
-                          child: Text(
-                            item.count > 99 ? '99+' : '${item.count}',
-                            style: const TextStyle(
-                              fontSize: 9,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
+                      const SizedBox(width: 4), // 🔥 5 -> 4
+                      const Text(
+                        'Open', // 🔥 'Open Menu' -> 'Open'
+                        style: TextStyle(
+                          fontSize: 8, // 🔥 9 -> 8
+                          color: Colors.white70,
                         ),
-                    ],
-                  ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        item.title,
-                        style: const TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.white,
-                          height: 1.3,
-                        ),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 4),
-                      Row(
-                        children: [
-                          Container(
-                            width: 5,
-                            height: 5,
-                            decoration: const BoxDecoration(
-                              color: Colors.white70,
-                              shape: BoxShape.circle,
-                            ),
-                          ),
-                          const SizedBox(width: 5),
-                          const Text(
-                            'Open Menu',
-                            style: TextStyle(
-                              fontSize: 9,
-                              color: Colors.white70,
-                            ),
-                          ),
-                        ],
                       ),
                     ],
                   ),
@@ -364,16 +310,12 @@ class _AnimatedMenuCardState
 class _MenuItem {
   final String title;
   final IconData icon;
-  final int count;
-  final Color countColor;
   final String route;
   final Color color;
 
   _MenuItem({
     required this.title,
     required this.icon,
-    required this.count,
-    required this.countColor,
     required this.route,
     required this.color,
   });

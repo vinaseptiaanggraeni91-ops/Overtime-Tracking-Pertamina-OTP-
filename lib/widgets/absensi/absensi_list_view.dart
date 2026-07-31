@@ -83,6 +83,92 @@ class _AbsensiListViewState extends State<AbsensiListView> {
     });
   }
 
+  // FIX: Helper methods untuk TenggatInfo
+  bool _getButuhPerhatian(TenggatInfo info) {
+    return info.canConfirm || (info.isLate && !info.isExpired);
+  }
+
+  Color _getWarnaIndikator(TenggatInfo info) {
+    if (info.isExpired) return const Color(0xFF9E9E9E);
+    if (info.canConfirm) return Colors.orange;
+    if (info.isLate) return Colors.orange;
+    if (info.isNormal) return const Color(0xFF66BB6A);
+    return Colors.orange;
+  }
+
+  IconData _getIconStatus(TenggatInfo info) {
+    if (info.isExpired) return Icons.timer_off_rounded;
+    if (info.canConfirm) return Icons.warning_amber_rounded;
+    if (info.isLate) return Icons.warning_amber_rounded;
+    if (info.isNormal) return Icons.timer_rounded;
+    return Icons.timer;
+  }
+
+  String _getSisaWaktuSingkat(TenggatInfo info) {
+    if (info.canConfirm) return 'Konfirmasi';
+    if (info.isLate) return 'Terlambat';
+    return 'Normal';
+  }
+
+  Color _getWarnaBackground(TenggatInfo info) {
+    if (info.canConfirm) return const Color(0xFFFFF3E0);
+    if (info.isLate) return const Color(0xFFFFF8E1);
+    if (info.isNormal) return Colors.white;
+    return Colors.white;
+  }
+
+  Color _getWarnaBorder(TenggatInfo info) {
+    if (info.canConfirm) return Colors.orange;
+    if (info.isLate) return Colors.orange.shade300;
+    return Colors.transparent;
+  }
+
+  String _getEmojiStatus(TenggatInfo info) {
+    if (info.isExpired) return '💀';
+    if (info.canConfirm) return '⚠️';
+    if (info.isLate) return '⏰';
+    if (info.isNormal) return '✅';
+    return '📋';
+  }
+
+  String _getAksiLabel(TenggatInfo info) {
+    if (info.isExpired) return 'Expired';
+    if (info.canConfirm) return 'Konfirmasi';
+    if (info.isLate) return 'Segera';
+    return 'Normal';
+  }
+
+  String _getBatasExpiredFormatted(TenggatInfo info) {
+    try {
+      return DateFormat('dd MMM yyyy, HH:mm', 'id_ID').format(info.batasExpired);
+    } catch (e) {
+      return info.batasExpired.toString();
+    }
+  }
+
+  String _getBatasNormalJam(TenggatInfo info) {
+    try {
+      return DateFormat('HH:mm').format(info.batasNormal);
+    } catch (e) {
+      return '--:--';
+    }
+  }
+
+  String _getBatasExpiredJam(TenggatInfo info) {
+    try {
+      return DateFormat('HH:mm').format(info.batasExpired);
+    } catch (e) {
+      return '--:--';
+    }
+  }
+
+  String _getLevelPrioritas(TenggatInfo info) {
+    if (info.isExpired) return 'Kritis';
+    if (info.canConfirm) return 'Tinggi';
+    if (info.isLate) return 'Sedang';
+    return 'Normal';
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<List<OvertimeHistory>>(
@@ -132,7 +218,8 @@ class _AbsensiListViewState extends State<AbsensiListView> {
             // Cek dari cache atau hitung manual
             final tenggat = _tenggatCache[e.id];
             if (tenggat != null) {
-              return tenggat.butuhPerhatian;
+              // FIX: Gunakan helper method
+              return _getButuhPerhatian(tenggat);
             }
             return false;
           }).toList();
@@ -300,6 +387,92 @@ class _AbsensiCardState extends State<_AbsensiCard> {
     super.dispose();
   }
 
+  // FIX: Helper methods untuk TenggatInfo di dalam _AbsensiCardState
+  Color _getWarnaIndikator(TenggatInfo info) {
+    if (info.isExpired) return const Color(0xFF9E9E9E);
+    if (info.canConfirm) return Colors.orange;
+    if (info.isLate) return Colors.orange;
+    if (info.isNormal) return const Color(0xFF66BB6A);
+    return Colors.orange;
+  }
+
+  IconData _getIconStatus(TenggatInfo info) {
+    if (info.isExpired) return Icons.timer_off_rounded;
+    if (info.canConfirm) return Icons.warning_amber_rounded;
+    if (info.isLate) return Icons.warning_amber_rounded;
+    if (info.isNormal) return Icons.timer_rounded;
+    return Icons.timer;
+  }
+
+  String _getSisaWaktuSingkat(TenggatInfo info) {
+    if (info.canConfirm) return 'Konfirmasi';
+    if (info.isLate) return 'Terlambat';
+    return 'Normal';
+  }
+
+  Color _getWarnaBackground(TenggatInfo info) {
+    if (info.canConfirm) return const Color(0xFFFFF3E0);
+    if (info.isLate) return const Color(0xFFFFF8E1);
+    if (info.isNormal) return Colors.white;
+    return Colors.white;
+  }
+
+  bool _getButuhPerhatian(TenggatInfo info) {
+    return info.canConfirm || (info.isLate && !info.isExpired);
+  }
+
+  Color _getWarnaBorder(TenggatInfo info) {
+    if (info.canConfirm) return Colors.orange;
+    if (info.isLate) return Colors.orange.shade300;
+    return Colors.transparent;
+  }
+
+  String _getEmojiStatus(TenggatInfo info) {
+    if (info.isExpired) return '💀';
+    if (info.canConfirm) return '⚠️';
+    if (info.isLate) return '⏰';
+    if (info.isNormal) return '✅';
+    return '📋';
+  }
+
+  String _getAksiLabel(TenggatInfo info) {
+    if (info.isExpired) return 'Expired';
+    if (info.canConfirm) return 'Konfirmasi';
+    if (info.isLate) return 'Segera';
+    return 'Normal';
+  }
+
+  String _getBatasExpiredFormatted(TenggatInfo info) {
+    try {
+      return DateFormat('dd MMM yyyy, HH:mm', 'id_ID').format(info.batasExpired);
+    } catch (e) {
+      return info.batasExpired.toString();
+    }
+  }
+
+  String _getBatasNormalJam(TenggatInfo info) {
+    try {
+      return DateFormat('HH:mm').format(info.batasNormal);
+    } catch (e) {
+      return '--:--';
+    }
+  }
+
+  String _getBatasExpiredJam(TenggatInfo info) {
+    try {
+      return DateFormat('HH:mm').format(info.batasExpired);
+    } catch (e) {
+      return '--:--';
+    }
+  }
+
+  String _getLevelPrioritas(TenggatInfo info) {
+    if (info.isExpired) return 'Kritis';
+    if (info.canConfirm) return 'Tinggi';
+    if (info.isLate) return 'Sedang';
+    return 'Normal';
+  }
+
   @override
   Widget build(BuildContext context) {
     // ✅ Gunakan extension dari OvertimeAbsensiService
@@ -316,14 +489,14 @@ class _AbsensiCardState extends State<_AbsensiCard> {
     IconData statusIcon;
 
     if (_tenggatInfo != null && !sudahAbsen && !isExpired) {
-      // Gunakan warna dari TenggatInfo
-      statusColor = _tenggatInfo!.warnaIndikator;
-      statusIcon = _tenggatInfo!.iconStatus.icon ?? Icons.timer;
+      // FIX: Gunakan helper methods
+      statusColor = _getWarnaIndikator(_tenggatInfo!);
+      statusIcon = _getIconStatus(_tenggatInfo!);
       
       if (_tenggatInfo!.isNormal) {
         statusText = 'Absen Normal';
       } else if (_tenggatInfo!.canConfirm) {
-        statusText = _tenggatInfo!.sisaWaktuSingkat;
+        statusText = _getSisaWaktuSingkat(_tenggatInfo!);
       } else {
         statusText = _tenggatInfo!.labelSingkat;
       }
@@ -356,15 +529,15 @@ class _AbsensiCardState extends State<_AbsensiCard> {
 
     // 🔥 Card background color based on urgency
     final cardColor = _tenggatInfo != null && !sudahAbsen && !isExpired
-        ? _tenggatInfo!.warnaBackground
+        ? _getWarnaBackground(_tenggatInfo!)
         : (widget.highlight ? const Color(0xFFFFF3E0) : Colors.white);
 
     return Card(
       margin: const EdgeInsets.only(bottom: 12),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: _tenggatInfo != null && _tenggatInfo!.butuhPerhatian && !sudahAbsen && !isExpired
-            ? BorderSide(color: _tenggatInfo!.warnaBorder, width: 1.5)
+        side: _tenggatInfo != null && _getButuhPerhatian(_tenggatInfo!) && !sudahAbsen && !isExpired
+            ? BorderSide(color: _getWarnaBorder(_tenggatInfo!), width: 1.5)
             : BorderSide.none,
       ),
       color: cardColor,
@@ -441,7 +614,7 @@ class _AbsensiCardState extends State<_AbsensiCard> {
                       children: [
                         if (_tenggatInfo != null && !sudahAbsen && !isExpired)
                           Text(
-                            _tenggatInfo!.emojiStatus,
+                            _getEmojiStatus(_tenggatInfo!),
                             style: const TextStyle(fontSize: 12),
                           ),
                         if (_tenggatInfo != null && !sudahAbsen && !isExpired)
@@ -473,7 +646,7 @@ class _AbsensiCardState extends State<_AbsensiCard> {
                     value: _tenggatInfo!.progressPercent,
                     backgroundColor: Colors.grey.shade200,
                     valueColor: AlwaysStoppedAnimation<Color>(
-                      _tenggatInfo!.warnaIndikator,
+                      _getWarnaIndikator(_tenggatInfo!),
                     ),
                     minHeight: 6,
                   ),
@@ -484,7 +657,11 @@ class _AbsensiCardState extends State<_AbsensiCard> {
                 // Countdown Text
                 Row(
                   children: [
-                    _tenggatInfo!.iconStatus,
+                    Icon(
+                      _getIconStatus(_tenggatInfo!),
+                      size: 14,
+                      color: _getWarnaIndikator(_tenggatInfo!),
+                    ),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
@@ -494,7 +671,7 @@ class _AbsensiCardState extends State<_AbsensiCard> {
                         style: GoogleFonts.poppins(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: _tenggatInfo!.warnaIndikator,
+                          color: _getWarnaIndikator(_tenggatInfo!),
                         ),
                       ),
                     ),
@@ -502,15 +679,15 @@ class _AbsensiCardState extends State<_AbsensiCard> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: _tenggatInfo!.warnaIndikator.withValues(alpha: 0.1),
+                        color: _getWarnaIndikator(_tenggatInfo!).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        _tenggatInfo!.aksiLabel,
+                        _getAksiLabel(_tenggatInfo!),
                         style: GoogleFonts.poppins(
                           fontSize: 10,
                           fontWeight: FontWeight.w700,
-                          color: _tenggatInfo!.warnaIndikator,
+                          color: _getWarnaIndikator(_tenggatInfo!),
                         ),
                       ),
                     ),
@@ -521,7 +698,7 @@ class _AbsensiCardState extends State<_AbsensiCard> {
                 if (_tenggatInfo!.isLate && _tenggatInfo!.canConfirm) ...[
                   const SizedBox(height: 4),
                   Text(
-                    'Batas konfirmasi: ${_tenggatInfo!.batasExpiredFormatted}',
+                    'Batas konfirmasi: ${_getBatasExpiredFormatted(_tenggatInfo!)}',
                     style: GoogleFonts.poppins(
                       fontSize: 10,
                       color: Colors.grey.shade500,
@@ -551,14 +728,14 @@ class _AbsensiCardState extends State<_AbsensiCard> {
                     _chip(
                       _tenggatInfo!.isNormal ? Icons.timer : Icons.warning_amber,
                       _tenggatInfo!.isNormal
-                          ? 'Batas: ${_tenggatInfo!.batasNormalJam}'
-                          : 'Exp: ${_tenggatInfo!.batasExpiredJam}',
-                      color: _tenggatInfo!.warnaIndikator,
+                          ? 'Batas: ${_getBatasNormalJam(_tenggatInfo!)}'
+                          : 'Exp: ${_getBatasExpiredJam(_tenggatInfo!)}',
+                      color: _getWarnaIndikator(_tenggatInfo!),
                     ),
                     _chip(
                       Icons.speed,
-                      _tenggatInfo!.levelPrioritas,
-                      color: _tenggatInfo!.warnaIndikator,
+                      _getLevelPrioritas(_tenggatInfo!),
+                      color: _getWarnaIndikator(_tenggatInfo!),
                     ),
                   ],
                   

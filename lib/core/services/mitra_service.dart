@@ -1,4 +1,9 @@
 // lib/core/services/mitra_service.dart
+// 🔥 FINAL VERSION V9 - NETWORK MONITORING + PERBAIKAN TOTAL JAM, KUOTA & PENDAPATAN
+// 🔥 EXCLUDE DIBATALKAN & DITOLAK DARI PERHITUNGAN
+// 🔥 FILTER DIBATALKAN di client-side
+// 🔥 totalLembur = HANYA disetujui + selesai
+// 🔥 FIX: _getTodayOvertime TANPA whereIn (hindari composite index error)
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -6,6 +11,7 @@ import 'package:flutter/material.dart';
 import 'package:logger/logger.dart';
 import 'package:intl/intl.dart';
 import 'notification_service.dart';
+import '/core/services/network_service.dart'; // 🔥 NETWORK SERVICE
 
 var logger = Logger(
   printer: PrettyPrinter(
@@ -22,6 +28,9 @@ class MitraService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final NotificationService _notifService = NotificationService();
+  
+  // 🔥 NETWORK SERVICE
+  final NetworkService _networkService = NetworkService();
 
   // 📦 KONSTANTA NAMA COLLECTION
   static const String collectionUsers = 'users';
@@ -30,11 +39,106 @@ class MitraService {
   static const String collectionAbsensi = 'absensi';
   static const String collectionSettings = 'settings';
   static const String collectionConfirmations = 'mitra_confirmations';
-  static const String collectionOvertimeSchedules = 'overtime_schedules';
-  static const String collectionOvertimeHistory = 'overtime_history';
-  static const String collectionAttendance = 'attendance';
 
+  // 💰 DEFAULT RATES (fallback jika settings tidak ada)
+  static const double defaultBaseSalary = 3000000.0;
+  static const double defaultJamKerjaPerBulan = 173.0;
+  static const double defaultRatePerHour = defaultBaseSalary / defaultJamKerjaPerBulan;
+  static const double defaultMaxKuota = 60.0;
+  static const double defaultWeekdayFirstHourMultiplier = 1.5;
+  static const double defaultWeekdayNextHoursMultiplier = 2.0;
+  static const double defaultHolidayFirst8HoursMultiplier = 2.0;
+  static const double defaultHolidayNinthHourMultiplier = 3.0;
+  static const double defaultHolidayTenthPlusMultiplier = 4.0;
+
+  // 🔥 STATUS YANG DIABAIKAN DALAM PERHITUNGAN
+  static const List<String> _excludedStatuses = ['dibatalkan', 'ditolak', 'rejected', 'draft'];
+
+  // 🔥 STATUS VALID UNTUK TODAY OVERTIME
+  static const List<String> _validTodayStatuses = [
+    'disetujui', 'approved', 'check_in', 'check_out', 'selesai'
+  ];
+
+  // ═══════════════════════════════════════════════════════
+  // 🔥 NETWORK CHECK HELPERS
+  // ═══════════════════════════════════════════════════════
+
+  bool _checkConnection(String operationName) {
+    if (!_networkService.isOnline) {
+      logger.w('⚠️ [$operationName] Dibatalkan - Tidak ada koneksi internet');
+      return false;
+    }
+    return true;
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 📅 DATE HELPERS
+  // ═══════════════════════════════════════════════════════
+
+  DateTime getStartOfCurrentMonth() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, 1);
+  }
+
+  DateTime getEndOfCurrentMonth() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month + 1, 0, 23, 59, 59, 999);
+  }
+
+  DateTime getStartOfLastMonth() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month - 1, 1);
+  }
+
+  DateTime getEndOfLastMonth() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, 0, 23, 59, 59, 999);
+  }
+
+  DateTime getStartOfToday() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day);
+  }
+
+  DateTime getEndOfToday() {
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+  }
+
+  String getCurrentYearMonth() => DateFormat('yyyy-MM').format(DateTime.now());
+
+  String getLastMonthYearMonth() {
+    final lastMonth = DateTime.now().subtract(const Duration(days: 30));
+    return DateFormat('yyyy-MM').format(lastMonth);
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 🔥 HELPER: Cek status dibatalkan/ditolak (client-side)
+  // ═══════════════════════════════════════════════════════
+
+  bool _isExcluded(Map<String, dynamic> data) {
+    final status = (data['status'] as String? ?? '').toLowerCase();
+    return _excludedStatuses.contains(status);
+  }
+
+  bool _isDibatalkan(Map<String, dynamic> data) {
+    final status = (data['status'] as String? ?? '').toLowerCase();
+    return status == 'dibatalkan';
+  }
+
+  bool _isDitolak(Map<String, dynamic> data) {
+    final status = (data['status'] as String? ?? '').toLowerCase();
+    return status == 'ditolak' || status == 'rejected';
+  }
+
+  bool _isValidTodayStatus(String? status) {
+    return _validTodayStatuses.contains(status?.toLowerCase());
+  }
+
+  // ═══════════════════════════════════════════════════════
   // 🎨 HELPER METHODS
+  // ═══════════════════════════════════════════════════════
+
   String formatNumber(int number) {
     if (number >= 1000000) return '${(number / 1000000).toStringAsFixed(1)}M';
     if (number >= 1000) return '${(number / 1000).toStringAsFixed(1)}K';
@@ -75,6 +179,8 @@ class MitraService {
       case 'ditolak':
       case 'rejected':
         return Colors.red;
+      case 'dibatalkan':
+        return Colors.red.shade300;
       case 'check_in':
         return Colors.blue;
       case 'check_out':
@@ -119,94 +225,194 @@ class MitraService {
     return NumberFormat.currency(locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0).format(amount);
   }
 
-  // ==================== GREETING & PROFILE ====================
-  Future<String> getGreetingWithNameAndEmoji() async {
-    final user = _auth.currentUser;
-    if (user == null) return '${getGreeting()}! 👋';
-    final profile = await getUserProfile();
-    final name = profile['nama_lengkap'] ?? user.displayName ?? user.email?.split('@')[0] ?? 'Mitra';
-    return '${getGreeting()}, $name! 👋';
-  }
-
-  Future<String> getGreetingMotivation() async {
-    final hour = DateTime.now().hour;
-    if (hour < 12) return 'Semoga pekerjaanmu lancar hari ini! ☀️';
-    if (hour < 15) return 'Tetap semangat bekerja! 💪';
-    if (hour < 18) return 'Sore yang produktif, semoga cepat selesai. 🌆';
-    return 'Jaga kesehatan, istirahat yang cukup. 🌙';
-  }
-
-  Future<Map<String, dynamic>?> getCurrentUserProfile() async {
-    try {
-      final user = _auth.currentUser;
-      if (user == null) return null;
-      final doc = await _firestore.collection(collectionUsers).doc(user.uid).get();
-      if (doc.exists) {
-        final data = doc.data()!;
-        return {
-          'nama_lengkap': data['nama_lengkap'],
-          'role': data['role'],
-          'photo_url': data['photo_url'],
-          'email': data['email'],
-        };
-      }
-      return null;
-    } catch (_) {
-      return null;
+  String formatRupiahCompact(double amount) {
+    if (amount >= 1000000) {
+      final juta = amount / 1000000;
+      final decimal = amount % 1000000 == 0 ? 0 : 1;
+      return 'Rp ${juta.toStringAsFixed(decimal)} Jt';
+    } else if (amount >= 1000) {
+      final ribu = amount / 1000;
+      return 'Rp ${ribu.toStringAsFixed(0)} Rb';
+    } else {
+      return 'Rp ${amount.toStringAsFixed(0)}';
     }
   }
 
-  // ==================== NOTIFICATIONS (DELEGASI) ====================
-  Future<List<Map<String, dynamic>>> getNotifications() async {
-    final user = _auth.currentUser;
-    if (user == null) return [];
-    return _notifService.getNotificationsOnce(user.uid);
+  // ═══════════════════════════════════════════════════════
+  // 💰 KALKULASI INCOME - SUPER LENGKAP
+  // ═══════════════════════════════════════════════════════
+
+  double calculateIncome(double hours, {Map<String, dynamic>? settings, bool isHoliday = false}) {
+    if (hours <= 0) return 0;
+
+    final rate = (settings?['rate_per_hour'] as num?)?.toDouble() ?? defaultRatePerHour;
+
+    if (isHoliday) {
+      final m1 = (settings?['holiday_rate']?['first_8_hours_multiplier'] as num?)?.toDouble() 
+          ?? defaultHolidayFirst8HoursMultiplier;
+      final m2 = (settings?['holiday_rate']?['ninth_hour_multiplier'] as num?)?.toDouble() 
+          ?? defaultHolidayNinthHourMultiplier;
+      final m3 = (settings?['holiday_rate']?['tenth_plus_multiplier'] as num?)?.toDouble() 
+          ?? defaultHolidayTenthPlusMultiplier;
+
+      if (hours <= 8) return hours * rate * m1;
+      if (hours <= 9) return (8 * rate * m1) + ((hours - 8) * rate * m2);
+      return (8 * rate * m1) + (1 * rate * m2) + ((hours - 9) * rate * m3);
+    } else {
+      final m1 = (settings?['weekday_rate']?['first_hour_multiplier'] as num?)?.toDouble() 
+          ?? defaultWeekdayFirstHourMultiplier;
+      final m2 = (settings?['weekday_rate']?['next_hours_multiplier'] as num?)?.toDouble() 
+          ?? defaultWeekdayNextHoursMultiplier;
+
+      if (hours <= 1) return hours * rate * m1;
+      return (1 * rate * m1) + ((hours - 1) * rate * m2);
+    }
   }
 
-  Future<void> markAllNotificationsRead() async {
-    final user = _auth.currentUser;
-    if (user == null) return;
-    await _notifService.markAllAsRead(user.uid);
+  double estimateIncomeFromSchedule(String jamMulai, String jamSelesai, {Map<String, dynamic>? settings, bool isHoliday = false}) {
+    final hours = calculateHoursFromSchedule(jamMulai, jamSelesai);
+    return calculateIncome(hours, settings: settings, isHoliday: isHoliday);
   }
 
-  // 📊 LOAD DASHBOARD DATA (REFACTORED)
+  double calculateHoursFromSchedule(String jamMulai, String jamSelesai) {
+    try {
+      final partsMulai = jamMulai.split(':');
+      final partsSelesai = jamSelesai.split(':');
+
+      if (partsMulai.length != 2 || partsSelesai.length != 2) return 0;
+
+      final mulaiMinutes = (int.tryParse(partsMulai[0]) ?? 0) * 60 + (int.tryParse(partsMulai[1]) ?? 0);
+      var selesaiMinutes = (int.tryParse(partsSelesai[0]) ?? 0) * 60 + (int.tryParse(partsSelesai[1]) ?? 0);
+
+      if (selesaiMinutes <= mulaiMinutes) selesaiMinutes += 24 * 60;
+
+      return (selesaiMinutes - mulaiMinutes) / 60.0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  String formatDuration(String jamMulai, String jamSelesai) {
+    final hours = calculateHoursFromSchedule(jamMulai, jamSelesai);
+    if (hours <= 0) return '';
+    
+    final h = hours.floor();
+    final m = ((hours - h) * 60).round();
+    
+    if (h > 0 && m > 0) return '${h}j ${m}m';
+    if (h > 0) return '${h}j';
+    if (m > 0) return '${m}m';
+    return '';
+  }
+
+  double _parseDouble(dynamic val) {
+    if (val == null) return 0.0;
+    if (val is double) return val;
+    if (val is int) return val.toDouble();
+    if (val is String) return double.tryParse(val) ?? 0.0;
+    return 0.0;
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 📊 LOAD DASHBOARD DATA - FULLY OPTIMIZED
+  // ═══════════════════════════════════════════════════════
+
   Future<MitraDashboardData> loadDashboardData() async {
+    // 🔥 CEK KONEKSI
+    if (!_checkConnection('loadDashboardData')) {
+      logger.w('⚠️ loadDashboardData: OFFLINE - Mengembalikan data kosong');
+      return MitraDashboardData(
+        userData: {},
+        userName: 'Offline',
+        fungsi: 'unknown',
+        todayOvertime: null,
+        todayAbsensi: null,
+        isCheckedIn: false,
+        isCheckedOut: false,
+        lastCheckIn: null,
+        lastCheckOut: null,
+        workDuration: null,
+        allLembur: [],
+        schedules: [],
+        pendingRequests: [],
+        stats: {},
+        overtimeSettings: {},
+        unreadNotifications: 0,
+        bulanStats: _BulanStats.empty(),
+        bulanLaluStats: _BulanStats.empty(),
+      );
+    }
+
     final user = _auth.currentUser;
     if (user == null) throw Exception('User tidak login');
 
     final userId = user.uid;
-    final now = DateTime.now();
-    final tahunBulan = DateFormat('yyyy-MM').format(now);
 
-    final userData = await _getUserData(userId);
-    final lemburData = await _getLemburMitraData(userId, now, tahunBulan);
-    final absensiData = await _getAbsensiToday(userId, now);
-    final pendingData = await _getPendingRequests(userId, now);
-    final additionalData = await _getAdditionalData(userId);
-    final schedules = _buildSchedules(lemburData.allLembur, now);
-    final stats = _calculateStats(lemburData);
+    logger.i('🚀 Memulai load dashboard data untuk user: $userId');
+    logger.i('📅 Filter BULAN INI: ${DateFormat('dd MMM yyyy').format(getStartOfCurrentMonth())} - ${DateFormat('dd MMM yyyy').format(getEndOfCurrentMonth())}');
+    logger.i('⚠️ Status dibatalkan & ditolak akan DIIGNORE dalam perhitungan');
 
-    return MitraDashboardData(
-      userData: userData,
-      userName: userData['nama_lengkap']?.toString() ?? user.email?.split('@')[0] ?? 'Mitra',
-      fungsi: userData['fungsi']?.toString() ?? 'operation',
-      todayOvertime: lemburData.todayOvertime,
-      todayAbsensi: absensiData.doc,
-      isCheckedIn: absensiData.isCheckedIn,
-      isCheckedOut: absensiData.isCheckedOut,
-      lastCheckIn: absensiData.checkInTime,
-      lastCheckOut: absensiData.checkOutTime,
-      workDuration: absensiData.workDuration,
-      allLembur: lemburData.allLembur,
-      schedules: schedules,
-      pendingRequests: pendingData,
-      stats: stats,
-      overtimeSettings: additionalData.settings,
-      unreadNotifications: additionalData.unreadCount,
-    );
+    try {
+      final results = await Future.wait([
+        _getUserData(userId),
+        _getLemburBulanIni(userId),
+        _getLemburBulanLalu(userId),
+        _getTodayOvertime(userId),
+        _getAbsensiToday(userId, DateTime.now()),
+        _getPendingRequests(userId, DateTime.now()),
+        _getAdditionalData(userId),
+        _getAllLemburData(userId),
+      ]);
+
+      final userData = results[0] as Map<String, dynamic>;
+      final lemburBulanIni = results[1] as _BulanStats;
+      final lemburBulanLalu = results[2] as _BulanStats;
+      final todayOvertime = results[3] as Map<String, dynamic>?;
+      final absensiData = results[4] as _AbsensiResult;
+      final pendingData = results[5] as List<Map<String, dynamic>>;
+      final additionalData = results[6] as _AdditionalData;
+      final allLemburData = results[7] as List<Map<String, dynamic>>;
+
+      final mergedStats = _mergeStats(lemburBulanIni, lemburBulanLalu);
+      final schedules = _buildSchedules(allLemburData, DateTime.now());
+
+      logger.i('✅ DASHBOARD DATA LOADED SUCCESSFULLY');
+      logger.i('📊 STATS BULAN INI: totalLembur=${lemburBulanIni.totalLembur}, totalJam=${lemburBulanIni.totalJam.toStringAsFixed(2)}, '
+          'income=${formatCurrency(lemburBulanIni.totalIncome)}, sisaKuota=${lemburBulanIni.sisaKuota.toStringAsFixed(2)}');
+      logger.i('📊 STATUS: pending=${lemburBulanIni.pending}, disetujui=${lemburBulanIni.disetujui}, '
+          'ditolak=${lemburBulanIni.ditolak}, selesai=${lemburBulanIni.selesai}');
+      logger.i('🔍 TODAY OVERTIME: ${todayOvertime != null ? "ADA (${todayOvertime!['id']}, status=${todayOvertime!['status']})" : "KOSONG - Tidak ada lembur aktif hari ini"}');
+
+      return MitraDashboardData(
+        userData: userData,
+        userName: userData['nama_lengkap']?.toString() ?? user.email?.split('@')[0] ?? 'Mitra',
+        fungsi: userData['fungsi']?.toString() ?? 'operation',
+        todayOvertime: todayOvertime,
+        todayAbsensi: absensiData.doc,
+        isCheckedIn: absensiData.isCheckedIn,
+        isCheckedOut: absensiData.isCheckedOut,
+        lastCheckIn: absensiData.checkInTime,
+        lastCheckOut: absensiData.checkOutTime,
+        workDuration: absensiData.workDuration,
+        allLembur: allLemburData,
+        schedules: schedules,
+        pendingRequests: pendingData,
+        stats: mergedStats,
+        overtimeSettings: additionalData.settings,
+        unreadNotifications: additionalData.unreadCount,
+        bulanStats: lemburBulanIni,
+        bulanLaluStats: lemburBulanLalu,
+      );
+    } catch (e, stackTrace) {
+      logger.e('❌ Gagal load dashboard data', error: e, stackTrace: stackTrace);
+      rethrow;
+    }
   }
 
+  // ═══════════════════════════════════════════════════════
   // 🔍 PRIVATE GETTER METHODS
+  // ═══════════════════════════════════════════════════════
+
   Future<Map<String, dynamic>> _getUserData(String userId) async {
     try {
       final doc = await _firestore.collection(collectionUsers).doc(userId).get();
@@ -224,243 +430,280 @@ class MitraService {
     return _getUserData(user.uid);
   }
 
-  // ==================== ✅ METHOD-METHOD BARU ====================
-  
-  /// Mendapatkan jadwal lembur yang akan datang (minggu ini)
-  Future<List<Map<String, dynamic>>> getUpcomingSchedules() async {
+  // ═══════════════════════════════════════════════════════
+  // GET LEMBUR BULAN INI & BULAN LALU
+  // ═══════════════════════════════════════════════════════
+
+  Future<_BulanStats> _getLemburBulanIni(String userId) async {
     try {
-      final user = _auth.currentUser;
-      if (user == null) return [];
-      
-      final now = DateTime.now();
-      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
-      final endOfWeek = startOfWeek.add(const Duration(days: 7));
-      
+      final startOfMonth = getStartOfCurrentMonth();
+      final endOfMonth = getEndOfCurrentMonth();
+
       final snapshot = await _firestore
           .collection(collectionLemburMitra)
-          .where('mitra_id', isEqualTo: user.uid)
-          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfWeek))
-          .where('tanggal', isLessThanOrEqualTo: Timestamp.fromDate(endOfWeek))
-          .orderBy('tanggal', descending: false)
+          .where('mitra_id', isEqualTo: userId)
+          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
+          .where('tanggal', isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth))
           .get();
+
+      logger.i('📊 Lembur bulan ini (SEBELUM filter): ${snapshot.docs.length} data');
+
+      final validDocs = snapshot.docs.where((doc) => !_isExcluded(doc.data())).toList();
       
-      return snapshot.docs.map((doc) {
+      logger.i('📊 Lembur bulan ini (SETELAH filter): ${validDocs.length} data');
+      
+      for (var doc in validDocs) {
         final data = doc.data();
-        final date = (data['tanggal'] as Timestamp).toDate();
-        return {
-          'id': doc.id,
-          'date': DateFormat('dd MMM yyyy', 'id_ID').format(date),
-          'jam_mulai': data['jam_mulai']?.toString() ?? '--:--',
-          'jam_selesai': data['jam_selesai']?.toString() ?? '--:--',
-          'description': data['alasan']?.toString() ?? data['keterangan']?.toString() ?? 'Lembur Rutin',
-          'status': data['status']?.toString() ?? 'scheduled',
-          'location': data['lokasi'] is Map ? data['lokasi']['pilihan']?.toString() ?? 'kantor' : 'kantor',
-        };
-      }).toList();
+        final status = data['status']?.toString() ?? 'unknown';
+        logger.d('  - ${doc.id}: status=$status');
+      }
+
+      return _calculateBulanStats(validDocs);
     } catch (e) {
-      logger.e('Error getting upcoming schedules: $e');
-      return [];
+      logger.e('❌ Gagal ambil lembur bulan ini: $e');
+      return _BulanStats.empty();
     }
   }
 
-  /// Mendapatkan riwayat lembur terbaru
-  Future<List<Map<String, dynamic>>> getRecentOvertimeHistory({int limit = 5}) async {
+  Future<_BulanStats> _getLemburBulanLalu(String userId) async {
     try {
-      final user = _auth.currentUser;
-      if (user == null) return [];
-      
+      final startOfLastMonth = getStartOfLastMonth();
+      final endOfLastMonth = getEndOfLastMonth();
+
       final snapshot = await _firestore
           .collection(collectionLemburMitra)
-          .where('mitra_id', isEqualTo: user.uid)
-          .orderBy('tanggal', descending: true)
-          .limit(limit)
+          .where('mitra_id', isEqualTo: userId)
+          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfLastMonth))
+          .where('tanggal', isLessThanOrEqualTo: Timestamp.fromDate(endOfLastMonth))
           .get();
+
+      final validDocs = snapshot.docs.where((doc) => !_isExcluded(doc.data())).toList();
       
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        final date = (data['tanggal'] as Timestamp?)?.toDate() ?? DateTime.now();
-        return {
-          'id': doc.id,
-          'date': DateFormat('dd MMM yyyy', 'id_ID').format(date),
-          'jam_mulai': data['jam_mulai']?.toString() ?? '--:--',
-          'jam_selesai': data['jam_selesai']?.toString() ?? '--:--',
-          'income': (data['income_amount'] ?? data['actual_income'] ?? 0).toDouble(),
-          'status': data['status']?.toString() ?? 'pending',
-          'description': data['alasan']?.toString() ?? data['keterangan']?.toString() ?? '',
-        };
-      }).toList();
+      return _calculateBulanStats(validDocs);
     } catch (e) {
-      logger.e('Error getting recent overtime history: $e');
-      return [];
+      logger.e('❌ Gagal ambil lembur bulan lalu: $e');
+      return _BulanStats.empty();
     }
   }
 
-  /// Mendapatkan status kehadiran hari ini
-  Future<Map<String, dynamic>?> getTodayAttendance() async {
+  // ═══════════════════════════════════════════════════════
+  // 🔥🔥🔥 PERBAIKAN UTAMA: _calculateBulanStats
+  // totalLembur = HANYA disetujui + selesai
+  // ═══════════════════════════════════════════════════════
+
+  _BulanStats _calculateBulanStats(List<QueryDocumentSnapshot> docs) {
+    int totalLemburKeseluruhan = 0;
+    int totalLemburSelesai = 0;
+    double totalJam = 0;
+    int pending = 0;
+    int disetujui = 0;
+    int ditolak = 0;
+    int selesai = 0;
+    double totalIncome = 0;
+
+    final statusCounts = <String, int>{};
+
+    for (var doc in docs) {
+      final data = doc.data() as Map<String, dynamic>? ?? {};
+      final status = (data['status'] as String? ?? 'pending').toLowerCase();
+      
+      if (_excludedStatuses.contains(status)) continue;
+
+      statusCounts[status] = (statusCounts[status] ?? 0) + 1;
+      totalLemburKeseluruhan++;
+
+      switch (status) {
+        case 'pending':
+          pending++;
+          break;
+          
+        case 'disetujui':
+        case 'approved':
+          disetujui++;
+          totalLemburSelesai++;
+          final jamDisetujui = _parseDouble(data['actual_total_jam'] ?? 0);
+          if (jamDisetujui > 0) {
+            totalJam += jamDisetujui;
+            final inc = _parseDouble(data['actual_income'] ?? data['income_amount'] ?? 0);
+            if (inc > 0) totalIncome += inc;
+          }
+          break;
+          
+        case 'selesai':
+          selesai++;
+          totalLemburSelesai++;
+          
+          double jamAktual = 0;
+          final jamFields = ['actual_total_jam', 'total_jam_desimal', 'total_jam_real', 'total_jam_aktual', 'total_jam'];
+          for (String field in jamFields) {
+            final val = _parseDouble(data[field] ?? 0);
+            if (val > 0) { jamAktual = val; break; }
+          }
+          if (jamAktual == 0) {
+            final jamMulai = data['jam_mulai']?.toString() ?? '';
+            final jamSelesai = data['jam_selesai']?.toString() ?? '';
+            if (jamMulai.isNotEmpty && jamSelesai.isNotEmpty) {
+              jamAktual = calculateHoursFromSchedule(jamMulai, jamSelesai);
+            }
+          }
+          totalJam += jamAktual;
+          
+          double income = 0;
+          final incomeFields = ['actual_income', 'income_amount', 'income', 'pendapatan_actual', 'estimasi_biaya_per_mitra', 'estimasi_biaya'];
+          for (String field in incomeFields) {
+            final val = _parseDouble(data[field] ?? 0);
+            if (val > 0) { income = val; break; }
+          }
+          if (income == 0 && jamAktual > 0) {
+            final isHoliday = (data['jenis_lembur']?.toString() ?? '') == 'hari_libur';
+            final ratePerHour = _parseDouble(data['rate_per_hour'] ?? 0);
+            if (ratePerHour > 0) {
+              income = jamAktual * ratePerHour;
+            } else {
+              income = calculateIncome(jamAktual, isHoliday: isHoliday);
+            }
+          }
+          totalIncome += income;
+          
+          logger.d('  ✅ SELESAI: ${doc.id} | jam=$jamAktual | income=$income');
+          break;
+          
+        case 'check_in':
+        case 'check_out':
+          pending++;
+          break;
+          
+        default:
+          pending++;
+          break;
+      }
+    }
+
+    logger.d('📊 Status counts: $statusCounts');
+    logger.i('📊 HASIL: totalKeseluruhan=$totalLemburKeseluruhan | totalSelesai=$totalLemburSelesai | jam=$totalJam | income=${formatCurrency(totalIncome)} | '
+        'pending=$pending | disetujui=$disetujui | selesai=$selesai | ditolak=$ditolak');
+
+    final double sisaKuota = (defaultMaxKuota - totalJam).clamp(0.0, defaultMaxKuota);
+
+    return _BulanStats(
+      totalLembur: totalLemburSelesai,
+      totalJam: totalJam,
+      pending: pending,
+      disetujui: disetujui,
+      ditolak: ditolak,
+      selesai: selesai,
+      totalIncome: totalIncome,
+      sisaKuota: sisaKuota,
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // _mergeStats
+  // ═══════════════════════════════════════════════════════
+
+  Map<String, dynamic> _mergeStats(_BulanStats bulanIni, _BulanStats bulanLalu) {
+    final double trendLembur = bulanLalu.totalLembur > 0
+        ? ((bulanIni.totalLembur - bulanLalu.totalLembur) / bulanLalu.totalLembur) * 100
+        : 0.0;
+
+    final double trendJam = bulanLalu.totalJam > 0
+        ? ((bulanIni.totalJam - bulanLalu.totalJam) / bulanLalu.totalJam) * 100
+        : 0.0;
+
+    final double trendIncome = bulanLalu.totalIncome > 0
+        ? ((bulanIni.totalIncome - bulanLalu.totalIncome) / bulanLalu.totalIncome) * 100
+        : 0.0;
+
+    return {
+      'trendLembur': trendLembur,
+      'trendJam': trendJam,
+      'trendIncome': trendIncome,
+      'bulanIni': getCurrentYearMonth(),
+      'bulanLalu': getLastMonthYearMonth(),
+    };
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 🔥🔥🔥 PERBAIKAN KRUSIAL: _getTodayOvertime
+  // TANPA whereIn('status', ...) untuk menghindari error composite index
+  // Filter status dilakukan secara manual di kode Dart
+  // ═══════════════════════════════════════════════════════
+
+  Future<Map<String, dynamic>?> _getTodayOvertime(String userId) async {
     try {
-      final user = _auth.currentUser;
-      if (user == null) return null;
-      
-      final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day);
-      final todayEnd = todayStart.add(const Duration(days: 1));
-      
+      final startOfToday = getStartOfToday();
+      final endOfToday = getEndOfToday();
+
+      logger.d('🔍 Mencari lembur hari ini untuk user: $userId');
+      logger.d('📅 Range: ${DateFormat('dd MMM yyyy HH:mm').format(startOfToday)} - ${DateFormat('dd MMM yyyy HH:mm').format(endOfToday)}');
+
       final snapshot = await _firestore
-          .collection(collectionAbsensi)
-          .where('user_id', isEqualTo: user.uid)
-          .where('waktu', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
-          .where('waktu', isLessThan: Timestamp.fromDate(todayEnd))
-          .limit(1)
+          .collection(collectionLemburMitra)
+          .where('mitra_id', isEqualTo: userId)
+          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfToday))
+          .where('tanggal', isLessThanOrEqualTo: Timestamp.fromDate(endOfToday))
           .get();
-      
+
+      logger.d('📊 Ditemukan ${snapshot.docs.length} dokumen lembur hari ini');
+
       if (snapshot.docs.isEmpty) {
-        return {
-          'is_checked_in': false,
-          'check_in_time': '--:--',
-          'working_hours': '0',
-          'status': 'Belum Absen',
-        };
+        logger.d('❌ Tidak ada lembur sama sekali hari ini untuk $userId');
+        return null;
       }
-      
-      final data = snapshot.docs.first.data();
-      final checkInTime = (data['waktu'] as Timestamp?)?.toDate();
-      final checkOutTime = (data['waktu_checkout'] as Timestamp?)?.toDate();
-      
-      double workingHours = 0;
-      if (checkInTime != null) {
-        final endTime = checkOutTime ?? DateTime.now();
-        workingHours = endTime.difference(checkInTime).inMinutes / 60.0;
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final status = (data['status'] as String? ?? 'unknown');
+        logger.d('  📄 ${doc.id}: status="$status" | mitra_id=${data['mitra_id']} | tanggal=${data['tanggal']}');
       }
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final status = (data['status'] as String? ?? '').toLowerCase().trim();
+
+        if (_excludedStatuses.contains(status)) {
+          logger.d('  ⛔ ${doc.id}: status "$status" excluded (dibatalkan/ditolak)');
+          continue;
+        }
+
+        if (_validTodayStatuses.contains(status)) {
+          logger.i('✅ Lembur valid ditemukan: ${doc.id} (status: $status)');
+          return _normalizeLemburData(doc);
+        } else {
+          logger.d('  ❓ ${doc.id}: status "$status" tidak termasuk dalam valid status list');
+        }
+      }
+
+      final allStatuses = snapshot.docs.map((d) => d.data()['status']?.toString() ?? 'null').toList();
+      logger.w('❌ Tidak ada lembur dengan status valid. Status yang ditemukan: $allStatuses');
+      logger.w('   Status valid yang dicari: $_validTodayStatuses');
       
-      return {
-        'is_checked_in': checkInTime != null,
-        'check_in_time': checkInTime != null 
-            ? DateFormat('HH:mm').format(checkInTime) 
-            : '--:--',
-        'working_hours': workingHours.toStringAsFixed(1),
-        'status': checkOutTime != null ? 'Selesai' : (checkInTime != null ? 'Sedang Bekerja' : 'Belum Absen'),
-      };
+      return null;
     } catch (e) {
-      logger.e('Error getting today attendance: $e');
+      logger.e('❌ Gagal ambil overtime hari ini: $e');
       return null;
     }
   }
 
-  /// Mendapatkan data performa untuk grafik
-  Future<List<Map<String, dynamic>>> getPerformanceData({int months = 6}) async {
+  Future<List<Map<String, dynamic>>> _getAllLemburData(String userId) async {
     try {
-      final user = _auth.currentUser;
-      if (user == null) return [];
-      
-      final now = DateTime.now();
-      final startDate = DateTime(now.year, now.month - months + 1, 1);
-      
-      final snapshot = await _firestore
-          .collection(collectionLemburMitra)
-          .where('mitra_id', isEqualTo: user.uid)
-          .where('status', isEqualTo: 'selesai')
-          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startDate))
-          .where('tanggal', isLessThanOrEqualTo: Timestamp.fromDate(now))
-          .get();
-      
-      // Group by month
-      final Map<String, double> monthlyData = {};
-      for (var doc in snapshot.docs) {
-        final data = doc.data();
-        final date = (data['tanggal'] as Timestamp).toDate();
-        final monthKey = DateFormat('yyyy-MM').format(date);
-        final hours = (data['actual_total_jam'] ?? 0).toDouble();
-        
-        monthlyData[monthKey] = (monthlyData[monthKey] ?? 0) + hours;
-      }
-      
-      // Fill all months in range
-      final result = <Map<String, dynamic>>[];
-      for (int i = months - 1; i >= 0; i--) {
-        final date = DateTime(now.year, now.month - i, 1);
-        final monthKey = DateFormat('yyyy-MM').format(date);
-        result.add({
-          'month': DateFormat('MMM', 'id_ID').format(date),
-          'year': date.year,
-          'hours': (monthlyData[monthKey] ?? 0.0).toDouble(),
-        });
-      }
-      
-      return result;
-    } catch (e) {
-      logger.e('Error getting performance data: $e');
-      return [];
-    }
-  }
+      final startOfMonth = getStartOfCurrentMonth();
 
-  Future<_LemburMitraResult> _getLemburMitraData(
-    String userId,
-    DateTime now,
-    String tahunBulan,
-  ) async {
-    try {
       final snapshot = await _firestore
           .collection(collectionLemburMitra)
           .where('mitra_id', isEqualTo: userId)
+          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
           .orderBy('tanggal', descending: true)
           .limit(50)
           .get();
 
-      final allLembur = <Map<String, dynamic>>[];
-      Map<String, dynamic>? todayOvertime;
-      int pending = 0, approved = 0, rejected = 0, selesai = 0;
-      double totalJam = 0, totalIncome = 0;
-
-      for (var doc in snapshot.docs) {
-        final d = _normalizeLemburData(doc);
-        allLembur.add(d);
-
-        final status = (d['status'] as String? ?? 'pending').toLowerCase();
-        final tanggal = d['tanggal_date'] as DateTime?;
-
-        switch (status) {
-          case 'pending': pending++; break;
-          case 'disetujui':
-          case 'approved': approved++; break;
-          case 'ditolak':
-          case 'rejected': rejected++; break;
-          case 'selesai': selesai++; break;
-        }
-
-        if (tanggal != null &&
-            DateUtils.isSameDay(tanggal, now) &&
-            (status == 'disetujui' || status == 'approved')) {
-          todayOvertime = d;
-        }
-
-        if (status == 'selesai' && d['tahun_bulan'] == tahunBulan) {
-          totalJam += (d['actual_total_jam'] as num?)?.toDouble() ?? 0;
-          totalIncome += (d['income_amount'] as num?)?.toDouble() ?? 0;
-        }
-      }
-
-      return _LemburMitraResult(
-        allLembur: allLembur,
-        todayOvertime: todayOvertime,
-        pending: pending,
-        approved: approved,
-        rejected: rejected,
-        selesai: selesai,
-        totalJam: totalJam,
-        totalIncome: totalIncome,
-      );
+      return snapshot.docs
+          .where((doc) => !_isExcluded(doc.data()))
+          .map((doc) => _normalizeLemburData(doc))
+          .toList();
     } catch (e) {
-      logger.e('Gagal ambil data lembur: $e');
-      return _LemburMitraResult(
-        allLembur: [],
-        todayOvertime: null,
-        pending: 0,
-        approved: 0,
-        rejected: 0,
-        selesai: 0,
-        totalJam: 0,
-        totalIncome: 0,
-      );
+      logger.e('❌ Gagal ambil semua data lembur: $e');
+      return [];
     }
   }
 
@@ -477,28 +720,52 @@ class MitraService {
       raw['updated_at_date'] = (raw['updated_at'] as Timestamp).toDate();
     }
 
+    final status = raw['status']?.toString().toLowerCase() ?? 'pending';
+    final jamMulai = raw['jam_mulai']?.toString() ?? '19:00';
+    final jamSelesai = raw['jam_selesai']?.toString() ?? '22:00';
+    final isHoliday = (raw['jenis_lembur']?.toString() ?? '') == 'hari_libur';
+    final jamAktual = _parseDouble(raw['actual_total_jam']);
+    
+    double income = 0;
+    if (status == 'selesai') {
+      income = _parseDouble(raw['actual_income'] ?? raw['income_amount'] ?? 0);
+      if (income == 0 && jamAktual > 0) {
+        income = calculateIncome(jamAktual, isHoliday: isHoliday);
+      }
+    }
+
+    final durasi = formatDuration(jamMulai, jamSelesai);
+    final totalJam = status == 'selesai' 
+        ? (jamAktual > 0 ? jamAktual : calculateHoursFromSchedule(jamMulai, jamSelesai))
+        : calculateHoursFromSchedule(jamMulai, jamSelesai);
+
     return {
       'id': doc.id,
-      'status': raw['status']?.toString().toLowerCase() ?? 'pending',
+      'status': status,
       'tanggal': raw['tanggal'],
       'tanggal_date': raw['tanggal_date'],
-      'jam_mulai': raw['jam_mulai']?.toString() ?? '19:00',
-      'jam_selesai': raw['jam_selesai']?.toString() ?? '22:00',
+      'jam_mulai': jamMulai,
+      'jam_selesai': jamSelesai,
+      'durasi': durasi,
+      'total_jam': totalJam,
+      'total_jam_desimal': _parseDouble(raw['total_jam_desimal'] ?? raw['total_jam'] ?? totalJam),
+      'actual_total_jam': jamAktual,
+      'income': income,
+      'income_formatted': formatCurrency(income),
+      'income_compact': formatRupiahCompact(income),
+      'is_holiday': isHoliday,
       'alasan': raw['alasan']?.toString() ?? raw['keterangan']?.toString() ?? 'Lembur',
       'jenis_lembur': raw['jenis_lembur']?.toString() ?? 'hari_kerja',
-      'lokasi': raw['lokasi'] is Map ? raw['lokasi']['pilihan']?.toString() ?? 'kantor' : 'kantor',
+      'lokasi': raw['lokasi'] is Map ? raw['lokasi']['pilihan']?.toString() ?? 'Kantor' : 'Kantor',
       'nama_pengawas': raw['nama_pengawas']?.toString() ?? raw['pengawas_nama']?.toString() ?? 'Pengawas',
       'pengawas_id': raw['pengawas_id']?.toString() ?? raw['diajukan_oleh_id']?.toString(),
       'pengawas_fungsi': raw['pengawas_fungsi']?.toString(),
-      'total_jam_desimal': (raw['total_jam_desimal'] ?? raw['total_jam'] ?? raw['actual_total_jam'] ?? 0).toDouble(),
-      'actual_total_jam': (raw['actual_total_jam'] as num?)?.toDouble(),
       'tahun_bulan': raw['tahun_bulan']?.toString(),
       'absensi_status': raw['absensi_status']?.toString(),
       'absensi_waktu': raw['absensi_waktu'],
       'absensi_checkout_waktu': raw['absensi_checkout_waktu'],
       'absensi_oleh': raw['absensi_oleh']?.toString(),
       'absensi_nama': raw['absensi_nama']?.toString(),
-      'income_amount': (raw['income_amount'] ?? raw['actual_income'] ?? 0).toDouble(),
       'is_income_calculated': raw['is_income_calculated'] == true,
       'group_id': raw['group_id']?.toString(),
       'mitra_id': raw['mitra_id']?.toString(),
@@ -511,7 +778,7 @@ class MitraService {
 
   Future<_AbsensiResult> _getAbsensiToday(String userId, DateTime now) async {
     try {
-      final startOfDay = DateTime(now.year, now.month, now.day);
+      final startOfDay = getStartOfToday();
       final snapshot = await _firestore
           .collection(collectionAbsensi)
           .where('user_id', isEqualTo: userId)
@@ -519,27 +786,14 @@ class MitraService {
           .limit(1)
           .get();
 
-      if (snapshot.docs.isEmpty) {
-        return _AbsensiResult(
-          doc: null,
-          isCheckedIn: false,
-          isCheckedOut: false,
-          checkInTime: null,
-          checkOutTime: null,
-          workDuration: null,
-        );
-      }
+      if (snapshot.docs.isEmpty) return _AbsensiResult.empty();
 
       final data = snapshot.docs.first.data() as Map<String, dynamic>? ?? {};
       DateTime? checkInTime;
       DateTime? checkOutTime;
 
-      if (data['waktu'] is Timestamp) {
-        checkInTime = (data['waktu'] as Timestamp).toDate();
-      }
-      if (data['waktu_checkout'] is Timestamp) {
-        checkOutTime = (data['waktu_checkout'] as Timestamp).toDate();
-      }
+      if (data['waktu'] is Timestamp) checkInTime = (data['waktu'] as Timestamp).toDate();
+      if (data['waktu_checkout'] is Timestamp) checkOutTime = (data['waktu_checkout'] as Timestamp).toDate();
 
       return _AbsensiResult(
         doc: data,
@@ -553,34 +807,21 @@ class MitraService {
       );
     } catch (e) {
       logger.e('Gagal ambil data absensi: $e');
-      return _AbsensiResult(
-        doc: null,
-        isCheckedIn: false,
-        isCheckedOut: false,
-        checkInTime: null,
-        checkOutTime: null,
-        workDuration: null,
-      );
+      return _AbsensiResult.empty();
     }
   }
 
-  // ✅ PERBAIKAN: query dengan mitra_ids array-contains
   Future<List<Map<String, dynamic>>> _getPendingRequests(String userId, DateTime now) async {
     try {
       final snapshot = await _firestore
           .collection(collectionPengajuan)
           .where('mitra_ids', arrayContains: userId)
           .where('status', isEqualTo: 'pending')
-          .where('tanggal_lembur',
-              isGreaterThanOrEqualTo: Timestamp.fromDate(now.subtract(const Duration(days: 1))))
+          .where('tanggal_lembur', isGreaterThanOrEqualTo: Timestamp.fromDate(now.subtract(const Duration(days: 1))))
           .orderBy('tanggal_lembur', descending: false)
           .get();
 
-      final confDoc = await _firestore
-          .collection(collectionConfirmations)
-          .doc(userId)
-          .get();
-
+      final confDoc = await _firestore.collection(collectionConfirmations).doc(userId).get();
       final confirmedIds = <String>{};
       if (confDoc.exists && confDoc.data() != null) {
         final data = confDoc.data() as Map<String, dynamic>;
@@ -592,23 +833,33 @@ class MitraService {
       final requests = <Map<String, dynamic>>[];
       for (var doc in snapshot.docs) {
         final d = doc.data() as Map<String, dynamic>? ?? {};
-        if (!confirmedIds.contains(doc.id)) {
-          requests.add({
-            'id': doc.id,
-            'tanggal': d['tanggal_lembur'] ?? d['tanggal'],
-            'jam_mulai': d['jam_mulai']?.toString() ?? '19:00',
-            'jam_selesai': d['jam_selesai']?.toString() ?? '22:00',
-            'total_jam': (d['total_jam_desimal'] as num?)?.toDouble() ?? 3.0,
-            'alasan': d['alasan']?.toString() ?? 'Lembur',
-            'pengawas_nama': d['nama_pengawas']?.toString() ?? 'Pengawas',
-            'pengawas_id': d['pengawas_id']?.toString(),
-            'pengawas_fungsi': d['pengawas_fungsi']?.toString() ?? '',
-            'urgensi': d['urgensi']?.toString() ?? 'normal',
-            'jenis_lembur': d['jenis_lembur']?.toString() ?? 'hari_kerja',
-            'lokasi': d['lokasi'] is Map ? d['lokasi']['pilihan']?.toString() ?? 'kantor' : 'kantor',
-            'estimasi_biaya': (d['estimasi_biaya_per_mitra'] ?? d['estimasi_biaya_total'] ?? 0).toDouble(),
-          });
-        }
+        if (confirmedIds.contains(doc.id)) continue;
+        if (_isDibatalkan(d)) continue;
+        
+        final jamMulai = d['jam_mulai']?.toString() ?? '19:00';
+        final jamSelesai = d['jam_selesai']?.toString() ?? '22:00';
+        final isHoliday = (d['jenis_lembur']?.toString() ?? '') == 'hari_libur';
+        final estimasiJam = calculateHoursFromSchedule(jamMulai, jamSelesai);
+        final estimasiBiaya = calculateIncome(estimasiJam, isHoliday: isHoliday);
+
+        requests.add({
+          'id': doc.id,
+          'tanggal': d['tanggal_lembur'] ?? d['tanggal'],
+          'jam_mulai': jamMulai,
+          'jam_selesai': jamSelesai,
+          'durasi': formatDuration(jamMulai, jamSelesai),
+          'total_jam': estimasiJam,
+          'estimasi_biaya': estimasiBiaya,
+          'estimasi_biaya_formatted': formatCurrency(estimasiBiaya),
+          'alasan': d['alasan']?.toString() ?? 'Lembur',
+          'pengawas_nama': d['nama_pengawas']?.toString() ?? 'Pengawas',
+          'pengawas_id': d['pengawas_id']?.toString(),
+          'pengawas_fungsi': d['pengawas_fungsi']?.toString() ?? '',
+          'urgensi': d['urgensi']?.toString() ?? 'normal',
+          'jenis_lembur': d['jenis_lembur']?.toString() ?? 'hari_kerja',
+          'is_holiday': isHoliday,
+          'lokasi': d['lokasi'] is Map ? d['lokasi']['pilihan']?.toString() ?? 'Kantor' : 'Kantor',
+        });
       }
       return requests;
     } catch (e) {
@@ -623,20 +874,15 @@ class MitraService {
         logger.e('Gagal ambil notifikasi: $e');
         return 0;
       }),
-      _firestore
-          .collection(collectionSettings)
-          .doc('overtime_rates')
-          .get()
-          .then((doc) {
-            if (doc.exists && doc.data() != null) {
-              return doc.data() as Map<String, dynamic>;
-            }
-            return <String, dynamic>{};
-          })
-          .catchError((e) {
-            logger.e('Gagal ambil settings: $e');
-            return <String, dynamic>{};
-          }),
+      _firestore.collection(collectionSettings).doc('overtime_rates').get().then((doc) {
+        if (doc.exists && doc.data() != null) {
+          return doc.data() as Map<String, dynamic>;
+        }
+        return <String, dynamic>{};
+      }).catchError((e) {
+        logger.e('Gagal ambil settings: $e');
+        return <String, dynamic>{};
+      }),
     ]);
 
     return _AdditionalData(
@@ -659,22 +905,241 @@ class MitraService {
     }).toList();
   }
 
-  Map<String, dynamic> _calculateStats(_LemburMitraResult data) {
-    const maxKuota = 60;
-    return {
-      'totalLembur': data.approved + data.selesai,
-      'totalJamLembur': data.totalJam.toInt(),
-      'sisaKuota': (maxKuota - data.totalJam).toInt().clamp(0, maxKuota),
-      'pending': data.pending,
-      'disetujui': data.approved,
-      'ditolak': data.rejected,
-      'selesai': data.selesai,
-      'totalIncome': data.totalIncome,
-    };
+  // ═══════════════════════════════════════════════════════
+  // 📋 PUBLIC METHODS
+  // ═══════════════════════════════════════════════════════
+
+  Future<List<Map<String, dynamic>>> getUpcomingSchedules() async {
+    try {
+      if (!_checkConnection('getUpcomingSchedules')) return [];
+      
+      final user = _auth.currentUser;
+      if (user == null) return [];
+
+      final now = DateTime.now();
+      final startOfWeek = now.subtract(Duration(days: now.weekday - 1));
+      final endOfWeek = startOfWeek.add(const Duration(days: 7));
+
+      final snapshot = await _firestore
+          .collection(collectionLemburMitra)
+          .where('mitra_id', isEqualTo: user.uid)
+          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfWeek))
+          .where('tanggal', isLessThanOrEqualTo: Timestamp.fromDate(endOfWeek))
+          .orderBy('tanggal', descending: false)
+          .get();
+
+      return snapshot.docs
+          .where((doc) {
+            final status = (doc.data()['status']?.toString() ?? '').toLowerCase();
+            return (status == 'disetujui' || status == 'approved') && !_isDibatalkan(doc.data());
+          })
+          .map((doc) {
+            final data = doc.data();
+            final date = (data['tanggal'] as Timestamp).toDate();
+            final jamMulai = data['jam_mulai']?.toString() ?? '--:--';
+            final jamSelesai = data['jam_selesai']?.toString() ?? '--:--';
+            final isHoliday = (data['jenis_lembur']?.toString() ?? '') == 'hari_libur';
+
+            return {
+              'id': doc.id,
+              'date': DateFormat('dd MMM yyyy', 'id_ID').format(date),
+              'date_raw': date,
+              'jam_mulai': jamMulai,
+              'jam_selesai': jamSelesai,
+              'durasi': formatDuration(jamMulai, jamSelesai),
+              'description': data['alasan']?.toString() ?? data['keterangan']?.toString() ?? 'Lembur Rutin',
+              'status': data['status']?.toString() ?? 'scheduled',
+              'location': data['lokasi'] is Map ? data['lokasi']['pilihan']?.toString() ?? 'Kantor' : 'Kantor',
+              'is_holiday': isHoliday,
+              'estimasi_income': estimateIncomeFromSchedule(jamMulai, jamSelesai, isHoliday: isHoliday),
+            };
+          }).toList();
+    } catch (e) {
+      logger.e('Error getting upcoming schedules: $e');
+      return [];
+    }
   }
 
-  // ✅ CHECK-IN LEMBUR
+  Future<List<Map<String, dynamic>>> getRecentOvertimeHistory({int limit = 5}) async {
+    try {
+      if (!_checkConnection('getRecentOvertimeHistory')) return [];
+      
+      final user = _auth.currentUser;
+      if (user == null) return [];
+
+      final startOfMonth = getStartOfCurrentMonth();
+      final endOfMonth = getEndOfCurrentMonth();
+
+      final snapshot = await _firestore
+          .collection(collectionLemburMitra)
+          .where('mitra_id', isEqualTo: user.uid)
+          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
+          .where('tanggal', isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth))
+          .orderBy('tanggal', descending: true)
+          .limit(limit)
+          .get();
+
+      return snapshot.docs
+          .where((doc) => !_isExcluded(doc.data()))
+          .map((doc) {
+            final data = doc.data();
+            final date = (data['tanggal'] as Timestamp?)?.toDate() ?? DateTime.now();
+            final status = data['status']?.toString() ?? 'pending';
+            final jamMulai = data['jam_mulai']?.toString() ?? '--:--';
+            final jamSelesai = data['jam_selesai']?.toString() ?? '--:--';
+            final isHoliday = (data['jenis_lembur']?.toString() ?? '') == 'hari_libur';
+
+            double income = 0;
+            if (status == 'selesai') {
+              income = _parseDouble(data['actual_income'] ?? data['income_amount'] ?? 0);
+              if (income == 0) {
+                final jamAktual = _parseDouble(data['actual_total_jam']);
+                if (jamAktual > 0) income = calculateIncome(jamAktual, isHoliday: isHoliday);
+              }
+              if (income == 0 && jamMulai != '--:--' && jamSelesai != '--:--') {
+                income = estimateIncomeFromSchedule(jamMulai, jamSelesai, isHoliday: isHoliday);
+              }
+            }
+
+            final totalJam = status == 'selesai'
+                ? (_parseDouble(data['actual_total_jam']) > 0 ? _parseDouble(data['actual_total_jam']) : calculateHoursFromSchedule(jamMulai, jamSelesai))
+                : calculateHoursFromSchedule(jamMulai, jamSelesai);
+
+            return {
+              'id': doc.id,
+              'date': DateFormat('dd MMM yyyy', 'id_ID').format(date),
+              'date_raw': date,
+              'jam_mulai': jamMulai,
+              'jam_selesai': jamSelesai,
+              'durasi': formatDuration(jamMulai, jamSelesai),
+              'total_jam': totalJam,
+              'income': income,
+              'income_formatted': formatCurrency(income),
+              'income_compact': formatRupiahCompact(income),
+              'status': status,
+              'description': data['alasan']?.toString() ?? data['keterangan']?.toString() ?? '',
+              'is_holiday': isHoliday,
+              'location': data['lokasi'] is Map ? data['lokasi']['pilihan']?.toString() ?? 'Kantor' : 'Kantor',
+            };
+          }).toList();
+    } catch (e) {
+      logger.e('Error getting recent overtime history: $e');
+      return [];
+    }
+  }
+
+  Future<Map<String, dynamic>?> getTodayAttendance() async {
+    try {
+      if (!_checkConnection('getTodayAttendance')) return null;
+      
+      final user = _auth.currentUser;
+      if (user == null) return null;
+
+      final now = DateTime.now();
+      final todayStart = DateTime(now.year, now.month, now.day);
+      final todayEnd = todayStart.add(const Duration(days: 1));
+
+      final snapshot = await _firestore
+          .collection(collectionAbsensi)
+          .where('user_id', isEqualTo: user.uid)
+          .where('waktu', isGreaterThanOrEqualTo: Timestamp.fromDate(todayStart))
+          .where('waktu', isLessThan: Timestamp.fromDate(todayEnd))
+          .limit(1)
+          .get();
+
+      if (snapshot.docs.isEmpty) {
+        return {
+          'is_checked_in': false,
+          'check_in_time': '--:--',
+          'working_hours': '0',
+          'status': 'Belum Absen',
+        };
+      }
+
+      final data = snapshot.docs.first.data();
+      final checkInTime = (data['waktu'] as Timestamp?)?.toDate();
+      final checkOutTime = (data['waktu_checkout'] as Timestamp?)?.toDate();
+
+      double workingHours = 0;
+      if (checkInTime != null) {
+        final endTime = checkOutTime ?? DateTime.now();
+        workingHours = endTime.difference(checkInTime).inMinutes / 60.0;
+      }
+
+      return {
+        'is_checked_in': checkInTime != null,
+        'check_in_time': checkInTime != null ? DateFormat('HH:mm').format(checkInTime) : '--:--',
+        'working_hours': workingHours.toStringAsFixed(1),
+        'status': checkOutTime != null ? 'Selesai' : (checkInTime != null ? 'Sedang Bekerja' : 'Belum Absen'),
+      };
+    } catch (e) {
+      logger.e('Error getting today attendance: $e');
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> getPerformanceData({int months = 6}) async {
+    try {
+      if (!_checkConnection('getPerformanceData')) return [];
+      
+      final user = _auth.currentUser;
+      if (user == null) return [];
+
+      final now = DateTime.now();
+      final result = <Map<String, dynamic>>[];
+
+      for (int i = months - 1; i >= 0; i--) {
+        final targetMonth = DateTime(now.year, now.month - i, 1);
+        final startOfMonth = DateTime(targetMonth.year, targetMonth.month, 1);
+        final endOfMonth = DateTime(targetMonth.year, targetMonth.month + 1, 0, 23, 59, 59, 999);
+
+        final snapshot = await _firestore
+            .collection(collectionLemburMitra)
+            .where('mitra_id', isEqualTo: user.uid)
+            .where('status', isEqualTo: 'selesai')
+            .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
+            .where('tanggal', isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth))
+            .get();
+
+        double totalHours = 0;
+        double totalIncome = 0;
+        int count = snapshot.docs.where((doc) => !_isDibatalkan(doc.data())).length;
+
+        for (var doc in snapshot.docs) {
+          if (_isDibatalkan(doc.data())) continue;
+          final data = doc.data();
+          totalHours += _parseDouble(data['actual_total_jam'] ?? 0);
+          totalIncome += _parseDouble(data['actual_income'] ?? data['income_amount'] ?? 0);
+        }
+
+        result.add({
+          'month': DateFormat('MMM', 'id_ID').format(targetMonth),
+          'year': targetMonth.year,
+          'hours': totalHours,
+          'count': count,
+          'income': totalIncome,
+          'income_formatted': formatCurrency(totalIncome),
+          'monthKey': DateFormat('yyyy-MM').format(targetMonth),
+        });
+      }
+
+      return result;
+    } catch (e) {
+      logger.e('❌ Error getting performance data: $e');
+      return [];
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // ✅ CHECK-IN & CHECK-OUT
+  // ═══════════════════════════════════════════════════════
+
   Future<void> checkInLembur(String lemburId, String userName) async {
+    // 🔥 CEK KONEKSI
+    if (!_checkConnection('checkInLembur')) {
+      throw Exception('Tidak ada koneksi internet. Tidak dapat melakukan check-in.');
+    }
+
     final user = _auth.currentUser;
     if (user == null) throw Exception('User tidak login');
 
@@ -684,6 +1149,7 @@ class MitraService {
 
       final lemburData = lemburDoc.data() ?? {};
       if (lemburData['mitra_id'] != user.uid) throw Exception('Bukan lembur milik Anda');
+      if (_isExcluded(lemburData)) throw Exception('Lembur sudah dibatalkan atau ditolak');
 
       final now = FieldValue.serverTimestamp();
       final batch = _firestore.batch();
@@ -708,8 +1174,7 @@ class MitraService {
 
       await batch.commit();
 
-      final pengawasId = lemburData['diajukan_oleh_id']?.toString() ??
-          lemburData['pengawas_id']?.toString();
+      final pengawasId = lemburData['diajukan_oleh_id']?.toString() ?? lemburData['pengawas_id']?.toString();
       if (pengawasId != null && pengawasId.isNotEmpty) {
         _notifService.sendMitraCheckInNotification(
           mitraName: userName,
@@ -725,12 +1190,12 @@ class MitraService {
     }
   }
 
-  // ✅ CHECK-OUT LEMBUR
-  Future<double> checkOutLembur(
-    String lemburId,
-    String userName,
-    Map<String, dynamic> overtimeSettings,
-  ) async {
+  Future<double> checkOutLembur(String lemburId, String userName, Map<String, dynamic> overtimeSettings) async {
+    // 🔥 CEK KONEKSI
+    if (!_checkConnection('checkOutLembur')) {
+      throw Exception('Tidak ada koneksi internet. Tidak dapat melakukan check-out.');
+    }
+
     final user = _auth.currentUser;
     if (user == null) throw Exception('User tidak login');
 
@@ -740,6 +1205,7 @@ class MitraService {
 
       final lemburData = lemburDoc.data() ?? {};
       if (lemburData['mitra_id'] != user.uid) throw Exception('Bukan lembur milik Anda');
+      if (_isExcluded(lemburData)) throw Exception('Lembur sudah dibatalkan atau ditolak');
 
       final checkInTimestamp = lemburData['absensi_waktu'];
       if (checkInTimestamp == null || checkInTimestamp is! Timestamp) {
@@ -753,7 +1219,8 @@ class MitraService {
       }
 
       final actualHours = checkOutTime.difference(checkInTime).inMinutes / 60.0;
-      final income = _calculateIncome(actualHours, overtimeSettings);
+      final isHoliday = (lemburData['jenis_lembur']?.toString() ?? '') == 'hari_libur';
+      final income = calculateIncome(actualHours, settings: overtimeSettings, isHoliday: isHoliday);
       final now = FieldValue.serverTimestamp();
       final batch = _firestore.batch();
 
@@ -786,8 +1253,7 @@ class MitraService {
 
       await batch.commit();
 
-      final pengawasId = lemburData['diajukan_oleh_id']?.toString() ??
-          lemburData['pengawas_id']?.toString();
+      final pengawasId = lemburData['diajukan_oleh_id']?.toString() ?? lemburData['pengawas_id']?.toString();
       if (pengawasId != null && pengawasId.isNotEmpty) {
         _notifService.sendMitraCheckOutNotification(
           mitraName: userName,
@@ -798,7 +1264,7 @@ class MitraService {
         );
       }
 
-      logger.i('Check-out berhasil: $userName -> $lemburId, income: $income');
+      logger.i('Check-out berhasil: $userName -> $lemburId, jam=$actualHours, income=$income');
       return income;
     } catch (e) {
       logger.e('Gagal check-out: $e');
@@ -806,25 +1272,15 @@ class MitraService {
     }
   }
 
-  // 💰 KALKULASI INCOME
-  double _calculateIncome(double hours, Map<String, dynamic> settings) {
-    const defaultRate = 17341.04;
-    const defaultM1 = 2.0;
-    const defaultM2 = 3.0;
-    const defaultM3 = 4.0;
-
-    final rate = (settings['rate_per_hour'] as num?)?.toDouble() ?? defaultRate;
-    final m1 = (settings['first_8_hours_multiplier'] as num?)?.toDouble() ?? defaultM1;
-    final m2 = (settings['ninth_hour_multiplier'] as num?)?.toDouble() ?? defaultM2;
-    final m3 = (settings['tenth_plus_multiplier'] as num?)?.toDouble() ?? defaultM3;
-
-    if (hours <= 0) return 0;
-    if (hours <= 8) return hours * rate * m1;
-    if (hours <= 9) return (8 * rate * m1) + ((hours - 8) * rate * m2);
-    return (8 * rate * m1) + (1 * rate * m2) + ((hours - 9) * rate * m3);
-  }
+  // ═══════════════════════════════════════════════════════
+  // ✅ KONFIRMASI & REJECT
+  // ═══════════════════════════════════════════════════════
 
   Future<void> confirmOvertime(String overtimeId) async {
+    if (!_checkConnection('confirmOvertime')) {
+      throw Exception('Tidak ada koneksi internet');
+    }
+
     final user = _auth.currentUser;
     if (user == null) throw Exception('User tidak login');
     try {
@@ -840,6 +1296,10 @@ class MitraService {
   }
 
   Future<void> rejectOvertime(String overtimeId, String? reason) async {
+    if (!_checkConnection('rejectOvertime')) {
+      throw Exception('Tidak ada koneksi internet');
+    }
+
     final user = _auth.currentUser;
     if (user == null) throw Exception('User tidak login');
     try {
@@ -870,6 +1330,24 @@ class MitraService {
     }
   }
 
+  // ═══════════════════════════════════════════════════════
+  // ✅ NOTIFICATIONS & LOGOUT
+  // ═══════════════════════════════════════════════════════
+
+  Future<List<Map<String, dynamic>>> getNotifications() async {
+    if (!_checkConnection('getNotifications')) return [];
+    final user = _auth.currentUser;
+    if (user == null) return [];
+    return _notifService.getNotificationsOnce(user.uid);
+  }
+
+  Future<void> markAllNotificationsRead() async {
+    if (!_checkConnection('markAllNotificationsRead')) return;
+    final user = _auth.currentUser;
+    if (user == null) return;
+    await _notifService.markAllAsRead(user.uid);
+  }
+
   Future<void> logout() async {
     try {
       await _auth.signOut();
@@ -881,7 +1359,40 @@ class MitraService {
   }
 }
 
-// =================== DATA CLASSES ===================
+// ═══════════════════════════════════════════════════════
+// 📦 DATA CLASSES
+// ═══════════════════════════════════════════════════════
+
+class _BulanStats {
+  final int totalLembur;
+  final double totalJam;
+  final int pending;
+  final int disetujui;
+  final int ditolak;
+  final int selesai;
+  final double totalIncome;
+  final double sisaKuota;
+
+  const _BulanStats({
+    required this.totalLembur,
+    required this.totalJam,
+    required this.pending,
+    required this.disetujui,
+    required this.ditolak,
+    required this.selesai,
+    required this.totalIncome,
+    required this.sisaKuota,
+  });
+
+  factory _BulanStats.empty() {
+    return const _BulanStats(
+      totalLembur: 0, totalJam: 0, pending: 0,
+      disetujui: 0, ditolak: 0, selesai: 0,
+      totalIncome: 0, sisaKuota: 60,
+    );
+  }
+}
+
 class MitraDashboardData {
   final Map<String, dynamic> userData;
   final String userName;
@@ -899,24 +1410,18 @@ class MitraDashboardData {
   final Map<String, dynamic> stats;
   final Map<String, dynamic> overtimeSettings;
   final int unreadNotifications;
+  final _BulanStats bulanStats;
+  final _BulanStats bulanLaluStats;
 
   const MitraDashboardData({
-    required this.userData,
-    required this.userName,
-    required this.fungsi,
-    this.todayOvertime,
-    this.todayAbsensi,
-    required this.isCheckedIn,
-    required this.isCheckedOut,
-    this.lastCheckIn,
-    this.lastCheckOut,
-    this.workDuration,
-    required this.allLembur,
-    required this.schedules,
-    required this.pendingRequests,
-    required this.stats,
-    required this.overtimeSettings,
-    required this.unreadNotifications,
+    required this.userData, required this.userName, required this.fungsi,
+    this.todayOvertime, this.todayAbsensi,
+    required this.isCheckedIn, required this.isCheckedOut,
+    this.lastCheckIn, this.lastCheckOut, this.workDuration,
+    required this.allLembur, required this.schedules,
+    required this.pendingRequests, required this.stats,
+    required this.overtimeSettings, required this.unreadNotifications,
+    required this.bulanStats, required this.bulanLaluStats,
   });
 
   bool get hasTodayOvertime => todayOvertime != null;
@@ -925,14 +1430,18 @@ class MitraDashboardData {
       todayOvertime?['absensi_status'] == 'check_out' ||
       todayOvertime?['absensi_status'] == 'selesai';
 
-  int get totalLemburStat => (stats['totalLembur'] as int?) ?? 0;
-  int get totalJamStat => (stats['totalJamLembur'] as int?) ?? 0;
-  int get sisaKuotaStat => (stats['sisaKuota'] as int?) ?? 60;
-  int get pendingStat => (stats['pending'] as int?) ?? 0;
-  int get disetujuiStat => (stats['disetujui'] as int?) ?? 0;
-  int get ditolakStat => (stats['ditolak'] as int?) ?? 0;
-  int get selesaiStat => (stats['selesai'] as int?) ?? 0;
-  double get totalIncomeStat => (stats['totalIncome'] as double?) ?? 0.0;
+  int get totalLemburStat => bulanStats.totalLembur;
+  int get totalJamStat => bulanStats.totalJam.toInt();
+  int get sisaKuotaStat => bulanStats.sisaKuota.toInt();
+  int get pendingStat => bulanStats.pending;
+  int get disetujuiStat => bulanStats.disetujui;
+  int get ditolakStat => bulanStats.ditolak;
+  int get selesaiStat => bulanStats.selesai;
+  double get totalIncomeStat => bulanStats.totalIncome;
+  
+  double get trendLembur => (stats['trendLembur'] as num?)?.toDouble() ?? 0.0;
+  double get trendJam => (stats['trendJam'] as num?)?.toDouble() ?? 0.0;
+  double get trendIncome => (stats['trendIncome'] as num?)?.toDouble() ?? 0.0;
 
   String get workDurationFormatted {
     if (workDuration == null) return '-';
@@ -941,28 +1450,6 @@ class MitraDashboardData {
     if (hours > 0) return '$hours jam $minutes mnt';
     return '$minutes mnt';
   }
-}
-
-class _LemburMitraResult {
-  final List<Map<String, dynamic>> allLembur;
-  final Map<String, dynamic>? todayOvertime;
-  final int pending;
-  final int approved;
-  final int rejected;
-  final int selesai;
-  final double totalJam;
-  final double totalIncome;
-
-  const _LemburMitraResult({
-    required this.allLembur,
-    this.todayOvertime,
-    required this.pending,
-    required this.approved,
-    required this.rejected,
-    required this.selesai,
-    required this.totalJam,
-    required this.totalIncome,
-  });
 }
 
 class _AbsensiResult {
@@ -974,21 +1461,21 @@ class _AbsensiResult {
   final Duration? workDuration;
 
   const _AbsensiResult({
-    this.doc,
-    required this.isCheckedIn,
-    required this.isCheckedOut,
-    this.checkInTime,
-    this.checkOutTime,
-    this.workDuration,
+    this.doc, required this.isCheckedIn, required this.isCheckedOut,
+    this.checkInTime, this.checkOutTime, this.workDuration,
   });
+
+  factory _AbsensiResult.empty() {
+    return const _AbsensiResult(
+      doc: null, isCheckedIn: false, isCheckedOut: false,
+      checkInTime: null, checkOutTime: null, workDuration: null,
+    );
+  }
 }
 
 class _AdditionalData {
   final int unreadCount;
   final Map<String, dynamic> settings;
 
-  const _AdditionalData({
-    required this.unreadCount,
-    required this.settings,
-  });
+  const _AdditionalData({required this.unreadCount, required this.settings});
 }

@@ -113,7 +113,7 @@ class _MitraOvertimeCardState extends State<MitraOvertimeCard> {
     } else if (widget.isCheckedIn) {
       primaryColor = Colors.orange.shade700;
       secondaryColor = Colors.orange.shade500;
-      statusText = '🔵 Sedang Lembur';
+      statusText = 'Sedang Lembur';
       statusIcon = Icons.access_time;
     } else {
       primaryColor = const Color(0xFFFF6B35);

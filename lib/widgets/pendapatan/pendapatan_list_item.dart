@@ -1,8 +1,4 @@
 // lib/widgets/pendapatan/pendapatan_list_item.dart
-// ============================================================================
-// PENDAPATAN LIST ITEM - Card untuk setiap item pendapatan
-// ============================================================================
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -76,7 +72,7 @@ class PendapatanListItem extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 12),
-                      
+
                       // Tanggal & Pengawas
                       Expanded(
                         child: Column(
@@ -118,9 +114,9 @@ class PendapatanListItem extends StatelessWidget {
                           ],
                         ),
                       ),
-                      
+
                       const SizedBox(width: 8),
-                      
+
                       // Status badges (column)
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
@@ -137,17 +133,19 @@ class PendapatanListItem extends StatelessWidget {
                               item.statusLembur!.isNotEmpty)
                             _buildStatusBadge(
                               label: item.statusLemburLabel,
-                              color: item.statusLemburColor,
-                              icon: _getLemburStatusIcon(item.statusLembur),
+                              color: _getStatusLemburColor(
+                                  item.statusLembur ?? ''),
+                              icon:
+                                  _getLemburStatusIcon(item.statusLembur),
                               isSmall: true,
                             ),
                         ],
                       ),
                     ],
                   ),
-                  
+
                   const SizedBox(height: 12),
-                  
+
                   //═══════════════════════════════════════════
                   // DETAIL: Jam Kerja + Durasi
                   //═══════════════════════════════════════════
@@ -155,7 +153,8 @@ class PendapatanListItem extends StatelessWidget {
                     children: [
                       _buildDetailChip(
                         icon: Icons.access_time_rounded,
-                        label: '${item.jamMulai ?? "-"} - ${item.jamSelesai ?? "-"}',
+                        label:
+                            '${item.jamMulai ?? "-"} - ${item.jamSelesai ?? "-"}',
                         color: const Color(0xFF1565C0),
                       ),
                       const SizedBox(width: 8),
@@ -166,9 +165,9 @@ class PendapatanListItem extends StatelessWidget {
                       ),
                     ],
                   ),
-                  
+
                   const SizedBox(height: 8),
-                  
+
                   //═══════════════════════════════════════════
                   // DETAIL: Absensi + Jenis Lembur
                   //═══════════════════════════════════════════
@@ -201,11 +200,11 @@ class PendapatanListItem extends StatelessWidget {
                       ),
                     ],
                   ),
-                  
+
                   const SizedBox(height: 10),
                   const Divider(height: 1),
                   const SizedBox(height: 10),
-                  
+
                   //═══════════════════════════════════════════
                   // FOOTER: Tarif + Pendapatan
                   //═══════════════════════════════════════════
@@ -236,7 +235,7 @@ class PendapatanListItem extends StatelessWidget {
                           ],
                         ),
                       ),
-                      
+
                       // Estimasi pendapatan
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.end,
@@ -256,14 +255,18 @@ class PendapatanListItem extends StatelessWidget {
                             ),
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
+                                colors: [
+                                  Color(0xFF1B5E20),
+                                  Color(0xFF2E7D32),
+                                ],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
                               borderRadius: BorderRadius.circular(8),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF1B5E20).withOpacity(0.2),
+                                  color: const Color(0xFF1B5E20)
+                                      .withOpacity(0.2),
                                   blurRadius: 4,
                                   offset: const Offset(0, 2),
                                 ),
@@ -282,7 +285,7 @@ class PendapatanListItem extends StatelessWidget {
                       ),
                     ],
                   ),
-                  
+
                   //═══════════════════════════════════════════
                   // LOKASI (kalau ada)
                   //═══════════════════════════════════════════
@@ -321,9 +324,10 @@ class PendapatanListItem extends StatelessWidget {
     );
   }
 
- 
+  // ═══════════════════════════════════════════════════════
   // STATUS BADGE
- 
+  // ═══════════════════════════════════════════════════════
+
   Widget _buildStatusBadge({
     required String label,
     required Color color,
@@ -366,9 +370,10 @@ class PendapatanListItem extends StatelessWidget {
     );
   }
 
- 
+  // ═══════════════════════════════════════════════════════
   // DETAIL CHIP
- 
+  // ═══════════════════════════════════════════════════════
+
   Widget _buildDetailChip({
     required IconData icon,
     required String label,
@@ -407,9 +412,10 @@ class PendapatanListItem extends StatelessWidget {
     );
   }
 
- 
+  // ═══════════════════════════════════════════════════════
   // ICON HELPERS
- 
+  // ═══════════════════════════════════════════════════════
+
   IconData? _getStatusIcon(String? status) {
     switch (status) {
       case 'selesai':
@@ -417,6 +423,7 @@ class PendapatanListItem extends StatelessWidget {
       case 'selesai_terlambat':
         return Icons.warning_amber_rounded;
       case 'sudah_absen':
+      case 'check_in':
         return Icons.camera_alt_outlined;
       case 'belum_absen':
         return Icons.schedule;
@@ -430,32 +437,65 @@ class PendapatanListItem extends StatelessWidget {
   IconData? _getLemburStatusIcon(String? status) {
     switch (status) {
       case 'disetujui':
+      case 'approved':
         return Icons.thumb_up_alt_outlined;
       case 'ditolak':
+      case 'rejected':
         return Icons.thumb_down_alt_outlined;
       case 'pending':
         return Icons.pending_outlined;
       case 'selesai':
+      case 'completed':
         return Icons.task_alt_rounded;
       case 'kadaluarsa':
+      case 'expired':
         return Icons.timer_off_outlined;
       case 'dibatalkan':
+      case 'cancelled':
         return Icons.block_outlined;
       default:
         return null;
     }
   }
 
- 
+  // ═══════════════════════════════════════════════════════
+  // ✅ HELPER: STATUS LEMBUR COLOR (FIX)
+  // ═══════════════════════════════════════════════════════
+
+  Color _getStatusLemburColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'disetujui':
+      case 'approved':
+        return Colors.green;
+      case 'ditolak':
+      case 'rejected':
+        return Colors.red;
+      case 'pending':
+        return Colors.orange;
+      case 'selesai':
+      case 'completed':
+        return Colors.blue;
+      case 'kadaluarsa':
+      case 'expired':
+        return Colors.grey;
+      case 'dibatalkan':
+      case 'cancelled':
+        return Colors.red.shade300;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
   // FORMATTING HELPERS
- 
+  // ═══════════════════════════════════════════════════════
+
   String _formatTanggal(DateTime date) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final dateOnly = DateTime(date.year, date.month, date.day);
     final diff = today.difference(dateOnly).inDays;
 
-    // Format relatif untuk 7 hari terakhir
     if (diff == 0) {
       return 'Hari Ini, ${DateFormat('dd MMM yyyy', 'id_ID').format(date)}';
     } else if (diff == 1) {
@@ -463,19 +503,17 @@ class PendapatanListItem extends StatelessWidget {
     } else if (diff < 7) {
       return '${DateFormat('EEEE', 'id_ID').format(date)}, ${DateFormat('dd MMM yyyy', 'id_ID').format(date)}';
     }
-    
+
     return DateFormat('EEEE, dd MMM yyyy', 'id_ID').format(date);
   }
 
   String _formatRupiah(double amount) {
     if (amount == 0) return 'Rp 0';
-    
-    final formatter = NumberFormat.currency(
+    return NumberFormat.currency(
       locale: 'id_ID',
       symbol: 'Rp ',
       decimalDigits: 0,
-    );
-    return formatter.format(amount);
+    ).format(amount);
   }
 
   String _formatJam(double hours) {

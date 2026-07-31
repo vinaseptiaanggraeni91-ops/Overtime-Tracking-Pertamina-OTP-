@@ -1,6 +1,8 @@
+// lib/features/my_team/member_detail_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../../core/services/my_team_service.dart';
 import '../../widgets/my_team/team_helpers.dart';
@@ -16,8 +18,36 @@ class MemberDetailScreen extends StatelessWidget {
     required this.userRole,
   });
 
+  // 🔥 PERBAIKAN: Cek status online berdasarkan last_active
+  bool _isMemberOnline(TeamMember member) {
+    if (member.lastLogin != null) {
+      final diff = DateTime.now().difference(member.lastLogin!);
+      if (diff.inMinutes < 10) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Format last active
+  String _formatLastActive(DateTime? time) {
+    if (time == null) return 'Offline';
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 1) return 'Baru saja';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m lalu';
+    if (diff.inHours < 24) return '${diff.inHours}j lalu';
+    if (diff.inDays < 7) return '${diff.inDays}h lalu';
+    if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}m lalu';
+    return '${(diff.inDays / 30).floor()}bl lalu';
+  }
+
   @override
   Widget build(BuildContext context) {
+    final isOnline = _isMemberOnline(member);
+    final statusColor = isOnline ? const Color(0xFF00C853) : Colors.grey;
+    final statusText = isOnline ? 'Online' : _formatLastActive(member.lastLogin);
+    final isActive = member.isActive; // Tetap pakai isActive untuk status akun
+
     return Scaffold(
       backgroundColor: const Color(0xFFF4F7FC),
       body: CustomScrollView(
@@ -43,38 +73,64 @@ class MemberDetailScreen extends StatelessWidget {
                   children: [
                     const SizedBox(height: 40),
                     
-                    // Avatar Besar
-                    Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: member.isActive
-                              ? [const Color(0xFF1976D2), const Color(0xFF42A5F5)]
-                              : [Colors.grey.shade400, Colors.grey.shade500],
-                        ),
-                        borderRadius: BorderRadius.circular(24),
-                        border: Border.all(color: Colors.white, width: 3),
-                        boxShadow: [
-                          BoxShadow(
-                            color: member.isActive
-                                ? const Color(0xFF1976D2).withValues(alpha: 0.3)
-                                : Colors.grey.withValues(alpha: 0.3),
-                            blurRadius: 20,
-                            offset: const Offset(0, 8),
+                    // Avatar Besar dengan status dot
+                    Stack(
+                      children: [
+                        Container(
+                          width: 80,
+                          height: 80,
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: isOnline
+                                  ? [const Color(0xFF1976D2), const Color(0xFF42A5F5)]
+                                  : [Colors.grey.shade400, Colors.grey.shade500],
+                            ),
+                            borderRadius: BorderRadius.circular(24),
+                            border: Border.all(color: Colors.white, width: 3),
+                            boxShadow: [
+                              BoxShadow(
+                                color: isOnline
+                                    ? const Color(0xFF1976D2).withValues(alpha: 0.3)
+                                    : Colors.grey.withValues(alpha: 0.3),
+                                blurRadius: 20,
+                                offset: const Offset(0, 8),
+                              ),
+                            ],
                           ),
-                        ],
-                      ),
-                      child: Center(
-                        child: Text(
-                          member.inisial,
-                          style: GoogleFonts.poppins(
-                            color: Colors.white,
-                            fontWeight: FontWeight.bold,
-                            fontSize: 28,
+                          child: Center(
+                            child: Text(
+                              member.inisial,
+                              style: GoogleFonts.poppins(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 28,
+                              ),
+                            ),
                           ),
                         ),
-                      ),
+                        // 🔥 Status dot di pojok avatar
+                        Positioned(
+                          bottom: 2,
+                          right: 2,
+                          child: Container(
+                            width: 20,
+                            height: 20,
+                            decoration: BoxDecoration(
+                              color: isOnline ? const Color(0xFF00C853) : Colors.grey.shade400,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2.5),
+                              boxShadow: [
+                                if (isOnline)
+                                  BoxShadow(
+                                    color: const Color(0xFF00C853).withValues(alpha: 0.4),
+                                    blurRadius: 8,
+                                    spreadRadius: 2,
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     
                     const SizedBox(height: 12),
@@ -128,27 +184,6 @@ class MemberDetailScreen extends StatelessWidget {
               ),
               onPressed: () => Navigator.pop(context),
             ),
-            
-            // Tombol Aksi (More/Restore)
-            actions: [
-              IconButton(
-                icon: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(
-                    member.isActive ? Icons.more_vert : Icons.restore_rounded,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                ),
-                onPressed: () {
-                  _showMemberOptions(context);
-                },
-              ),
-            ],
           ),
 
           // ========== CONTENT ==========
@@ -159,7 +194,7 @@ class MemberDetailScreen extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Status Card
-                  _buildStatusCard(),
+                  _buildStatusCard(isOnline, statusText, statusColor, isActive),
                   const SizedBox(height: 20),
                   
                   // Informasi Kontak
@@ -180,8 +215,9 @@ class MemberDetailScreen extends StatelessWidget {
                   _buildActivityCard(),
                   const SizedBox(height: 30),
                   
-                  // Action Buttons
-                  _buildActionButtons(context),
+                  // 🔥 HAPUS TOMBOL ACTION - tidak ada tombol Kirim Pesan & Telepon
+                  // _buildActionButtons(context),  // ❌ DIHAPUS
+                  
                   const SizedBox(height: 20),
                 ],
               ),
@@ -190,7 +226,6 @@ class MemberDetailScreen extends StatelessWidget {
         ],
       ),
       
-      // ========== BOTTOM NAVBAR DINAMIS ==========
       bottomNavigationBar: AppBottomNav(
         userRole: userRole,
         currentIndex: 0,
@@ -217,7 +252,7 @@ class MemberDetailScreen extends StatelessWidget {
   // STATUS CARD
   // =========================================================
   
-  Widget _buildStatusCard() {
+  Widget _buildStatusCard(bool isOnline, String statusText, Color statusColor, bool isActive) {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -238,14 +273,12 @@ class MemberDetailScreen extends StatelessWidget {
             width: 56,
             height: 56,
             decoration: BoxDecoration(
-              color: member.isActive
-                  ? const Color(0xFF00C853).withValues(alpha: 0.1)
-                  : Colors.grey.withValues(alpha: 0.1),
+              color: statusColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Icon(
-              member.isActive ? Icons.check_circle_rounded : Icons.cancel_rounded,
-              color: member.isActive ? const Color(0xFF00C853) : Colors.grey,
+              isOnline ? Icons.wifi_rounded : Icons.wifi_off_rounded,
+              color: statusColor,
               size: 28,
             ),
           ),
@@ -258,7 +291,7 @@ class MemberDetailScreen extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Status Akun',
+                  'Status Kehadiran',
                   style: GoogleFonts.poppins(
                     fontSize: 12,
                     color: Colors.grey,
@@ -266,34 +299,32 @@ class MemberDetailScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  member.isActive ? 'Aktif' : 'Nonaktif',
+                  isOnline ? 'Online' : 'Offline',
                   style: GoogleFonts.poppins(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
-                    color: member.isActive ? const Color(0xFF00C853) : Colors.grey,
+                    color: statusColor,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  member.isActive
-                      ? 'Dapat mengakses semua fitur'
-                      : 'Tidak dapat mengakses aplikasi',
+                  isOnline 
+                      ? 'Sedang aktif di aplikasi'
+                      : 'Terakhir aktif: $statusText',
                   style: GoogleFonts.poppins(
                     fontSize: 11,
-                    color: Colors.grey.shade600,
+                    color: isOnline ? Colors.grey.shade600 : Colors.grey.shade500,
                   ),
                 ),
               ],
             ),
           ),
           
-          // Online/Offline Badge
+          // Status Badge
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: member.isActive
-                  ? const Color(0xFF00C853).withValues(alpha: 0.1)
-                  : Colors.grey.withValues(alpha: 0.1),
+              color: statusColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
@@ -304,16 +335,24 @@ class MemberDetailScreen extends StatelessWidget {
                   height: 8,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: member.isActive ? const Color(0xFF00C853) : Colors.grey,
+                    color: statusColor,
+                    boxShadow: [
+                      if (isOnline)
+                        BoxShadow(
+                          color: statusColor.withValues(alpha: 0.4),
+                          blurRadius: 6,
+                          spreadRadius: 2,
+                        ),
+                    ],
                   ),
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  member.isActive ? 'Online' : 'Offline',
+                  isOnline ? 'Online' : 'Offline',
                   style: GoogleFonts.poppins(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: member.isActive ? const Color(0xFF00C853) : Colors.grey,
+                    color: statusColor,
                   ),
                 ),
               ],
@@ -488,16 +527,9 @@ class MemberDetailScreen extends StatelessWidget {
           const SizedBox(height: 16),
           _buildActivityItem(
             icon: Icons.access_time_rounded,
-            label: 'Total Jam Kerja Bulan Ini',
-            value: '- jam',
-            color: const Color(0xFFF59E0B),
-          ),
-          const SizedBox(height: 16),
-          _buildActivityItem(
-            icon: Icons.assignment_turned_in_rounded,
-            label: 'Pengajuan Bulan Ini',
-            value: '- pengajuan',
-            color: const Color(0xFF059669),
+            label: 'Status Akun',
+            value: member.isActive ? 'Aktif' : 'Nonaktif',
+            color: member.isActive ? const Color(0xFF00C853) : Colors.grey,
           ),
         ],
       ),
@@ -545,285 +577,6 @@ class MemberDetailScreen extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-
-  // =========================================================
-  // ACTION BUTTONS
-  // =========================================================
-  
-  Widget _buildActionButtons(BuildContext context) {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildActionButton(
-            icon: Icons.message_rounded,
-            label: 'Kirim Pesan',
-            color: const Color(0xFF1976D2),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Chat dengan ${member.namaLengkap}'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _buildActionButton(
-            icon: Icons.call_rounded,
-            label: 'Telepon',
-            color: const Color(0xFF059669),
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Menelpon ${member.phone.isNotEmpty ? member.phone : member.namaLengkap}'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionButton({
-    required IconData icon,
-    required String label,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          color: color,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: color.withValues(alpha: 0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: Colors.white, size: 18),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                color: Colors.white,
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // =========================================================
-  // MEMBER OPTIONS (More/Restore menu)
-  // =========================================================
-  
-  void _showMemberOptions(BuildContext context) {
-    if (member.isActive) {
-      showModalBottomSheet(
-        context: context,
-        shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-        ),
-        builder: (ctx) => Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(
-                'Opsi Anggota',
-                style: GoogleFonts.poppins(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: 24),
-              
-              _buildOptionItem(
-                icon: Icons.edit_rounded,
-                title: 'Edit Profil',
-                color: const Color(0xFF1976D2),
-                onTap: () {
-                  Navigator.pop(ctx);
-                },
-              ),
-              _buildOptionItem(
-                icon: Icons.block_rounded,
-                title: 'Nonaktifkan Akun',
-                color: const Color(0xFFDC2626),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _showDeactivateConfirmation(context);
-                },
-              ),
-              _buildOptionItem(
-                icon: Icons.admin_panel_settings_rounded,
-                title: 'Reset Password',
-                color: const Color(0xFFF59E0B),
-                onTap: () {
-                  Navigator.pop(ctx);
-                },
-              ),
-            ],
-          ),
-        ),
-      );
-    } else {
-      _showReactivateConfirmation(context);
-    }
-  }
-
-  Widget _buildOptionItem({
-    required IconData icon,
-    required String title,
-    required Color color,
-    required VoidCallback onTap,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        onTap: onTap,
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              Icon(icon, color: color),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Text(
-                  title,
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w600,
-                    fontSize: 14,
-                    color: color,
-                  ),
-                ),
-              ),
-              Icon(Icons.chevron_right, color: color.withValues(alpha: 0.5)),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _showDeactivateConfirmation(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
-        title: Text(
-          'Nonaktifkan Akun',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-        ),
-        content: Text(
-          'Apakah Anda yakin ingin menonaktifkan akun ${member.namaLengkap}?',
-          style: GoogleFonts.poppins(fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Batal',
-              style: GoogleFonts.poppins(color: Colors.grey),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${member.namaLengkap} telah dinonaktifkan'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(
-              'Nonaktifkan',
-              style: GoogleFonts.poppins(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showReactivateConfirmation(BuildContext context) {
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(24),
-        ),
-        title: Text(
-          'Aktifkan Kembali',
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w700),
-        ),
-        content: Text(
-          'Apakah Anda yakin ingin mengaktifkan kembali akun ${member.namaLengkap}?',
-          style: GoogleFonts.poppins(fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text(
-              'Batal',
-              style: GoogleFonts.poppins(color: Colors.grey),
-            ),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${member.namaLengkap} telah diaktifkan kembali'),
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00C853),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-            ),
-            child: Text(
-              'Aktifkan',
-              style: GoogleFonts.poppins(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

@@ -1,8 +1,3 @@
-// lib/widgets/pendapatan/pendapatan_header_card.dart
-// ============================================================================
-// PENDAPATAN HEADER CARD - Ringkasan pendapatan bulanan
-// ============================================================================
-
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';

@@ -9,7 +9,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'overtime_rate_service.dart';
 
 
-// ENUM & CONSTANTS (Top-Level)
+// ==================== ENUM & CONSTANTS (Top-Level) ====================
 
 
 /// Channel notifikasi yang didukung
@@ -33,7 +33,7 @@ const Map<String, String> notificationTypes = {
   'lembur_completed': 'Lembur Selesai',
   'lembur_confirmed': 'Lembur Dikonfirmasi',
   'general': 'Notifikasi Umum',
-  'hsse_risk_validation': 'Validasi Risiko HSSE',  // 🔥 BARU
+  'hsse_risk_validation': 'Validasi Risiko HSSE',
 };
 
 /// Priority level
@@ -51,11 +51,11 @@ const List<NotificationChannel> defaultChannels = [
 ];
 
 
-// NOTIFICATION SERVICE
+// ==================== NOTIFICATION SERVICE ====================
 
 
 /// Service untuk mengelola notifikasi multi-channel
-/// Mendukung: Firestore Notification, Email (mailto), WhatsApp (Fonnte API)
+/// Mendukung: Firestore Notification, Email (mailto), WhatsApp (Fonnte API), Push Notification (FCM via Cloudflare Worker)
 class NotificationService {
   // ==================== SINGLETON ====================
   static final NotificationService _instance = NotificationService._internal();
@@ -77,6 +77,174 @@ class NotificationService {
   
   // Base URL aplikasi
   static const String _baseUrl = 'https://otp-pge.web.app';
+
+  // Cloudflare Worker (Push Notification via FCM)
+  static const String _pushWorkerUrl =
+      'https://pge-overtime-notify.overtime-tracking-pertamina.workers.dev';
+  static const String _pushSharedSecret = 'Cbxq25OjimF8oSkPNIaTWr6tuwUBYnvghR9XHVJ7';
+
+  // ==================== 🔥 PRIORITY NOTIFICATION TYPES ====================
+  
+  /// Tipe notifikasi yang menggunakan suara custom OTP & channel prioritas
+  static const List<String> priorityNotificationTypes = [
+    'lembur_submitted',
+    'lembur_approved',
+    'lembur_rejected',
+    'lembur_assignment',
+    'hsse_risk_validation',
+  ];
+
+  /// Cek apakah tipe notifikasi termasuk prioritas (suara OTP)
+  static bool isPriorityType(String type) {
+    return priorityNotificationTypes.contains(type);
+  }
+
+  // ==================== 🔥 GET NOTIFICATIONS STREAM (REAL-TIME) ====================
+  
+  /// Stream notifikasi real-time untuk user tertentu
+  Stream<List<Map<String, dynamic>>> getNotificationsStream(String userId) {
+    try {
+      return _firestore
+          .collection(collectionNotifications)
+          .where('userId', isEqualTo: userId)
+          .orderBy('createdAt', descending: true)
+          .snapshots()
+          .map((snapshot) {
+            return snapshot.docs.map((doc) {
+              final data = doc.data();
+              return {
+                'id': doc.id,
+                ...data,
+                'createdAt': (data['createdAt'] as Timestamp?)?.toDate(),
+                'readAt': (data['readAt'] as Timestamp?)?.toDate(),
+              };
+            }).toList();
+          });
+    } catch (e) {
+      debugPrint('❌ Error creating notifications stream - $e');
+      return Stream.value([]);
+    }
+  }
+
+  /// Stream notifikasi user (real-time) dengan limit
+  Stream<List<Map<String, dynamic>>> getUserNotifications(String userId, {int limit = 50}) {
+    return _firestore
+        .collection(collectionNotifications)
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map((snapshot) => snapshot.docs.map((doc) {
+              final data = doc.data();
+              return {
+                'id': doc.id,
+                ...data,
+                'createdAt': (data['createdAt'] as Timestamp?)?.toDate(),
+                'readAt': (data['readAt'] as Timestamp?)?.toDate(),
+              };
+            }).toList());
+  }
+
+  /// Get notifikasi (Future, one-time fetch)
+  Future<List<Map<String, dynamic>>> getNotificationsOnce(String userId, {int limit = 20}) async {
+    try {
+      final snapshot = await _firestore
+          .collection(collectionNotifications)
+          .where('userId', isEqualTo: userId)
+          .orderBy('createdAt', descending: true)
+          .limit(limit)
+          .get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          ...data,
+          'createdAt': (data['createdAt'] as Timestamp?)?.toDate(),
+          'readAt': (data['readAt'] as Timestamp?)?.toDate(),
+        };
+      }).toList();
+    } catch (e) {
+      debugPrint('❌ Error getNotificationsOnce - $e');
+      return [];
+    }
+  }
+
+  /// Tandai notifikasi sudah dibaca
+  Future<void> markAsRead(String notificationId) async {
+    try {
+      await _firestore.collection(collectionNotifications).doc(notificationId).update({
+        'isRead': true,
+        'readAt': FieldValue.serverTimestamp(),
+      });
+      debugPrint('✅ Notification $notificationId marked as read');
+    } catch (e) {
+      debugPrint('❌ Error markAsRead - $e');
+    }
+  }
+
+  /// Tandai semua notifikasi user sudah dibaca
+  Future<void> markAllAsRead(String userId) async {
+    try {
+      final snapshot = await _firestore
+          .collection(collectionNotifications)
+          .where('userId', isEqualTo: userId)
+          .where('isRead', isEqualTo: false)
+          .get();
+
+      if (snapshot.docs.isEmpty) return;
+
+      final batch = _firestore.batch();
+      for (final doc in snapshot.docs) {
+        batch.update(doc.reference, {
+          'isRead': true,
+          'readAt': FieldValue.serverTimestamp(),
+        });
+      }
+      await batch.commit();
+      debugPrint('✅ Marked ${snapshot.docs.length} as read for user $userId');
+    } catch (e) {
+      debugPrint('❌ Error markAllAsRead - $e');
+    }
+  }
+
+  /// Hitung notifikasi belum dibaca
+  Future<int> getUnreadCount(String userId) async {
+    try {
+      final snapshot = await _firestore
+          .collection(collectionNotifications)
+          .where('userId', isEqualTo: userId)
+          .where('isRead', isEqualTo: false)
+          .count()
+          .get();
+      return snapshot.count ?? 0;
+    } catch (e) {
+      debugPrint('❌ Error getUnreadCount - $e');
+      return 0;
+    }
+  }
+
+  /// Hapus notifikasi lama (cleanup)
+  Future<void> cleanOldNotifications({int daysOld = 30}) async {
+    try {
+      final cutoffDate = DateTime.now().subtract(Duration(days: daysOld));
+      final snapshot = await _firestore
+          .collection(collectionNotifications)
+          .where('createdAt', isLessThan: Timestamp.fromDate(cutoffDate))
+          .get();
+
+      if (snapshot.docs.isEmpty) return;
+
+      final batch = _firestore.batch();
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
+      }
+      await batch.commit();
+      debugPrint('✅ Cleaned ${snapshot.docs.length} old notifications');
+    } catch (e) {
+      debugPrint('❌ Error cleanOld - $e');
+    }
+  }
 
   // ==================== 🔥 HSSE RISK VALIDATION NOTIFICATION ====================
 
@@ -200,7 +368,7 @@ class NotificationService {
   }
 
   
-  // SECTION 1: MANAGER NOTIFICATION - PENGAJUAN BARU
+  // ==================== SECTION 1: MANAGER NOTIFICATION - PENGAJUAN BARU ====================
   
 
   /// Kirim notifikasi pengajuan lembur baru ke manager
@@ -381,7 +549,7 @@ class NotificationService {
   }
 
   
-  // SECTION 2: APPROVAL RESULT NOTIFICATION
+  // ==================== SECTION 2: APPROVAL RESULT NOTIFICATION ====================
   
 
   /// Kirim notifikasi hasil approval ke pengawas
@@ -492,7 +660,7 @@ class NotificationService {
   }
 
   
-  // SECTION 3: MITRA ASSIGNMENT NOTIFICATION
+  // ==================== SECTION 3: MITRA ASSIGNMENT NOTIFICATION ====================
   
 
   /// Kirim notifikasi penugasan ke mitra
@@ -586,7 +754,7 @@ class NotificationService {
   }
 
   
-  // SECTION 4: ABSENSI REMINDER
+  // ==================== SECTION 4: ABSENSI REMINDER ====================
   
 
   /// Kirim pengingat absensi ke mitra
@@ -649,7 +817,7 @@ class NotificationService {
   }
 
   
-  // SECTION 5: SPKL READY NOTIFICATION
+  // ==================== SECTION 5: SPKL READY NOTIFICATION ====================
   
 
   /// Kirim notifikasi SPKL siap ke pengawas dan mitra
@@ -754,7 +922,7 @@ class NotificationService {
   }
 
   
-  // SECTION 6: MITRA STATUS NOTIFICATIONS
+  // ==================== SECTION 6: MITRA STATUS NOTIFICATIONS ====================
   
 
   /// Notifikasi check-in mitra ke pengawas
@@ -846,7 +1014,7 @@ class NotificationService {
   }
 
   
-  // SECTION 7: GENERAL NOTIFICATION
+  // ==================== SECTION 7: GENERAL NOTIFICATION ====================
   
 
   /// Kirim notifikasi umum ke user
@@ -895,131 +1063,46 @@ class NotificationService {
   }
 
   
-  // SECTION 8: GET & MANAGE NOTIFICATIONS
+  // ==================== 🔥 TESTING METHOD ====================
   
 
-  /// Stream notifikasi user (real-time)
-  Stream<List<Map<String, dynamic>>> getUserNotifications(String userId, {int limit = 50}) {
-    return _firestore
-        .collection(collectionNotifications)
-        .where('userId', isEqualTo: userId)
-        .orderBy('createdAt', descending: true)
-        .limit(limit)
-        .snapshots()
-        .map((snapshot) => snapshot.docs.map((doc) {
-              final data = doc.data();
-              return {
-                'id': doc.id,
-                ...data,
-                'createdAt': (data['createdAt'] as Timestamp?)?.toDate(),
-                'readAt': (data['readAt'] as Timestamp?)?.toDate(),
-              };
-            }).toList());
-  }
-
-  /// Get notifikasi (Future, one-time fetch)
-  Future<List<Map<String, dynamic>>> getNotificationsOnce(String userId, {int limit = 20}) async {
+  /// Method untuk testing push notification (development only)
+  Future<void> testPushNotification({
+    required String userId,
+    bool testPriority = true,
+  }) async {
     try {
-      final snapshot = await _firestore
-          .collection(collectionNotifications)
-          .where('userId', isEqualTo: userId)
-          .orderBy('createdAt', descending: true)
-          .limit(limit)
-          .get();
-
-      return snapshot.docs.map((doc) {
-        final data = doc.data();
-        return {
-          'id': doc.id,
-          ...data,
-          'createdAt': (data['createdAt'] as Timestamp?)?.toDate(),
-          'readAt': (data['readAt'] as Timestamp?)?.toDate(),
-        };
-      }).toList();
-    } catch (e) {
-      debugPrint('❌ Error getNotificationsOnce - $e');
-      return [];
-    }
-  }
-
-  /// Tandai notifikasi sudah dibaca
-  Future<void> markAsRead(String notificationId) async {
-    try {
-      await _firestore.collection(collectionNotifications).doc(notificationId).update({
-        'isRead': true,
-        'readAt': FieldValue.serverTimestamp(),
-      });
-      debugPrint('✅ Notification $notificationId marked as read');
-    } catch (e) {
-      debugPrint('❌ Error markAsRead - $e');
-    }
-  }
-
-  /// Tandai semua notifikasi user sudah dibaca
-  Future<void> markAllAsRead(String userId) async {
-    try {
-      final snapshot = await _firestore
-          .collection(collectionNotifications)
-          .where('userId', isEqualTo: userId)
-          .where('isRead', isEqualTo: false)
-          .get();
-
-      if (snapshot.docs.isEmpty) return;
-
-      final batch = _firestore.batch();
-      for (final doc in snapshot.docs) {
-        batch.update(doc.reference, {
-          'isRead': true,
-          'readAt': FieldValue.serverTimestamp(),
-        });
+      final token = await _getUserFcmToken(userId);
+      if (token == null) {
+        debugPrint('❌ User $userId tidak punya FCM token');
+        return;
       }
-      await batch.commit();
-      debugPrint('✅ Marked ${snapshot.docs.length} as read for user $userId');
+
+      final type = testPriority ? 'lembur_submitted' : 'general';
+      
+      await _sendPushNotification(
+        userId: userId,
+        type: type,
+        title: testPriority 
+            ? '🔊 TEST - Notifikasi Prioritas OTP' 
+            : '🔔 TEST - Notifikasi Umum',
+        body: testPriority 
+            ? 'Ini test notifikasi prioritas dengan suara OTP custom' 
+            : 'Ini test notifikasi umum dengan suara default',
+        data: {
+          'test': 'true',
+          'timestamp': DateTime.now().toIso8601String(),
+        },
+      );
+      
+      debugPrint('✅ Test push sent - type: $type');
     } catch (e) {
-      debugPrint('❌ Error markAllAsRead - $e');
-    }
-  }
-
-  /// Hitung notifikasi belum dibaca
-  Future<int> getUnreadCount(String userId) async {
-    try {
-      final snapshot = await _firestore
-          .collection(collectionNotifications)
-          .where('userId', isEqualTo: userId)
-          .where('isRead', isEqualTo: false)
-          .count()
-          .get();
-      return snapshot.count ?? 0;
-    } catch (e) {
-      debugPrint('❌ Error getUnreadCount - $e');
-      return 0;
-    }
-  }
-
-  /// Hapus notifikasi lama (cleanup)
-  Future<void> cleanOldNotifications({int daysOld = 30}) async {
-    try {
-      final cutoffDate = DateTime.now().subtract(Duration(days: daysOld));
-      final snapshot = await _firestore
-          .collection(collectionNotifications)
-          .where('createdAt', isLessThan: Timestamp.fromDate(cutoffDate))
-          .get();
-
-      if (snapshot.docs.isEmpty) return;
-
-      final batch = _firestore.batch();
-      for (final doc in snapshot.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
-      debugPrint('✅ Cleaned ${snapshot.docs.length} old notifications');
-    } catch (e) {
-      debugPrint('❌ Error cleanOld - $e');
+      debugPrint('❌ Test push gagal - $e');
     }
   }
 
   
-  // PRIVATE HELPERS
+  // ==================== PRIVATE HELPERS ====================
   
 
   /// Cek apakah channel tertentu harus dikirim
@@ -1027,7 +1110,7 @@ class NotificationService {
     return channels.contains(channel) || channels.contains(NotificationChannel.all);
   }
 
-  /// Buat notifikasi di Firestore
+  /// Buat notifikasi di Firestore + kirim push notification
   Future<void> _createFirestoreNotification({
     required String userId,
     required String type,
@@ -1048,9 +1131,116 @@ class NotificationService {
         'priorityLabel': priorityLevels[priority] ?? 'info',
         'createdAt': FieldValue.serverTimestamp(),
       });
+      
+      debugPrint('📝 Firestore notification created - type: $type, priority: $priority');
     } catch (e) {
       debugPrint('❌ Error create notification - $e');
       rethrow;
+    }
+
+    // Kirim push notification (best-effort — tidak blocking)
+    _sendPushNotification(
+      userId: userId,
+      type: type,
+      title: title,
+      body: body,
+      data: data,
+    );
+  }
+
+  /// Kirim push notification via Cloudflare Worker → FCM
+  Future<void> _sendPushNotification({
+    required String userId,
+    required String type,
+    required String title,
+    required String body,
+    required Map<String, dynamic> data,
+  }) async {
+    try {
+      // 1) Cek preferensi user
+      final prefsAllowed = await _isPushAllowed(userId: userId, type: type);
+      if (!prefsAllowed) {
+        debugPrint('🔕 Push untuk "$type" di-mute user $userId, skip.');
+        return;
+      }
+
+      // 2) Ambil FCM token user
+      final token = await _getUserFcmToken(userId);
+      if (token == null) {
+        debugPrint('ℹ️ User $userId belum punya FCM token, skip push.');
+        return;
+      }
+
+      // 3) Konversi data ke string
+      final stringData = data.map((k, v) => MapEntry(k, v.toString()));
+      
+      // 4) Tentukan apakah ini notifikasi prioritas
+      final isPriority = isPriorityType(type);
+
+      // 5) Kirim ke Cloudflare Worker
+      final payload = {
+        'token': token,
+        'title': title,
+        'body': body,
+        'data': {
+          'type': type,
+          ...stringData,
+        },
+        'is_priority': isPriority,
+      };
+
+      debugPrint('📤 Sending push to Worker - type: $type, priority: $isPriority');
+
+      final response = await http.post(
+        Uri.parse(_pushWorkerUrl),
+        headers: {
+          'Authorization': 'Bearer $_pushSharedSecret',
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode == 200) {
+        final result = jsonDecode(response.body);
+        debugPrint('✅ Push terkirim ke $userId ($type) - ${result['result'] ?? 'OK'}');
+      } else {
+        debugPrint('❌ Push gagal (${response.statusCode}): ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('❌ Error _sendPushNotification - $e');
+      // Tidak rethrow: gagal push bukan alasan menggagalkan seluruh proses
+    }
+  }
+
+  /// Ambil FCM token user dari Firestore
+  Future<String?> _getUserFcmToken(String userId) async {
+    try {
+      final doc = await _firestore.collection(collectionUsers).doc(userId).get();
+      return doc.data()?['fcmToken'] as String?;
+    } catch (e) {
+      debugPrint('❌ Error getUserFcmToken - $e');
+      return null;
+    }
+  }
+
+  /// Cek apakah push notification diizinkan user
+  Future<bool> _isPushAllowed({required String userId, required String type}) async {
+    try {
+      final doc = await _firestore
+          .collection('notification_preferences')
+          .doc(userId)
+          .get();
+
+      if (!doc.exists) return true; // default: semua nyala
+
+      final prefs = doc.data()!;
+      final pushEnabled = prefs['pushEnabled'] ?? true;
+      final typeEnabled = (prefs['types'] as Map<String, dynamic>?)?[type] ?? true;
+
+      return pushEnabled && typeEnabled;
+    } catch (e) {
+      debugPrint('⚠️ Error cek preferensi push - $e');
+      return true; // fallback aman
     }
   }
 
@@ -1253,7 +1443,7 @@ Terima kasih.
   }
 
   
-  // MESSAGE TEMPLATES - BODY (untuk Firestore)
+  // ==================== MESSAGE TEMPLATES - BODY (untuk Firestore) ====================
   
 
   String _buildManagerNotificationBody({
@@ -1341,8 +1531,7 @@ Terima kasih.
   }
 
   
-  // MESSAGE TEMPLATES - EMAIL (existing, tidak berubah)
-  // ... (semua method email template tetap sama seperti kode asli)
+  // ==================== MESSAGE TEMPLATES - EMAIL ====================
   
 
   String _buildManagerEmailBody({
@@ -1492,8 +1681,7 @@ Sistem Lembur PGE Kamojang
   }
 
   
-  // MESSAGE TEMPLATES - WHATSAPP (existing, tidak berubah)
-  // ... (semua method WA template tetap sama seperti kode asli)
+  // ==================== MESSAGE TEMPLATES - WHATSAPP ====================
   
 
   String _buildManagerWaMessage({

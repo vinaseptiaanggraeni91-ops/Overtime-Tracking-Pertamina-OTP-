@@ -107,7 +107,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
   void _applyFilters() {
     setState(() {
       _filteredWorkers = _workers.where((worker) {
-        // 🔥 GANTI departemen -> role
         final searchMatch = _searchQuery.isEmpty ||
             (worker['id_pekerja']?.toString().toLowerCase().contains(_searchQuery) == true) ||
             (worker['nama']?.toString().toLowerCase().contains(_searchQuery) == true) ||
@@ -165,7 +164,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
     final idController = TextEditingController();
     final namaController = TextEditingController();
     String selectedFungsi = 'operation';
-    final roleController = TextEditingController(); // 🔥 ROLE
+    final roleController = TextEditingController();
     final formKey = GlobalKey<FormState>();
 
     showDialog(
@@ -213,7 +212,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
                   validator: (v) => (v == null || v.trim().isEmpty) ? 'Wajib diisi' : null,
                 ),
                 const SizedBox(height: 12),
-                // 🔥 FUNGSI DROPDOWN
                 DropdownButtonFormField<String>(
                   initialValue: 'operation',
                   decoration: InputDecoration(
@@ -223,7 +221,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
                   ),
                   items: const [
                     DropdownMenuItem(value: 'operation', child: Text('Operation')),
-                    DropdownMenuItem(value: 'lab', child: Text('Laboratorium')),
                     DropdownMenuItem(value: 'maintenance', child: Text('Maintenance')),
                     DropdownMenuItem(value: 'hsse', child: Text('HSSE')),
                     DropdownMenuItem(value: 'gpr', child: Text('GPR')),
@@ -232,7 +229,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
                   onChanged: (v) => selectedFungsi = v ?? 'operation',
                 ),
                 const SizedBox(height: 12),
-                // 🔥 ROLE/JABATAN FIELD
                 TextFormField(
                   controller: roleController,
                   decoration: InputDecoration(
@@ -260,7 +256,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
                     'id_pekerja': idController.text.trim(),
                     'nama': namaController.text.trim(),
                     'fungsi': selectedFungsi,
-                    'role': roleController.text.trim(), // 🔥 ROLE
+                    'role': roleController.text.trim(),
                   });
                   await _loadData();
                   _showSnackBar('Pekerja berhasil ditambahkan');
@@ -287,7 +283,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
     final idController = TextEditingController(text: worker['id_pekerja']);
     final namaController = TextEditingController(text: worker['nama']);
     String selectedFungsi = worker['fungsi'] ?? 'operation';
-    final roleController = TextEditingController(text: worker['role'] ?? ''); // 🔥 ROLE
+    final roleController = TextEditingController(text: worker['role'] ?? '');
     final formKey = GlobalKey<FormState>();
 
     showDialog(
@@ -333,7 +329,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
                   validator: (v) => (v == null || v.trim().isEmpty) ? 'Wajib diisi' : null,
                 ),
                 const SizedBox(height: 12),
-                // 🔥 FUNGSI DROPDOWN
                 DropdownButtonFormField<String>(
                   initialValue: selectedFungsi,
                   decoration: InputDecoration(
@@ -352,7 +347,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
                   onChanged: (v) => selectedFungsi = v ?? 'operation',
                 ),
                 const SizedBox(height: 12),
-                // 🔥 ROLE/JABATAN FIELD
                 TextFormField(
                   controller: roleController,
                   decoration: InputDecoration(
@@ -380,7 +374,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
                     'id_pekerja': idController.text.trim(),
                     'nama': namaController.text.trim(),
                     'fungsi': selectedFungsi,
-                    'role': roleController.text.trim(), // 🔥 ROLE
+                    'role': roleController.text.trim(),
                   });
                   await _loadData();
                   _showSnackBar('Pekerja berhasil diupdate');
@@ -547,7 +541,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
         return;
       }
 
-      // Show loading
       if (!mounted) return;
       showDialog(
         context: context,
@@ -574,7 +567,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
       final importResult = await _service.importWorkersBulk(workers);
 
       if (mounted) {
-        Navigator.pop(context); // Close loading
+        Navigator.pop(context);
         _showImportResultDialog(importResult);
       }
     } catch (e) {
@@ -582,7 +575,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
     }
   }
 
-  // 🔥 PARSING CSV MANUAL - DENGAN FIELD ROLE
   Future<List<Map<String, dynamic>>> _parseCsvFile(File file) async {
     try {
       final csvString = await file.readAsString();
@@ -593,11 +585,10 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
           .map((e) => e.trim().toLowerCase().replaceAll('"', ''))
           .toList();
 
-      // Cari index kolom
       int idIndex = -1;
       int namaIndex = -1;
       int fungsiIndex = -1;
-      int roleIndex = -1; // 🔥 ROLE
+      int roleIndex = -1;
 
       for (int i = 0; i < headers.length; i++) {
         final h = headers[i];
@@ -608,16 +599,14 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
         } else if (h.contains('fungsi') || h.contains('divisi') || h.contains('unit')) {
           fungsiIndex = i;
         } else if (h.contains('role') || h.contains('jabatan') || h.contains('posisi') || h.contains('departemen') || h.contains('dept') || h.contains('bagian')) {
-          // 🔥 Detect role/jabatan/departemen -> jadi role
           roleIndex = i;
         }
       }
 
-      // Fallback
       if (idIndex == -1) idIndex = 0;
       if (namaIndex == -1) namaIndex = 1;
       if (fungsiIndex == -1) fungsiIndex = 2;
-      if (roleIndex == -1) roleIndex = 3; // 🔥 ROLE
+      if (roleIndex == -1) roleIndex = 3;
 
       List<Map<String, dynamic>> workers = [];
 
@@ -639,7 +628,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
               ? row[fungsiIndex].trim().replaceAll('"', '').toLowerCase()
               : 'operation',
           'role': roleIndex < row.length
-              ? row[roleIndex].trim().replaceAll('"', '') // 🔥 ROLE
+              ? row[roleIndex].trim().replaceAll('"', '')
               : '',
           'is_active': true,
         });
@@ -652,7 +641,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
     }
   }
 
-  /// Parse satu baris CSV
   List<String> _parseCsvLine(String line) {
     List<String> result = [];
     StringBuffer current = StringBuffer();
@@ -688,7 +676,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
         return;
       }
 
-      // 🔥 CSV header dengan Role
       StringBuffer csv = StringBuffer();
       csv.writeln('ID Pekerja,Nama,Fungsi,Role,Status');
 
@@ -697,12 +684,11 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
           '"${row['ID Pekerja'] ?? ''}",'
           '"${row['Nama'] ?? ''}",'
           '"${row['Fungsi'] ?? ''}",'
-          '"${row['Role'] ?? row['Departemen'] ?? ''}",' // 🔥 ROLE (fallback ke Departemen)
+          '"${row['Role'] ?? row['Departemen'] ?? ''}",'
           '"${row['Status'] ?? ''}"',
         );
       }
 
-      // Save ke file
       final directory = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final filePath = '${directory.path}/master_pekerja_$timestamp.csv';
@@ -736,9 +722,10 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
   // ==================== BUILD ====================
   @override
   Widget build(BuildContext context) {
+    final statusBarHeight = MediaQuery.of(context).padding.top;
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FB),
-      appBar: _buildAppBar(),
       floatingActionButton: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -765,14 +752,15 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
         child: CustomScrollView(
           physics: const BouncingScrollPhysics(),
           slivers: [
+            _buildCompactHeader(statusBarHeight),
             SliverPadding(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 100),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
               sliver: SliverList(
                 delegate: SliverChildListDelegate([
                   FadeTransition(opacity: _fadeAnimation, child: _buildStatsCards()),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   _buildSearchAndFilter(),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 14),
                   _buildWorkerList(),
                 ]),
               ),
@@ -784,72 +772,186 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
-    return AppBar(
+  // ==================== HEADER - COMPACT / MINIMALIS ====================
+  Widget _buildCompactHeader(double statusBarHeight) {
+    final activeWorkers = _masterDataStats['activeWorkers'] ?? 0;
+    final inactiveWorkers = _masterDataStats['inactiveWorkers'] ?? 0;
+
+    return SliverAppBar(
+      pinned: true,
+      snap: false,
+      floating: false,
+      expandedHeight: 0,
+      toolbarHeight: 64,
+      backgroundColor: const Color(0xFF0D3B5C),
       elevation: 0,
-      backgroundColor: Colors.transparent,
-      flexibleSpace: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [Color(0xFF1A5276), Color(0xFF2E86C1)],
-          ),
-          borderRadius: BorderRadius.only(
-            bottomLeft: Radius.circular(32),
-            bottomRight: Radius.circular(32),
-          ),
-          boxShadow: [
-            BoxShadow(color: Color(0x331A5276), blurRadius: 16, offset: Offset(0, 4)),
-          ],
-        ),
-      ),
       leading: IconButton(
-        icon: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
-        ),
+        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
         onPressed: () => context.pop(),
       ),
-      title: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      titleSpacing: 0,
+      title: Row(
         children: [
-          Text(
-            'Master Data Pekerja',
-            style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 20, color: Colors.white),
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.14),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.badge_rounded, color: Colors.white, size: 18),
           ),
-          Text(
-            'Database Pekerja TAD Pertamina',
-            style: GoogleFonts.poppins(fontSize: 11, color: Colors.white70),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Text(
+                'Master Pekerja',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: -0.2,
+                  height: 1.1,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Row(
+                children: [
+                  _buildStatusDot(Colors.green),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$activeWorkers aktif',
+                    style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(width: 6),
+                  _buildStatusDot(Colors.orange),
+                  const SizedBox(width: 4),
+                  Text(
+                    '$inactiveWorkers non-aktif',
+                    style: const TextStyle(color: Colors.white70, fontSize: 10.5, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ],
           ),
         ],
       ),
       actions: [
-        IconButton(
-          icon: const Icon(Icons.download_rounded, color: Colors.white),
-          tooltip: 'Export CSV',
-          onPressed: _exportToCsv,
-        ),
-        IconButton(
-          icon: _isRefreshing
+        _buildHeaderActionButton(
+          icon: _isRefreshing ? null : Icons.refresh_rounded,
+          widget: _isRefreshing
               ? const SizedBox(
-                  width: 20,
-                  height: 20,
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                 )
-              : const Icon(Icons.refresh_rounded, color: Colors.white),
-          tooltip: 'Refresh',
+              : null,
           onPressed: _isRefreshing ? null : _refreshData,
         ),
-        const SizedBox(width: 8),
+        _buildHeaderActionButton(
+          icon: Icons.download_rounded,
+          onPressed: _exportToCsv,
+        ),
+        const SizedBox(width: 6),
       ],
     );
   }
 
+  // ==================== HELPER WIDGETS ====================
+
+  Widget _buildStatusDot(Color color) {
+    return Container(
+      width: 6,
+      height: 6,
+      decoration: BoxDecoration(
+        color: color,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.5),
+            blurRadius: 6,
+            spreadRadius: 1,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildHeaderActionButton({
+    IconData? icon,
+    Widget? widget,
+    VoidCallback? onPressed,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 2),
+      child: IconButton(
+        icon: widget ??
+            Icon(icon, color: Colors.white, size: 20),
+        onPressed: onPressed,
+        splashRadius: 20,
+        tooltip: icon == Icons.refresh_rounded ? 'Refresh' : 'Export CSV',
+      ),
+    );
+  }
+
+  Widget _buildInfoChip({
+    required IconData icon,
+    required String value,
+    required String label,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.white.withValues(alpha: 0.08),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(4),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: Icon(icon, size: 12, color: color),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                value,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w700,
+                  height: 1,
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                label,
+                style: TextStyle(
+                  color: Colors.white.withValues(alpha: 0.7),
+                  fontSize: 9,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== STATS CARDS ====================
   Widget _buildStatsCards() {
     final total = _masterDataStats['totalWorkers'] ?? 0;
     final active = _masterDataStats['activeWorkers'] ?? 0;
@@ -866,7 +968,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
             color: const Color(0xFF1A5276),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
           child: _StatCard(
             icon: Icons.check_circle_rounded,
@@ -875,7 +977,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
             color: Colors.green,
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
           child: _StatCard(
             icon: Icons.cancel_rounded,
@@ -884,7 +986,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
             color: Colors.red,
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 8),
         Expanded(
           child: _StatCard(
             icon: Icons.work_rounded,
@@ -915,7 +1017,7 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
           child: TextField(
             controller: _searchController,
             decoration: InputDecoration(
-              hintText: 'Cari ID Pekerja, Nama, atau Role...', // 🔥 ROLE
+              hintText: 'Cari ID Pekerja, Nama, atau Role...',
               hintStyle: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[400]),
               prefixIcon: const Icon(Icons.search_rounded, color: Colors.grey),
               suffixIcon: _searchQuery.isNotEmpty
@@ -1189,7 +1291,6 @@ class _MasterPekerjaScreenState extends State<MasterPekerjaScreen>
                   _buildDetailRow('ID Pekerja', worker['id_pekerja'] ?? '-', Icons.badge_rounded),
                   _buildDetailRow('Nama Lengkap', worker['nama'] ?? '-', Icons.person_rounded),
                   _buildDetailRow('Fungsi', worker['fungsi'] ?? '-', Icons.work_rounded),
-                  // 🔥 ROLE/JABATAN
                   _buildDetailRow('Role/Jabatan', worker['role'] ?? '-', Icons.admin_panel_settings_rounded),
                 ],
               ),
@@ -1237,10 +1338,10 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
@@ -1252,21 +1353,21 @@ class _StatCard extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
+              borderRadius: BorderRadius.circular(8),
             ),
-            child: Icon(icon, color: color, size: 20),
+            child: Icon(icon, color: color, size: 18),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: 6),
           Text(
             value,
-            style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: color),
+            style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.bold, color: color),
           ),
           Text(
             label,
-            style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[600]),
+            style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey[600]),
           ),
         ],
       ),
@@ -1346,7 +1447,6 @@ class _WorkerCard extends StatelessWidget {
                       'ID: ${worker['id_pekerja'] ?? '-'} • ${worker['fungsi'] ?? '-'}',
                       style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey[600]),
                     ),
-                    // 🔥 Tampilkan Role/Jabatan jika ada
                     if (worker['role'] != null && worker['role'].toString().isNotEmpty)
                       Text(
                         '${worker['role']}',

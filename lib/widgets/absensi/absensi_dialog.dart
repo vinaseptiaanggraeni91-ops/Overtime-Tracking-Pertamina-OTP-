@@ -1,19 +1,3 @@
-// lib/widgets/absensi/absensi_dialog.dart
-// ============================================================================
-// ABSENSI DIALOG - CLOUDINARY VERSION + KONFIRMASI KETERLAMBATAN
-// ============================================================================
-// Fitur:
-// ✅ Verifikasi GPS dengan timeout & retry
-// ✅ Kamera depan → belakang → galeri (fallback)
-// ✅ Watermark otomatis (koordinat, waktu, nama)
-// ✅ Upload ke Cloudinary (GRATIS 25GB)
-// ✅ Simpan data ke Firestore
-// ✅ Anti double-submit
-// ✅ Cleanup temp file otomatis
-// ✅ UI Corporate dengan step indicator
-// ✅ Konfirmasi Keterlambatan (NEW)
-// ============================================================================
-
 import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';

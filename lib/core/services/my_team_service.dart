@@ -78,8 +78,6 @@ class TeamMember {
     switch (fungsi.toLowerCase()) {
       case 'operation':
         return 'Operation';
-      case 'lab':
-        return 'Laboratorium';
       case 'maintenance':
         return 'Maintenance';
       case 'hsse':

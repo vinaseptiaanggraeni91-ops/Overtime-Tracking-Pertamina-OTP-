@@ -1,4 +1,3 @@
-// lib/widgets/approval/approval_card.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -6,9 +5,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '/core/services/overtime_rate_service.dart';
 
 class ApprovalCard extends StatelessWidget {
-  // 🔥 Static cache
   static final _rateService = OvertimeRateService();
   static final _dateFormatter = DateFormat('dd MMM yyyy', 'id_ID');
+  static final _dateTimeFormatter = DateFormat('dd MMM yyyy, HH:mm', 'id_ID');
   static final Map<String, Color> _fungsiColorCache = {};
   static final Map<String, String> _fungsiLabelCache = {};
 
@@ -36,6 +35,154 @@ class ApprovalCard extends StatelessWidget {
   static const Color textSecondary = Color(0xFF64748B);
   static const Color successColor = Color(0xFF10B981);
 
+  // ===================================================================
+  // 🔥 FORMAT RUPIAH TANPA PEMBULATAN (HARGA ASLI)
+  // ===================================================================
+  static String _formatRupiahAsli(double value) {
+    if (value == 0) return 'Rp 0';
+
+    final intPart = value.floor();
+    final decPart = value - intPart;
+
+    final formattedInt = intPart.toString().replaceAllMapped(
+      RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'),
+      (Match m) => '${m[1]}.',
+    );
+
+    if (decPart > 0) {
+      final decStr = (decPart * 1000).round().toString().padLeft(3, '0');
+      final trimmedDec = decStr.replaceAll(RegExp(r'0+$'), '');
+      if (trimmedDec.isEmpty) {
+        return 'Rp $formattedInt';
+      }
+      return 'Rp $formattedInt,$trimmedDec';
+    }
+
+    return 'Rp $formattedInt';
+  }
+
+  // ===================================================================
+  // 🔥 NORMALISASI TANGGAL
+  // ===================================================================
+  static DateTime? _parseDate(dynamic value) {
+    if (value == null) return null;
+    try {
+      if (value is Timestamp) return value.toDate();
+      if (value is DateTime) return value;
+      if (value is String) return DateTime.tryParse(value);
+      if (value is num) return DateTime.fromMillisecondsSinceEpoch(value.toInt());
+      return null;
+    } catch (e) {
+      debugPrint('❌ ApprovalCard._parseDate error: $value → $e');
+      return null;
+    }
+  }
+
+  static String _formatTanggal(Map<String, dynamic> data) {
+    final dateFieldCandidates = [
+      'tanggal_formatted', 'tanggal', 'tanggal_lembur',
+      'tgl_lembur', 'tanggal_pengajuan', 'tgl_pengajuan', 'created_at',
+    ];
+
+    for (final field in dateFieldCandidates) {
+      final value = data[field];
+      if (value is String && value.isNotEmpty) {
+        if (value.contains(RegExp(r'[A-Za-z]'))) return value;
+        final parsed = _parseDate(value);
+        if (parsed != null) return _dateFormatter.format(parsed);
+      }
+      final parsed = _parseDate(value);
+      if (parsed != null) return _dateFormatter.format(parsed);
+    }
+
+    final submittedAt = _parseDate(data['submitted_at']);
+    if (submittedAt != null) return _dateFormatter.format(submittedAt);
+    return '-';
+  }
+
+  static String _formatJamKerja(Map<String, dynamic> data) {
+    final jamMulai = data['jam_mulai']?.toString() ?? '';
+    final jamSelesai = data['jam_selesai']?.toString() ?? '';
+    if (jamMulai.isNotEmpty && jamSelesai.isNotEmpty) {
+      return '$jamMulai - $jamSelesai';
+    }
+    if (jamMulai.isNotEmpty) return jamMulai;
+
+    final startTime = data['start_time']?.toString() ?? data['waktu_mulai']?.toString() ?? '';
+    final endTime = data['end_time']?.toString() ?? data['waktu_selesai']?.toString() ?? '';
+    if (startTime.isNotEmpty && endTime.isNotEmpty) return '$startTime - $endTime';
+    return '-';
+  }
+
+  // ===================================================================
+  // 🔥🔥🔥 FORMAT BIAYA - FIXED: SUPPORT lembur_mitra 🔥🔥🔥
+  // ===================================================================
+  static String _formatBiaya(Map<String, dynamic> data) {
+    // 1️⃣ Cek display field (dari normalisasi PendingApprovalList)
+    final displayField = data['estimasi_biaya_total_display']?.toString();
+    if (displayField != null && displayField.isNotEmpty && displayField != 'Rp 0') {
+      return displayField;
+    }
+
+    // 2️⃣ Ambil nilai ASLI dari berbagai field (pengajuan_lembur & lembur_mitra)
+    double biaya = 0.0;
+
+    // 🔥 Daftar field biaya (prioritas: pengajuan_lembur dulu, lalu lembur_mitra)
+    final rawValue = data['estimasi_biaya_total_raw'] ??
+        data['estimasi_biaya_total'] ??          // pengajuan_lembur
+        data['estimasi_biaya'] ??                // ✅ lembur_mitra
+        data['estimasi_biaya_per_mitra'] ??      // ✅ lembur_mitra
+        data['total_biaya'] ??
+        data['biaya_total'] ??
+        data['biaya'] ??
+        0;
+
+    if (rawValue is double) {
+      biaya = rawValue;
+    } else if (rawValue is int) {
+      biaya = rawValue.toDouble();
+    } else if (rawValue is num) {
+      biaya = rawValue.toDouble();
+    } else if (rawValue is String) {
+      biaya = double.tryParse(rawValue) ?? 0.0;
+    }
+
+    // 3️⃣ Format tanpa pembulatan
+    final result = _formatRupiahAsli(biaya);
+    debugPrint('💰 Format biaya: raw=$rawValue → biaya=$biaya → result=$result');
+    return result;
+  }
+
+  // ===================================================================
+  // 🔥 FORMAT NAMA - FIXED: SUPPORT lembur_mitra
+  // ===================================================================
+  static String _getNamaPengawas(Map<String, dynamic> data) {
+    return data['nama_pengawas']?.toString() ??
+        data['pengawas_nama_lengkap']?.toString() ??
+        data['nama_mitra']?.toString() ??         // ✅ lembur_mitra
+        data['mitra_nama']?.toString() ??         // ✅ lembur_mitra
+        data['diajukan_oleh_nama']?.toString() ?? // ✅ lembur_mitra
+        data['nama_lengkap']?.toString() ??
+        data['nama']?.toString() ??
+        'Unknown';
+  }
+
+  static String _formatTotalMitra(Map<String, dynamic> data) {
+    final total = data['total_mitra'] ??
+        data['jumlah_mitra'] ??
+        data['mitra_count'] ??
+        1;
+    try {
+      final count = total is int ? total : int.tryParse(total.toString()) ?? 1;
+      return '$count Mitra';
+    } catch (e) {
+      return '1 Mitra';
+    }
+  }
+
+  // ===================================================================
+  // BUILD
+  // ===================================================================
   @override
   Widget build(BuildContext context) {
     final isUrgent = data['urgensi'] == 'kritis' || data['urgensi'] == 'critical';
@@ -51,20 +198,21 @@ class ApprovalCard extends StatelessWidget {
     final isHighRisk = riskLevel == 'high' || riskLevel == 'critical' || riskLevel == 'tinggi';
     final isRisky = isNeedHSSE && isHighRisk;
 
-    DateTime? parsedTanggal;
-    final tanggalData = data['tanggal'] ?? data['tanggal_lembur'];
-    if (tanggalData is Timestamp) parsedTanggal = tanggalData.toDate();
+    // 🔥 GUNAKAN FUNGSI NORMALISASI
+    final formattedTanggal = _formatTanggal(data);
+    final formattedJam = _formatJamKerja(data);
+    final formattedBiaya = _formatBiaya(data);       // ✅ SUDAH FIX
+    final formattedMitra = _formatTotalMitra(data);
+    final namaPengawas = _getNamaPengawas(data);     // ✅ SUDAH FIX
 
-    // 🎨 ACCENT COLOR — yang kasih karakter ke card
+    // 🎨 ACCENT COLOR
     final Color accentColor = isRisky
-        ? const Color(0xFFDC2626) // High risk → merah
+        ? const Color(0xFFDC2626)
         : isNeedHSSE
-            ? const Color(0xFFF59E0B) // Butuh K3 tapi low/medium → orange
+            ? const Color(0xFFF59E0B)
             : isUrgent
-                ? const Color(0xFFEF4444) // Urgent → red
-                : getFungsiColor(data['pengawas_fungsi']); // Normal → warna fungsi
-
-    final fungsiColor = getFungsiColor(data['pengawas_fungsi']);
+                ? const Color(0xFFEF4444)
+                : getFungsiColor(data['pengawas_fungsi']);
 
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0.0, end: 1.0),
@@ -83,9 +231,6 @@ class ApprovalCard extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 10),
         child: Stack(
           children: [
-            // ============================================================
-            // 🔥 MAIN CARD
-            // ============================================================
             GestureDetector(
               onTap: () {
                 if (isBulkMode) {
@@ -114,9 +259,7 @@ class ApprovalCard extends StatelessWidget {
                 ),
                 child: Stack(
                   children: [
-                    // ====================================================
-                    // 🎨 LEFT ACCENT BAR (GRADIENT)
-                    // ====================================================
+                    // LEFT ACCENT BAR
                     Positioned(
                       left: 0,
                       top: 0,
@@ -137,28 +280,23 @@ class ApprovalCard extends StatelessWidget {
                       ),
                     ),
 
-                    // ====================================================
-                    // 📄 CONTENT
-                    // ====================================================
+                    // CONTENT
                     Padding(
                       padding: const EdgeInsets.fromLTRB(20, 14, 14, 14),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // ── HEADER: Avatar + Nama + Badges ──
+                          // HEADER: Avatar + Nama + Badges
                           Row(
                             children: [
-                              // 🟣 Avatar
                               _buildAvatar(accentColor, isRisky),
                               const SizedBox(width: 12),
-
-                              // Nama + Fungsi
                               Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Text(
-                                      data['nama_pengawas'] ?? data['pengawas_nama_lengkap'] ?? 'Unknown',
+                                      namaPengawas,  // ✅ SUDAH FIX
                                       style: GoogleFonts.poppins(
                                         fontSize: 14,
                                         fontWeight: FontWeight.w600,
@@ -180,8 +318,6 @@ class ApprovalCard extends StatelessWidget {
                                   ],
                                 ),
                               ),
-
-                              // Bulk checkbox atau chevron
                               if (isBulkMode)
                                 _buildBulkCheckbox(accentColor)
                               else
@@ -198,42 +334,24 @@ class ApprovalCard extends StatelessWidget {
 
                           const SizedBox(height: 12),
 
-                          // ── BODY: Info Chips ──
+                          // BODY: Info Chips
                           Row(
                             children: [
-                              _buildInfoChip(
-                                Icons.calendar_today_rounded,
-                                parsedTanggal != null ? _dateFormatter.format(parsedTanggal) : '-',
-                                const Color(0xFF3B82F6),
-                              ),
+                              _buildInfoChip(Icons.calendar_today_rounded, formattedTanggal, const Color(0xFF3B82F6)),
                               const SizedBox(width: 8),
-                              _buildInfoChip(
-                                Icons.access_time_rounded,
-                                '${data['jam_mulai'] ?? '-'} - ${data['jam_selesai'] ?? '-'}',
-                                const Color(0xFF8B5CF6),
-                              ),
+                              _buildInfoChip(Icons.access_time_rounded, formattedJam, const Color(0xFF8B5CF6)),
                             ],
                           ),
                           const SizedBox(height: 8),
                           Row(
                             children: [
-                              _buildInfoChip(
-                                Icons.people_rounded,
-                                '${data['total_mitra'] ?? 1} Mitra',
-                                const Color(0xFF10B981),
-                              ),
+                              _buildInfoChip(Icons.people_rounded, formattedMitra, const Color(0xFF10B981)),
                               const SizedBox(width: 8),
-                              _buildInfoChip(
-                                Icons.receipt_long_rounded,
-                                _rateService.formatRupiahCompact(
-                                  (data['estimasi_biaya_total'] ?? 0).toDouble(),
-                                ),
-                                const Color(0xFFF59E0B),
-                              ),
+                              _buildInfoChip(Icons.receipt_long_rounded, formattedBiaya, const Color(0xFFF59E0B)),
                             ],
                           ),
 
-                          // ── TAGS: Weekend / Override / Outside ──
+                          // TAGS
                           if (isWeekend || isOverride || isOutside) ...[
                             const SizedBox(height: 10),
                             Wrap(
@@ -247,7 +365,7 @@ class ApprovalCard extends StatelessWidget {
                             ),
                           ],
 
-                          // ── ALASAN (kalau ada) ──
+                          // ALASAN
                           if ((data['alasan']?.toString() ?? '').isNotEmpty) ...[
                             const SizedBox(height: 10),
                             Container(
@@ -278,7 +396,7 @@ class ApprovalCard extends StatelessWidget {
                       ),
                     ),
 
-                    // ── SELECTED OVERLAY ──
+                    // SELECTED OVERLAY
                     if (isSelected)
                       Positioned.fill(
                         child: Container(
@@ -301,6 +419,7 @@ class ApprovalCard extends StatelessWidget {
   // ==================== HELPER WIDGETS ====================
 
   Widget _buildAvatar(Color accentColor, bool isRisky) {
+    final nama = _getNamaPengawas(data);
     return Container(
       width: 44,
       height: 44,
@@ -319,7 +438,7 @@ class ApprovalCard extends StatelessWidget {
         child: isRisky
             ? Icon(Icons.health_and_safety_rounded, color: accentColor, size: 20)
             : Text(
-                ((data['nama_pengawas'] ?? data['pengawas_nama_lengkap'] ?? 'U').toString())[0].toUpperCase(),
+                nama.isNotEmpty ? nama[0].toUpperCase() : 'U',
                 style: GoogleFonts.poppins(
                   fontSize: 17,
                   fontWeight: FontWeight.w700,
@@ -356,16 +475,9 @@ class ApprovalCard extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Container(
-            width: 5,
-            height: 5,
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
-          ),
+          Container(width: 5, height: 5, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
           const SizedBox(width: 4),
-          Text(
-            label,
-            style: GoogleFonts.poppins(fontSize: 8, color: color, fontWeight: FontWeight.w700),
-          ),
+          Text(label, style: GoogleFonts.poppins(fontSize: 8, color: color, fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -427,10 +539,7 @@ class ApprovalCard extends StatelessWidget {
         height: 24,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(
-            color: isSelected ? accentColor : Colors.grey.shade300,
-            width: 2,
-          ),
+          border: Border.all(color: isSelected ? accentColor : Colors.grey.shade300, width: 2),
           color: isSelected ? accentColor : Colors.transparent,
         ),
         child: isSelected ? const Icon(Icons.check, size: 14, color: Colors.white) : null,
@@ -447,20 +556,12 @@ class ApprovalCard extends StatelessWidget {
 
   static Color _computeFungsiColor(String fungsi) {
     switch (fungsi) {
-      case 'operation':
-        return const Color(0xFF1976D2);
-      case 'lab':
-        return const Color(0xFF4CAF50);
-      case 'maintenance':
-        return const Color(0xFFFF9800);
-      case 'hsse':
-        return const Color(0xFF9C27B0);
-      case 'gpr':
-        return const Color(0xFFEF4444);
-      case 'bs':
-        return const Color(0xFF795548);
-      default:
-        return const Color(0xFF6366F1);
+      case 'operation': return const Color(0xFF1976D2);
+      case 'maintenance': return const Color(0xFFFF9800);
+      case 'hsse': return const Color(0xFF9C27B0);
+      case 'gpr': return const Color(0xFFEF4444);
+      case 'bs': return const Color(0xFF795548);
+      default: return const Color(0xFF6366F1);
     }
   }
 
@@ -471,20 +572,12 @@ class ApprovalCard extends StatelessWidget {
 
   static String _computeFungsiLabel(String fungsi) {
     switch (fungsi) {
-      case 'operation':
-        return 'Operation';
-      case 'lab':
-        return 'Laboratorium';
-      case 'maintenance':
-        return 'Maintenance';
-      case 'hsse':
-        return 'HSSE';
-      case 'gpr':
-        return 'GPR';
-      case 'bs':
-        return 'BS';
-      default:
-        return fungsi.isNotEmpty ? fungsi : 'Unknown';
+      case 'operation': return 'Operation';
+      case 'maintenance': return 'Maintenance';
+      case 'hsse': return 'HSSE';
+      case 'gpr': return 'GPR';
+      case 'bs': return 'Business Support';
+      default: return fungsi.isNotEmpty ? fungsi : 'Unknown';
     }
   }
 }

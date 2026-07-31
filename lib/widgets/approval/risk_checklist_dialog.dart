@@ -18,37 +18,37 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
   // 🔥 Static constants
   static const Color _primaryColor = Color(0xFF9C27B0);
   
-  // 🔥 Checklist items (static, never changes)
+  // 🔥 Checklist K3 Esensial (fleksibel, HSSE bisa menambahkan catatan spesifik)
   static const List<_ChecklistItem> _checklistItems = [
     _ChecklistItem(
       key: 'apd',
-      label: 'APD Lengkap & Sesuai Standar',
+      label: 'APD Lengkap Sesuai Jenis Pekerjaan',
       icon: Icons.health_and_safety,
     ),
     _ChecklistItem(
       key: 'izin',
-      label: 'Izin Kerja Tersedia',
+      label: 'Izin Kerja & Dokumen K3 Lengkap',
       icon: Icons.assignment_turned_in,
     ),
     _ChecklistItem(
-      key: 'prosedur',
-      label: 'Prosedur Safety Terpenuhi',
-      icon: Icons.verified_user,
+      key: 'safety_briefing',
+      label: 'Safety Briefing / Toolbox Meeting',
+      icon: Icons.campaign,
     ),
     _ChecklistItem(
-      key: 'tim',
-      label: 'Tim Tanggap Darurat Siap',
+      key: 'area_aman',
+      label: 'Area Kerja Aman & Rambu K3 Terpasang',
+      icon: Icons.signpost,
+    ),
+    _ChecklistItem(
+      key: 'darurat',
+      label: 'Peralatan Darurat & P3K Siap',
       icon: Icons.emergency,
     ),
     _ChecklistItem(
-      key: 'alat',
-      label: 'Alat Pemadam & P3K Tersedia',
-      icon: Icons.fire_extinguisher,
-    ),
-    _ChecklistItem(
-      key: 'briefing',
-      label: 'Safety Briefing Dilakukan',
-      icon: Icons.campaign,
+      key: 'pengawas',
+      label: 'Pengawas K3 / Safety Officer Standby',
+      icon: Icons.supervisor_account,
     ),
   ];
 
@@ -76,73 +76,75 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      title: _buildHeader(),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Warning Banner
-            _buildWarningBanner(),
-            const SizedBox(height: 16),
-            
-            // Progress Indicator
-            _buildProgressIndicator(),
-            const SizedBox(height: 16),
-            
-            // Checklist Title
-            Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: _buildHeader(),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Icon(Icons.checklist_rounded, size: 20, color: _primaryColor),
-                const SizedBox(width: 8),
+                // Info Banner
+                _buildInfoBanner(),
+                const SizedBox(height: 16),
+                
+                // Progress Indicator
+                _buildProgressIndicator(),
+                const SizedBox(height: 16),
+                
+                // Checklist Title
+                Wrap(
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    const Icon(Icons.checklist_rounded, size: 20, color: _primaryColor),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Checklist K3 Esensial',
+                      style: GoogleFonts.poppins(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: const Color(0xFF1E293B),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 4),
                 Text(
-                  'Checklist Kelayakan K3',
+                  'HSSE dapat menyesuaikan poin K3 tambahan di catatan',
                   style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: const Color(0xFF1E293B),
+                    fontSize: 10,
+                    color: Colors.grey[500],
+                    fontStyle: FontStyle.italic,
                   ),
                 ),
-                const Spacer(),
-                // Select All / Clear All
-                _buildQuickAction(),
+                const SizedBox(height: 12),
+                
+                // Checklist Items
+                ..._checklistItems.map((item) => _buildChecklistItem(item)),
+                
+                const SizedBox(height: 20),
+                
+                // Divider
+                const Divider(),
+                const SizedBox(height: 12),
+                
+                // Notes Field - DIPERBESAR & DIPENTINGKAN
+                _buildNotesSection(),
+                
+                // Error Message
+                if (_showError) ...[
+                  const SizedBox(height: 8),
+                  _buildErrorMessage(),
+                ],
               ],
             ),
-            const SizedBox(height: 8),
-            
-            // Checklist Items
-            ..._checklistItems.map((item) => _buildChecklistItem(item)),
-            
-            const SizedBox(height: 16),
-            
-            // Divider
-            const Divider(),
-            const SizedBox(height: 8),
-            
-            // Notes Field
-            Text(
-              'Catatan Safety',
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: const Color(0xFF1E293B),
-              ),
-            ),
-            const SizedBox(height: 8),
-            _buildNotesField(),
-            
-            // Error Message
-            if (_showError) ...[
-              const SizedBox(height: 8),
-              _buildErrorMessage(),
-            ],
-          ],
-        ),
-      ),
-      actions: _buildActions(),
-      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          ),
+          actions: _buildActions(),
+          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        );
+      },
     );
   }
 
@@ -167,7 +169,7 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
               ),
             ],
           ),
-          child: const Icon(Icons.health_and_safety, color: Colors.white, size: 24),
+          child: const Icon(Icons.verified_user, color: Colors.white, size: 24),
         ),
         const SizedBox(width: 12),
         Expanded(
@@ -176,7 +178,7 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text(
-                'Approve HSSE',
+                'Approval HSSE',
                 style: GoogleFonts.poppins(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -185,7 +187,7 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
               ),
               const SizedBox(height: 2),
               Text(
-                'Verifikasi K3 sebelum approval',
+                'Verifikasi K3 oleh HSSE Officer',
                 style: GoogleFonts.poppins(
                   fontSize: 11,
                   color: Colors.grey[500],
@@ -215,40 +217,27 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
     );
   }
 
-  // ============== WARNING BANNER ==============
-  Widget _buildWarningBanner() {
+  // ============== INFO BANNER ==============
+  Widget _buildInfoBanner() {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Colors.orange.withValues(alpha: 0.1),
-            Colors.orange.withValues(alpha: 0.05),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
+        color: _primaryColor.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+        border: Border.all(color: _primaryColor.withValues(alpha: 0.2)),
       ),
       child: Row(
         children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: Colors.orange.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 18),
-          ),
+          const Icon(Icons.info_outline, size: 20, color: _primaryColor),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Pastikan seluruh aspek K3 telah dipenuhi sebelum menyetujui pekerjaan ini',
+              'Checklist ini bersifat esensial. Tambahkan catatan untuk poin K3 spesifik sesuai kondisi lapangan.',
               style: GoogleFonts.poppins(
                 fontSize: 11,
-                color: Colors.orange.shade800,
+                color: _primaryColor,
                 height: 1.4,
+                fontWeight: FontWeight.w500,
               ),
             ),
           ),
@@ -266,15 +255,16 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
       children: [
         Row(
           children: [
-            Text(
-              'Progress: $_checkedCount/${_checklistItems.length} item',
-              style: GoogleFonts.poppins(
-                fontSize: 11,
-                fontWeight: FontWeight.w500,
-                color: Colors.grey[600],
+            Expanded(
+              child: Text(
+                'Progress: $_checkedCount/${_checklistItems.length} item',
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w500,
+                  color: Colors.grey[600],
+                ),
               ),
             ),
-            const Spacer(),
             Text(
               '${(progress * 100).toInt()}%',
               style: GoogleFonts.poppins(
@@ -301,67 +291,18 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
     );
   }
 
-  // ============== QUICK ACTION ==============
-  Widget _buildQuickAction() {
-    if (_allChecked) {
-      return TextButton.icon(
-        onPressed: () {
-          setState(() {
-            for (final key in _checklist.keys) {
-              _checklist[key] = false;
-            }
-            _showError = false;
-          });
-        },
-        icon: const Icon(Icons.clear_all, size: 14),
-        label: Text(
-          'Clear',
-          style: GoogleFonts.poppins(fontSize: 10),
-        ),
-        style: TextButton.styleFrom(
-          foregroundColor: Colors.grey[600],
-          padding: const EdgeInsets.symmetric(horizontal: 8),
-          minimumSize: Size.zero,
-          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        ),
-      );
-    }
-    
-    return TextButton.icon(
-      onPressed: () {
-        setState(() {
-          for (final key in _checklist.keys) {
-            _checklist[key] = true;
-          }
-          _showError = false;
-        });
-      },
-      icon: const Icon(Icons.done_all, size: 14),
-      label: Text(
-        'All',
-        style: GoogleFonts.poppins(fontSize: 10),
-      ),
-      style: TextButton.styleFrom(
-        foregroundColor: _primaryColor,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        minimumSize: Size.zero,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-    );
-  }
-
   // ============== CHECKLIST ITEM ==============
   Widget _buildChecklistItem(_ChecklistItem item) {
     final isChecked = _checklist[item.key] ?? false;
     
     return Container(
-      margin: const EdgeInsets.only(bottom: 4),
+      margin: const EdgeInsets.only(bottom: 6),
       decoration: BoxDecoration(
         color: isChecked ? _primaryColor.withValues(alpha: 0.05) : Colors.transparent,
         borderRadius: BorderRadius.circular(10),
         border: isChecked
             ? Border.all(color: _primaryColor.withValues(alpha: 0.2))
-            : null,
+            : Border.all(color: Colors.grey[200]!),
       ),
       child: CheckboxListTile(
         value: isChecked,
@@ -375,26 +316,26 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
           children: [
             Icon(
               item.icon,
-              size: 16,
-              color: isChecked ? _primaryColor : Colors.grey[400],
+              size: 18,
+              color: isChecked ? _primaryColor : Colors.grey[500],
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             Expanded(
               child: Text(
                 item.label,
                 style: GoogleFonts.poppins(
-                  fontSize: 12,
+                  fontSize: 13,
                   fontWeight: FontWeight.w500,
                   color: isChecked
                       ? const Color(0xFF1E293B)
-                      : Colors.grey[600],
+                      : Colors.grey[700],
                 ),
               ),
             ),
           ],
         ),
         controlAffinity: ListTileControlAffinity.leading,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         activeColor: _primaryColor,
         checkColor: Colors.white,
         dense: true,
@@ -405,31 +346,93 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
     );
   }
 
-  // ============== NOTES FIELD ==============
-  Widget _buildNotesField() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: TextField(
-        controller: _notesController,
-        maxLines: 3,
-        style: GoogleFonts.poppins(fontSize: 12),
-        decoration: InputDecoration(
-          hintText: 'Tambahan catatan terkait K3 (opsional)...',
-          hintStyle: GoogleFonts.poppins(
-            fontSize: 11,
-            color: Colors.grey[400],
-          ),
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: BorderSide.none,
-          ),
-          contentPadding: const EdgeInsets.all(12),
+  // ============== NOTES SECTION (DIPERBESAR & DIPENTINGKAN) ==============
+  Widget _buildNotesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.edit_note, size: 20, color: _primaryColor),
+            const SizedBox(width: 8),
+            Text(
+              'Catatan HSSE Officer',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: const Color(0xFF1E293B),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'WAJIB DIISI',
+                style: GoogleFonts.poppins(
+                  fontSize: 8,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.red,
+                ),
+              ),
+            ),
+          ],
         ),
-      ),
+        const SizedBox(height: 6),
+        Text(
+          'Cantumkan poin K3 spesifik sesuai kondisi lapangan',
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            color: Colors.grey[600],
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.grey[50],
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey[300]!),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.03),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: TextField(
+            controller: _notesController,
+            maxLines: 5, // 🔥 Diperbesar
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              color: const Color(0xFF1E293B),
+            ),
+            decoration: InputDecoration(
+              hintText: 'Contoh catatan HSSE:\n'
+                  '• Detektor gas H2S berfungsi normal\n'
+                  '• Ventilasi area sumur cukup\n'
+                  '• Penerangan area kerja 120 lux\n'
+                  '• Cuaca cerah, angin tenang\n'
+                  '• Tim emergency response siap\n'
+                  '• Dll...',
+              hintStyle: GoogleFonts.poppins(
+                fontSize: 12,
+                color: Colors.grey[400],
+                height: 1.5,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.all(14),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -448,7 +451,7 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              'Harap checklist semua item K3 sebelum menyetujui',
+              'Harap checklist semua item K3 & isi catatan HSSE sebelum menyetujui',
               style: GoogleFonts.poppins(
                 fontSize: 11,
                 color: Colors.red.shade700,
@@ -470,7 +473,7 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
         style: OutlinedButton.styleFrom(
           foregroundColor: Colors.grey[600],
           side: BorderSide(color: Colors.grey[300]!),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),
@@ -478,37 +481,39 @@ class _RiskChecklistDialogState extends State<RiskChecklistDialog> {
         child: Text(
           'Batal',
           style: GoogleFonts.poppins(
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: FontWeight.w500,
           ),
         ),
       ),
       
-      const SizedBox(width: 10),
+      const SizedBox(width: 12),
       
       // Approve Button
       ElevatedButton.icon(
         onPressed: _allChecked
             ? () {
                 final notes = _notesController.text.trim();
-                final message = notes.isEmpty
-                    ? 'Disetujui HSSE - Semua checklist K3 terpenuhi'
-                    : 'Disetujui HSSE: $notes';
+                if (notes.isEmpty) {
+                  setState(() => _showError = true);
+                  return;
+                }
+                final message = 'Disetujui HSSE\nCatatan K3: $notes';
                 widget.onApprove(message);
               }
             : () => setState(() => _showError = true),
-        icon: const Icon(Icons.verified_user, size: 18),
+        icon: const Icon(Icons.verified_user, size: 20),
         label: Text(
-          'Setujui K3',
+          'Setujui',
           style: GoogleFonts.poppins(
-            fontSize: 12,
+            fontSize: 13,
             fontWeight: FontWeight.w600,
           ),
         ),
         style: ElevatedButton.styleFrom(
           backgroundColor: _allChecked ? Colors.green : Colors.grey[400],
           foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(10),
           ),

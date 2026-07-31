@@ -1,11 +1,13 @@
-// lib/widgets/approval/manager/approval_detail_bottom_sheet.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:open_filex/open_filex.dart';
 import '/core/services/overtime_rate_service.dart';
+import '/core/services/spkl_generator_service.dart';
 
 class ApprovalDetailBottomSheet extends StatefulWidget {
   final Map<String, dynamic> data;
@@ -34,33 +36,73 @@ class ApprovalDetailBottomSheet extends StatefulWidget {
   });
 
   @override
-  State<ApprovalDetailBottomSheet> createState() => _ApprovalDetailBottomSheetState();
+  State<ApprovalDetailBottomSheet> createState() =>
+      _ApprovalDetailBottomSheetState();
 }
 
 class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
-  // 🔥 STATIC CACHE - Dibuat sekali, dipakai selamanya
   static final _rateService = OvertimeRateService();
   static final Map<String, String> _fungsiLabelCache = {};
 
-  // 🔥 STATE UNTUK DATA PENGAWAS
+  // 🔥 SPKL Generator Service instance
+  final SpklGeneratorService _spklGenerator = SpklGeneratorService();
+
   Map<String, dynamic>? _pengawasData;
   bool _isLoadingPengawas = true;
+  bool _isLoadingSpkl = false;
+  String _loadingSpklMessage = '';
+
+  // ✅ STATUS YANG DIANGGAP DIBATALKAN
+  static const List<String> _canceledStatuses = [
+    'dibatalkan',
+    'canceled',
+  ];
+
+  // ✅ STATUS YANG SUDAH DISETUJUI (BOLEH AKSES SPKL)
+  static const List<String> _approvedStatuses = [
+    'disetujui',
+    'approved',
+    'selesai',
+    'completed',
+  ];
+
+  // ✅ GETTER ROLE LABEL
+  String get _roleLabel {
+    if (widget.isSuperadmin) return 'Superadmin';
+    if (widget.isManager) return 'Manager';
+    return widget.userRole;
+  }
+
+  // ✅ GETTER: Apakah SPKL boleh diakses?
+  bool get _canAccessSpkl {
+    final status = widget.data['status']?.toString().toLowerCase() ?? '';
+    return _approvedStatuses.contains(status);
+  }
 
   @override
   void initState() {
     super.initState();
     _loadPengawasData();
+
+    // 🔍 DEBUG
+    debugPrint('═══════════════════════════════════════════════');
+    debugPrint('🔍 DETAIL BOTTOM SHEET INIT:');
+    debugPrint('  📌 Role: ${widget.userRole}, isSuperadmin: ${widget.isSuperadmin}');
+    debugPrint('  📌 Status: ${widget.data['status']}');
+    debugPrint('  📌 Can Access SPKL: $_canAccessSpkl');
+    debugPrint('  📌 Group ID: ${widget.data['group_id']}');
+    debugPrint('═══════════════════════════════════════════════');
   }
 
-  // 🔥 AMBIL DATA PENGAWAS DARI COLLECTION USERS
+  // ===========================================================================
+  // LOAD PENGAWAS DATA
+  // ===========================================================================
   Future<void> _loadPengawasData() async {
     try {
       final pengawasId = widget.data['pengawas_id']?.toString() ?? '';
-      
+
       if (pengawasId.isEmpty) {
-        if (mounted) {
-          setState(() => _isLoadingPengawas = false);
-        }
+        if (mounted) setState(() => _isLoadingPengawas = false);
         return;
       }
 
@@ -79,38 +121,246 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
       }
     } catch (e) {
       debugPrint('❌ Error loading pengawas data: $e');
+      if (mounted) setState(() => _isLoadingPengawas = false);
+    }
+  }
+
+  // ===========================================================================
+  // DATE HELPER
+  // ===========================================================================
+  DateTime _toDate(dynamic value) {
+    if (value is DateTime) return value;
+    if (value is Timestamp) return value.toDate();
+    if (value is String && value.isNotEmpty) {
+      return DateTime.tryParse(value) ?? DateTime.now();
+    }
+    return DateTime.now();
+  }
+
+  // ===========================================================================
+  // 🔥 SPKL HELPER METHODS
+  // ===========================================================================
+  String _getSpklNomor() {
+    final candidates = [
+      widget.data['spkl_nomor'],
+      widget.data['spkl_number'],
+      widget.data['no_spkl'],
+      widget.data['nomor_spkl'],
+      widget.data['spkl'] is Map ? (widget.data['spkl'] as Map)['nomor'] : null,
+      widget.data['spkl'] is Map ? (widget.data['spkl'] as Map)['number'] : null,
+    ];
+
+    for (final c in candidates) {
+      if (c != null && c.toString().isNotEmpty) return c.toString();
+    }
+    return '';
+  }
+
+  String _getSpklUrl() {
+    final candidates = [
+      widget.data['spkl_url'],
+      widget.data['spkl_file_url'],
+      widget.data['spkl_generated_url'],
+      widget.data['spkl_download_url'],
+      widget.data['spkl'] is Map ? (widget.data['spkl'] as Map)['url'] : null,
+      widget.data['spkl'] is Map ? (widget.data['spkl'] as Map)['file_url'] : null,
+      widget.data['spkl'] is Map ? (widget.data['spkl'] as Map)['fileUrl'] : null,
+      widget.data['spkl'] is Map ? (widget.data['spkl'] as Map)['download_url'] : null,
+    ];
+
+    for (final c in candidates) {
+      if (c != null && c.toString().isNotEmpty) return c.toString();
+    }
+    return '';
+  }
+
+  Future<void> _openSpklUrl(String url) async {
+    try {
+      String finalUrl = url.trim();
+      if (!finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+        finalUrl = 'https://$finalUrl';
+      }
+
+      final uri = Uri.parse(finalUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('Tidak dapat membuka URL SPKL. Coba gunakan browser.'),
+              backgroundColor: Colors.red,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error opening SPKL URL: $e');
       if (mounted) {
-        setState(() => _isLoadingPengawas = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: ${e.toString().substring(0, 100)}'),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 4),
+          ),
+        );
       }
     }
   }
 
-  // ✅ HELPER: Parse tanggal (support DateTime & Timestamp)
-  DateTime _toDate(dynamic value) {
-    if (value is DateTime) return value;
-    if (value is Timestamp) return value.toDate();
-    return DateTime.now();
+  Future<void> _viewSpkl() async {
+    // ✅ VALIDASI: SPKL hanya bisa diakses jika sudah disetujui
+    if (!_canAccessSpkl) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              '⚠️ SPKL hanya tersedia setelah pengajuan disetujui oleh $_roleLabel.\n'
+              'Silakan setujui pengajuan terlebih dahulu.',
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (_isLoadingSpkl) return;
+
+    try {
+      setState(() {
+        _isLoadingSpkl = true;
+        _loadingSpklMessage = '⏳ Memeriksa SPKL...';
+      });
+
+      final spklUrl = _getSpklUrl();
+      if (spklUrl.isNotEmpty) {
+        setState(() => _loadingSpklMessage = '📱 Membuka URL SPKL...');
+        await _openSpklUrl(spklUrl);
+        return;
+      }
+
+      if (widget.onPreviewSpkl != null) {
+        setState(() => _loadingSpklMessage = '📄 Membuka preview SPKL...');
+        widget.onPreviewSpkl!();
+        return;
+      }
+
+      setState(() => _loadingSpklMessage = '📄 Menyiapkan dokumen SPKL...');
+
+      final dataWithMitra = Map<String, dynamic>.from(widget.data);
+      dataWithMitra['_mitra_list'] = widget.mitraList;
+
+      final filePath = await _spklGenerator.generateSpklFromOvertimeData(dataWithMitra);
+
+      if (filePath.isNotEmpty) {
+        setState(() => _loadingSpklMessage = '📱 Membuka SPKL...');
+
+        final result = await OpenFilex.open(filePath);
+
+        if (result.type == ResultType.done) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('✅ SPKL berhasil dibuka'),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else if (result.type == ResultType.noAppToOpen) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text('⚠️ Tidak ada aplikasi PDF reader.\nInstall PDF reader terlebih dahulu.'),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+        } else {
+          throw Exception('Gagal membuka PDF: ${result.message}');
+        }
+      } else {
+        throw Exception('Gagal generate SPKL dari data lembur');
+      }
+    } catch (e) {
+      debugPrint('❌ Error viewing SPKL: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'SPKL belum dapat ditampilkan.\n'
+              'Silakan coba lagi atau hubungi pengawas.\n\n'
+              '💡 SPKL dapat diakses di menu Riwayat Lembur',
+            ),
+            backgroundColor: Colors.orange,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoadingSpkl = false;
+          _loadingSpklMessage = '';
+        });
+      }
+    }
   }
 
+  // ===========================================================================
+  // BUILD
+  // ===========================================================================
   @override
   Widget build(BuildContext context) {
-    // 🔥 Gunakan static _rateService, bukan buat baru
-    final status = widget.data['status'] ?? 'pending';
+    final status = widget.data['status']?.toString() ?? 'pending';
     final isPending = status == 'pending';
-    final urgensi = widget.data['urgensi'] ?? 'normal';
-    final isOverride = widget.data['is_override'] ?? false;
+    final isCanceled = _canceledStatuses.contains(status);
+    final urgensi = widget.data['urgensi']?.toString() ?? 'normal';
+    final isOverride = widget.data['is_override'] == true;
     final isWeekend = widget.data['jenis_lembur'] == 'hari_libur';
 
     final lokasiData = widget.data['lokasi'];
     final lokasiMap = lokasiData is Map<String, dynamic> ? lokasiData : <String, dynamic>{};
     final isOutside = lokasiMap['is_outside_radius'] == true;
 
-    final totalMitra = widget.data['total_mitra'] ?? 1;
-    final biayaTotal = (widget.data['estimasi_biaya_total'] ?? 0).toDouble();
-    final biayaPerMitra = widget.mitraList.isNotEmpty ? biayaTotal / widget.mitraList.length : 0.0;
-    final canApprove = isPending && (widget.isManager || widget.isSuperadmin);
+    final totalMitra = widget.mitraList.isNotEmpty
+        ? widget.mitraList.length
+        : (widget.data['total_mitra'] ?? 1);
 
-    // 🔥 Cache MediaQuery height
+    double biayaTotal = 0.0;
+    if (widget.data['estimasi_biaya_total'] != null) {
+      biayaTotal = (widget.data['estimasi_biaya_total'] is int
+          ? (widget.data['estimasi_biaya_total'] as int).toDouble()
+          : (widget.data['estimasi_biaya_total'] as num).toDouble());
+    } else if (widget.mitraList.isNotEmpty) {
+      biayaTotal = widget.mitraList.fold(0.0, (sum, mitra) {
+        final biaya = mitra['estimasi_biaya_per_mitra'] ?? mitra['estimasi_biaya'] ?? 0;
+        return sum + (biaya is int ? biaya.toDouble() : (biaya as num).toDouble());
+      });
+    }
+
+    final biayaPerMitra = totalMitra > 0 ? biayaTotal / totalMitra : 0.0;
+
+    // ✅ PERBAIKAN: Superadmin bisa approve/reject, exclude canceled
+    final canApprove = isPending && !isCanceled && (widget.isManager || widget.isSuperadmin);
+    final canReject = isPending && !isCanceled && (widget.isManager || widget.isSuperadmin);
+
     final screenHeight = MediaQuery.of(context).size.height;
 
     return Container(
@@ -138,11 +388,9 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
               borderRadius: BorderRadius.circular(3),
             ),
           ),
-          
-          // Header
-          _buildHeader(status, urgensi, isWeekend, isOverride, isOutside),
-          
-          // Content
+
+          _buildHeader(status, urgensi, isWeekend, isOverride, isOutside, isCanceled),
+
           Expanded(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
@@ -150,29 +398,29 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Informasi Pengawas
                   _buildInfoCard(
                     icon: Icons.person_rounded,
                     iconColor: const Color(0xFF6366F1),
                     title: 'Informasi Pengawas',
                     children: [
-                      _buildInfoRow('Nama', _pengawasData?['nama_lengkap'] ?? widget.data['nama_pengawas'] ?? '-'),
-                      _buildInfoRow('Fungsi', _getFungsiLabelCached(widget.data['pengawas_fungsi'])),
+                      _buildInfoRow('Nama',
+                          _pengawasData?['nama_lengkap'] ?? widget.data['nama_pengawas'] ?? '-'),
+                      _buildInfoRow('Fungsi',
+                          _getFungsiLabelCached(widget.data['pengawas_fungsi'])),
                       _buildInfoRow(
                         'Email',
-                        _isLoadingPengawas 
-                            ? 'Memuat...' 
-                            : _pengawasData?['email'] ?? '-',
+                        _isLoadingPengawas ? 'Memuat...' : _pengawasData?['email'] ?? '-',
                       ),
-                      if (_pengawasData?['phone'] != null && _pengawasData!['phone'].toString().isNotEmpty)
+                      if (_pengawasData?['phone'] != null &&
+                          _pengawasData!['phone'].toString().isNotEmpty)
                         _buildInfoRow('No. HP', _pengawasData!['phone']),
-                      if (_pengawasData?['nip'] != null && _pengawasData!['nip'].toString().isNotEmpty)
+                      if (_pengawasData?['nip'] != null &&
+                          _pengawasData!['nip'].toString().isNotEmpty)
                         _buildInfoRow('NIP', _pengawasData!['nip']),
                     ],
                   ),
                   const SizedBox(height: 12),
 
-                  // Waktu Lembur
                   _buildInfoCard(
                     icon: Icons.access_time_rounded,
                     iconColor: const Color(0xFF10B981),
@@ -180,11 +428,13 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
                     children: [
                       _buildInfoRow(
                         'Tanggal',
-                        widget.data['tanggal'] != null 
-                            ? DateFormat('EEEE, dd MMM yyyy', 'id_ID').format(_toDate(widget.data['tanggal'])) // ✅ FIX
+                        widget.data['tanggal'] != null
+                            ? DateFormat('EEEE, dd MMM yyyy', 'id_ID')
+                                .format(_toDate(widget.data['tanggal']))
                             : '-',
                       ),
-                      _buildInfoRow('Jam', '${widget.data['jam_mulai']} - ${widget.data['jam_selesai']}'),
+                      _buildInfoRow('Jam',
+                          '${widget.data['jam_mulai']} - ${widget.data['jam_selesai']}'),
                       _buildInfoRow(
                         'Durasi',
                         '${(widget.data['total_jam_desimal'] ?? 0).toStringAsFixed(1)} jam',
@@ -196,17 +446,14 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
                   ),
                   const SizedBox(height: 12),
 
-                  // Lokasi
                   if (lokasiMap.isNotEmpty) ...[
                     _buildLokasiCard(lokasiMap),
                     const SizedBox(height: 12),
                   ],
 
-                  // Estimasi Biaya
                   _buildBiayaCard(totalMitra, biayaPerMitra, biayaTotal),
                   const SizedBox(height: 12),
 
-                  // Alasan
                   _buildInfoCard(
                     icon: Icons.description_rounded,
                     iconColor: const Color(0xFFF59E0B),
@@ -231,8 +478,8 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
                     ],
                   ),
 
-                  // Catatan Tambahan
-                  if (widget.data['catatan_tambahan'] != null && widget.data['catatan_tambahan'].toString().isNotEmpty) ...[
+                  if (widget.data['catatan_tambahan'] != null &&
+                      widget.data['catatan_tambahan'].toString().isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _buildInfoCard(
                       icon: Icons.note_add_rounded,
@@ -260,17 +507,13 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
                     ),
                   ],
 
-                  // Daftar Mitra
                   if (widget.mitraList.isNotEmpty) ...[
                     const SizedBox(height: 12),
                     _buildMitraCard(),
                   ],
 
-                  // SPKL
-                  if (widget.data['spkl_nomor'] != null && !isPending) ...[
-                    const SizedBox(height: 12),
-                    _buildSpklCard(),
-                  ],
+                  const SizedBox(height: 12),
+                  _buildSpklCard(),
 
                   const SizedBox(height: 100),
                 ],
@@ -278,15 +521,64 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
             ),
           ),
 
-          // Action Buttons
-          if (canApprove) _buildActionButtons(),
+          // ✅ Tampilkan action buttons ATAU canceled banner
+          if (canApprove || canReject)
+            _buildActionButtons()
+          else if (isCanceled)
+            _buildCanceledBanner(),
         ],
       ),
     );
   }
 
-  // ============== HEADER ==============
-  Widget _buildHeader(String status, String urgensi, bool isWeekend, bool isOverride, bool isOutside) {
+  // ===========================================================================
+  // ✅ CANCELED BANNER
+  // ===========================================================================
+  Widget _buildCanceledBanner() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
+      decoration: BoxDecoration(
+        color: widget.isDarkMode ? const Color(0xFF1E293B) : Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, -3),
+          ),
+        ],
+      ),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.grey.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.grey.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.cancel_outlined, size: 20, color: Colors.grey[600]),
+            const SizedBox(width: 10),
+            Text(
+              'Pengajuan ini telah dibatalkan',
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                fontWeight: FontWeight.w600,
+                color: Colors.grey[600],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // HEADER
+  // ===========================================================================
+  Widget _buildHeader(String status, String urgensi, bool isWeekend,
+      bool isOverride, bool isOutside, bool isCanceled) {
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
       decoration: BoxDecoration(
@@ -304,17 +596,16 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
         children: [
           Row(
             children: [
-              // Status Icon
               Container(
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: _getStatusColor(status).withValues(alpha: 0.1),
+                  color: (isCanceled ? Colors.grey : _getStatusColor(status)).withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Icon(
-                  _getStatusIcon(status),
-                  color: _getStatusColor(status),
+                  isCanceled ? Icons.cancel_rounded : _getStatusIcon(status),
+                  color: isCanceled ? Colors.grey : _getStatusColor(status),
                   size: 24,
                 ),
               ),
@@ -338,23 +629,43 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
                         const SizedBox(width: 4),
                         Text(
                           '${(widget.data['group_id'] ?? '').toString().substring(0, 10)}...',
-                          style: GoogleFonts.poppins(
-                            fontSize: 11,
-                            color: Colors.grey[500],
-                          ),
+                          style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey[500]),
                         ),
                       ],
                     ),
                   ],
                 ),
               ),
-              // Action Icons
-              if (widget.onPreviewSpkl != null && status != 'pending')
-                _buildHeaderAction(
-                  icon: Icons.picture_as_pdf_rounded,
-                  color: Colors.blue,
-                  onTap: widget.onPreviewSpkl,
-                ),
+              // ✅ Tombol SPKL di header - hanya aktif jika sudah disetujui
+              _buildHeaderAction(
+                icon: Icons.picture_as_pdf_rounded,
+                color: _canAccessSpkl ? Colors.red : Colors.grey,
+                onTap: _canAccessSpkl ? _viewSpkl : () {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('⚠️ SPKL hanya tersedia setelah disetujui oleh $_roleLabel'),
+                      backgroundColor: Colors.orange,
+                      duration: const Duration(seconds: 2),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+              ),
+              _buildHeaderAction(
+                icon: Icons.refresh_rounded,
+                color: Colors.green,
+                onTap: () {
+                  setState(() => _loadPengawasData());
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('🔄 Memuat ulang data...'),
+                      backgroundColor: Colors.green,
+                      duration: const Duration(seconds: 1),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+              ),
               _buildHeaderAction(
                 icon: Icons.close_rounded,
                 color: Colors.grey[600]!,
@@ -363,13 +674,16 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
             ],
           ),
           const SizedBox(height: 12),
-          // Status Badges
           Wrap(
             spacing: 6,
             runSpacing: 6,
             children: [
-              _buildStatusBadge(_getStatusLabel(status), _getStatusColor(status)),
-              _buildStatusBadge(urgensi.toUpperCase(), _getUrgensiColor(urgensi)),
+              if (isCanceled)
+                _buildStatusBadge('DIBATALKAN', Colors.grey)
+              else ...[
+                _buildStatusBadge(_getStatusLabel(status), _getStatusColor(status)),
+                _buildStatusBadge(urgensi.toUpperCase(), _getUrgensiColor(urgensi)),
+              ],
               if (isWeekend) _buildStatusBadge('HARI LIBUR', Colors.purple),
               if (isOverride) _buildStatusBadge('OVERRIDE', Colors.orange),
               if (isOutside) _buildStatusBadge('LUAR RADIUS', Colors.deepOrange),
@@ -380,7 +694,11 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  Widget _buildHeaderAction({required IconData icon, required Color color, VoidCallback? onTap}) {
+  Widget _buildHeaderAction({
+    required IconData icon,
+    required Color color,
+    VoidCallback? onTap,
+  }) {
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -400,7 +718,9 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  // ============== INFO CARD ==============
+  // ===========================================================================
+  // INFO CARD
+  // ===========================================================================
   Widget _buildInfoCard({
     required IconData icon,
     required Color iconColor,
@@ -452,7 +772,8 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  Widget _buildInfoRow(String label, String value, {bool isBold = false, Color? valueColor}) {
+  Widget _buildInfoRow(String label, String value,
+      {bool isBold = false, Color? valueColor}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -484,7 +805,9 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  // ============== LOKASI CARD ==============
+  // ===========================================================================
+  // LOKASI CARD
+  // ===========================================================================
   Widget _buildLokasiCard(Map<String, dynamic> lokasi) {
     String alamat = lokasi['alamat'] ?? '';
     final rt = lokasi['rt'] ?? '';
@@ -569,7 +892,7 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
                 Material(
                   color: Colors.transparent,
                   child: InkWell(
-                    onTap: () => _showLokasiOnMap(context, (lat).toDouble(), (lng).toDouble(), alamat),
+                    onTap: () => _showLokasiOptions(context, lat.toDouble(), lng.toDouble(), alamat),
                     borderRadius: BorderRadius.circular(10),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -608,14 +931,10 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: isOutside 
-            ? Colors.orange.withValues(alpha: 0.1) 
-            : Colors.green.withValues(alpha: 0.1),
+        color: isOutside ? Colors.orange.withValues(alpha: 0.1) : Colors.green.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isOutside 
-              ? Colors.orange.withValues(alpha: 0.3) 
-              : Colors.green.withValues(alpha: 0.3),
+          color: isOutside ? Colors.orange.withValues(alpha: 0.3) : Colors.green.withValues(alpha: 0.3),
         ),
       ),
       child: Row(
@@ -640,7 +959,9 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  // ============== BIAYA CARD ==============
+  // ===========================================================================
+  // BIAYA CARD
+  // ===========================================================================
   Widget _buildBiayaCard(int totalMitra, double biayaPerMitra, double biayaTotal) {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -676,11 +997,7 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
               const SizedBox(width: 10),
               Text(
                 'Estimasi Biaya',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Colors.white,
-                ),
+                style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.white),
               ),
             ],
           ),
@@ -719,7 +1036,9 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  // ============== MITRA CARD ==============
+  // ===========================================================================
+  // MITRA CARD
+  // ===========================================================================
   Widget _buildMitraCard() {
     return Container(
       padding: const EdgeInsets.all(16),
@@ -766,11 +1085,7 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
                 ),
                 child: Text(
                   '${widget.mitraList.length} orang',
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    color: const Color(0xFF8B5CF6),
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: GoogleFonts.poppins(fontSize: 11, color: const Color(0xFF8B5CF6), fontWeight: FontWeight.w600),
                 ),
               ),
             ],
@@ -835,7 +1150,8 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  Widget _tableCell(String text, {bool isBold = false, Color? textColor, TextAlign textAlign = TextAlign.start}) {
+  Widget _tableCell(String text,
+      {bool isBold = false, Color? textColor, TextAlign textAlign = TextAlign.start}) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       child: Text(
@@ -850,14 +1166,28 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  // ============== SPKL CARD ==============
+  // ===========================================================================
+  // 🔥 SPKL CARD - FULLY FIXED (2 MODE: LOCKED / AVAILABLE)
+  // ===========================================================================
   Widget _buildSpklCard() {
+    final spklNomor = _getSpklNomor();
+    final spklUrl = _getSpklUrl();
+    final hasSpklUrl = spklUrl.isNotEmpty;
+    final hasSpklNomor = spklNomor.isNotEmpty;
+    final hasPreview = widget.onPreviewSpkl != null;
+    final bool spklReady = hasSpklUrl || hasPreview;
+    final bool isApproved = _canAccessSpkl;
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: widget.isDarkMode ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+        border: Border.all(
+          color: isApproved
+              ? (spklReady ? Colors.green.withValues(alpha: 0.3) : Colors.blue.withValues(alpha: 0.3))
+              : Colors.orange.withValues(alpha: 0.3),
+        ),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.03),
@@ -866,66 +1196,257 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
           ),
         ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.picture_as_pdf_rounded, color: Colors.red, size: 22),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'SPKL',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.red,
-                  ),
+          // Header SPKL
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: isApproved
+                      ? (spklReady ? Colors.green.withValues(alpha: 0.1) : Colors.blue.withValues(alpha: 0.1))
+                      : Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  widget.data['spkl_nomor'] ?? '-',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: widget.isDarkMode ? Colors.white70 : const Color(0xFF475569),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (widget.onPreviewSpkl != null)
-            ElevatedButton.icon(
-              onPressed: widget.onPreviewSpkl,
-              icon: const Icon(Icons.visibility_rounded, size: 16),
-              label: const Text('Lihat'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red.withValues(alpha: 0.1),
-                foregroundColor: Colors.red,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+                child: Icon(
+                  isApproved ? Icons.picture_as_pdf_rounded : Icons.lock_rounded,
+                  color: isApproved ? (spklReady ? Colors.green : Colors.blue) : Colors.orange,
+                  size: 22,
                 ),
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'SPKL 📄',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: widget.isDarkMode ? Colors.white : const Color(0xFF1E293B),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      isApproved
+                          ? (hasSpklNomor ? spklNomor : 'No. SPKL: Auto-Generate')
+                          : '🔒 Menunggu Persetujuan',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: isApproved
+                            ? (widget.isDarkMode ? Colors.white70 : const Color(0xFF475569))
+                            : Colors.orange,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isApproved
+                      ? (spklReady ? Colors.green.withValues(alpha: 0.1) : Colors.blue.withValues(alpha: 0.1))
+                      : Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isApproved
+                        ? (spklReady ? Colors.green.withValues(alpha: 0.3) : Colors.blue.withValues(alpha: 0.3))
+                        : Colors.orange.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Text(
+                  isApproved ? (spklReady ? 'TERSEDIA' : 'SIAP') : '🔒',
+                  style: GoogleFonts.poppins(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    color: isApproved ? (spklReady ? Colors.green : Colors.blue) : Colors.orange,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // ================================================================
+          // MODE 1: BELUM DISETUJUI → Tampilkan info SPKL terkunci
+          // ================================================================
+          if (!isApproved) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.05),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.orange.withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lock_rounded, size: 18, color: Colors.orange[700]),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'SPKL Belum Tersedia',
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.orange[800],
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'SPKL akan otomatis dibuat setelah pengajuan ini disetujui oleh $_roleLabel.\n'
+                          'Silakan setujui pengajuan terlebih dahulu.',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: Colors.orange[700],
+                            height: 1.4,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: Colors.blue.shade600),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'Setujui pengajuan ini untuk membuat SPKL secara otomatis',
+                      style: GoogleFonts.poppins(fontSize: 10, color: Colors.blue.shade600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+
+          // ================================================================
+          // MODE 2: SUDAH DISETUJUI → Tampilkan tombol SPKL
+          // ================================================================
+          if (isApproved) ...[
+            if (_isLoadingSpkl) ...[
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.blue.shade50,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.blue.shade200),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        _loadingSpklMessage.isNotEmpty ? _loadingSpklMessage : 'Memproses...',
+                        style: GoogleFonts.poppins(fontSize: 13, color: Colors.blue.shade700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: _viewSpkl,
+                  icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                  label: Text(
+                    hasSpklUrl ? 'Lihat SPKL' : 'Generate & Lihat SPKL',
+                    style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF10B981),
+                    foregroundColor: Colors.white,
+                    elevation: 0,
+                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (hasSpklUrl)
+                _buildSpklInfoNote(icon: Icons.check_circle_outline, color: Colors.green, text: 'SPKL tersedia. Tap untuk melihat dokumen.')
+              else if (hasPreview)
+                _buildSpklInfoNote(icon: Icons.preview, color: const Color(0xFF6366F1), text: 'SPKL dapat dipreview. Tap tombol di atas.')
+              else
+                _buildSpklInfoNote(icon: Icons.auto_awesome, color: Colors.blue, text: 'SPKL akan digenerate otomatis saat tombol ditekan.'),
+            ],
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.info_outline, size: 14, color: Colors.blue.shade600),
+                  const SizedBox(width: 6),
+                  Flexible(
+                    child: Text(
+                      'SPKL juga dapat diakses di menu Riwayat Lembur',
+                      style: GoogleFonts.poppins(fontSize: 11, color: Colors.blue.shade600),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
-  // ============== ACTION BUTTONS ==============
+  Widget _buildSpklInfoNote({required IconData icon, required Color color, required String text}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color.withValues(alpha: 0.8)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(text, style: GoogleFonts.poppins(fontSize: 10, color: color.withValues(alpha: 0.8))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ===========================================================================
+  // ACTION BUTTONS (DENGAN LABEL DINAMIS)
+  // ===========================================================================
   Widget _buildActionButtons() {
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
       decoration: BoxDecoration(
         color: widget.isDarkMode ? const Color(0xFF1E293B) : Colors.white,
         boxShadow: [
@@ -936,33 +1457,31 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
           ),
         ],
       ),
-      child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: _buildActionButton(
-                label: 'Tolak',
-                icon: Icons.close_rounded,
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFFEF4444),
-                borderColor: const Color(0xFFEF4444),
-                onPressed: widget.onReject,
-              ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildActionButton(
+              label: 'TOLAK',
+              icon: Icons.close_rounded,
+              backgroundColor: const Color(0xFFEF4444).withValues(alpha: 0.1),
+              foregroundColor: const Color(0xFFEF4444),
+              borderColor: const Color(0xFFEF4444),
+              onPressed: widget.onReject,
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              flex: 2,
-              child: _buildActionButton(
-                label: 'Setujui Pengajuan',
-                icon: Icons.check_rounded,
-                backgroundColor: const Color(0xFF10B981),
-                foregroundColor: Colors.white,
-                onPressed: widget.onApprove,
-                hasShadow: true,
-              ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            flex: 2,
+            child: _buildActionButton(
+              label: 'SETUJUI ($_roleLabel)',
+              icon: Icons.check_rounded,
+              backgroundColor: const Color(0xFF10B981),
+              foregroundColor: Colors.white,
+              onPressed: widget.onApprove,
+              hasShadow: true,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -1011,7 +1530,9 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  // ============== STATUS BADGE ==============
+  // ===========================================================================
+  // STATUS BADGE
+  // ===========================================================================
   Widget _buildStatusBadge(String label, Color color) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -1027,162 +1548,78 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     );
   }
 
-  // ============== MAP DIALOG ==============
-  void _showLokasiOnMap(BuildContext context, double lat, double lng, String alamat) {
-    showDialog(
+  // ===========================================================================
+  // LOKASI OPTIONS
+  // ===========================================================================
+  void _showLokasiOptions(BuildContext context, double lat, double lng, String alamat) {
+    showModalBottomSheet(
       context: context,
-      builder: (ctx) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(16),
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.7,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(20),
-          ),
-          clipBehavior: Clip.antiAlias,
-          child: Column(
-            children: [
-              _buildMapHeader(alamat, lat, lng, ctx),
-              Expanded(
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: LatLng(lat, lng),
-                    initialZoom: 18.0,
-                    maxZoom: 19.0,
-                    interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                      userAgentPackageName: 'com.pge.overtimeapp',
-                    ),
-                    MarkerLayer(
-                      markers: [
-                        Marker(
-                          point: LatLng(lat, lng),
-                          width: 120,
-                          height: 80,
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: Colors.white,
-                                  borderRadius: BorderRadius.circular(6),
-                                  boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.25), blurRadius: 6, offset: const Offset(0, 2))],
-                                ),
-                                child: Text('📍 Lokasi Lembur', style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B))),
-                              ),
-                              Container(width: 2, height: 4, color: Colors.red.withValues(alpha: 0.5)),
-                              const Icon(Icons.location_on_rounded, color: Color(0xFFEF4444), size: 32, shadows: [Shadow(color: Colors.black26, blurRadius: 4, offset: Offset(0, 2))]),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(2)),
               ),
-              _buildMapBottomBar(ctx, lat, lng, alamat),
-            ],
-          ),
+            ),
+            const SizedBox(height: 20),
+            Text('Lihat Lokasi', style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: Container(
+                width: 44, height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.satellite_rounded, color: Color(0xFF6366F1)),
+              ),
+              title: Text('Lihat di Peta', style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+              subtitle: Text('Tampilan satelit resolusi tinggi', style: GoogleFonts.poppins(fontSize: 12)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showLokasiOnMap(context, lat, lng, alamat, isSatellite: true);
+              },
+            ),
+            const Divider(height: 8),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildMapHeader(String alamat, double lat, double lng, BuildContext dialogContext) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)], begin: Alignment.topLeft, end: Alignment.bottomRight),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.map_rounded, color: Colors.white, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Lokasi Lembur', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white)),
-                if (alamat.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(alamat, style: GoogleFonts.poppins(fontSize: 11, color: Colors.white70, height: 1.3), maxLines: 2, overflow: TextOverflow.ellipsis),
-                ],
-              ],
-            ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(10)),
-            child: Text('${lat.toStringAsFixed(6)}, ${lng.toStringAsFixed(6)}', style: GoogleFonts.poppins(fontSize: 9, color: Colors.white, fontWeight: FontWeight.w500)),
-          ),
-          const SizedBox(width: 8),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () => Navigator.pop(dialogContext),
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                width: 36, height: 36,
-                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
-              ),
-            ),
-          ),
-        ],
-      ),
+  Future<void> _openInGoogleMaps(double lat, double lng, String label) async {
+    final encodedLabel = Uri.encodeComponent(label);
+    final appUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    final webUri = Uri.parse('https://www.google.com/maps?q=$lat,$lng($encodedLabel)');
+
+    try {
+      if (await canLaunchUrl(appUri)) {
+        await launchUrl(appUri, mode: LaunchMode.externalApplication);
+      } else {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      debugPrint('❌ Error opening Google Maps: $e');
+      await launchUrl(webUri, mode: LaunchMode.externalApplication);
+    }
+  }
+
+  void _showLokasiOnMap(BuildContext context, double lat, double lng, String alamat, {bool isSatellite = true}) {
+    showDialog(
+      context: context,
+      builder: (ctx) => _MapDialog(lat: lat, lng: lng, alamat: alamat, isSatellite: isSatellite),
     );
   }
 
-  Widget _buildMapBottomBar(BuildContext dialogContext, double lat, double lng, String alamat) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        border: Border(top: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.info_outline_rounded, size: 16, color: Colors.grey),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text('Zoom in/out untuk melihat detail area sekitar', style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[600])),
-          ),
-          Material(
-            color: Colors.transparent,
-            child: InkWell(
-              onTap: () {
-                Navigator.pop(dialogContext);
-                _showLokasiOnMap(context, lat, lng, alamat);
-              },
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(border: Border.all(color: Colors.grey.shade300), borderRadius: BorderRadius.circular(8)),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.center_focus_strong_rounded, size: 14, color: Colors.grey[700]),
-                    const SizedBox(width: 4),
-                    Text('Reset', style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[700], fontWeight: FontWeight.w500)),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ============== HELPER: Parse tanggal (support DateTime & Timestamp) ==============
-  
-
-  // ============== HELPER METHODS (CACHED) ==============
+  // ===========================================================================
+  // HELPER METHODS
+  // ===========================================================================
   IconData _getStatusIcon(String status) {
     switch (status) {
       case 'pending': return Icons.hourglass_bottom_rounded;
@@ -1219,7 +1656,6 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
     }
   }
 
-  // 🔥 CACHED VERSION
   String _getFungsiLabelCached(String? f) {
     final key = f?.toLowerCase() ?? 'default';
     return _fungsiLabelCache[key] ??= _computeFungsiLabel(key);
@@ -1227,13 +1663,233 @@ class _ApprovalDetailBottomSheetState extends State<ApprovalDetailBottomSheet> {
 
   String _computeFungsiLabel(String fungsi) {
     switch (fungsi) {
-      case 'operation': return 'Operation';
-      case 'lab': return 'Laboratorium';
+      case 'operation': return 'Operational';
       case 'maintenance': return 'Maintenance';
       case 'hsse': return 'HSSE';
       case 'gpr': return 'GPR';
-      case 'bs': return 'BS';
+      case 'bs': return 'Business Support';
       default: return fungsi.isNotEmpty ? fungsi : 'Unknown';
     }
+  }
+}
+
+// ===========================================================================
+// MAP DIALOG (TETAP SAMA)
+// ===========================================================================
+class _MapDialog extends StatefulWidget {
+  final double lat;
+  final double lng;
+  final String alamat;
+  final bool isSatellite;
+
+  const _MapDialog({required this.lat, required this.lng, required this.alamat, required this.isSatellite});
+
+  @override
+  State<_MapDialog> createState() => _MapDialogState();
+}
+
+class _MapDialogState extends State<_MapDialog> {
+  late bool _isSatellite;
+
+  static const String _satelliteUrl = 'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+  static const String _streetUrl = 'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+
+  String get _currentTileUrl => _isSatellite ? _satelliteUrl : _streetUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _isSatellite = widget.isSatellite;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(8),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        width: MediaQuery.of(context).size.width,
+        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: Stack(
+                children: [
+                  FlutterMap(
+                    options: MapOptions(
+                      initialCenter: LatLng(widget.lat, widget.lng),
+                      initialZoom: 17.0,
+                      minZoom: 5.0,
+                      maxZoom: 21.0,
+                      interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate: _currentTileUrl,
+                        userAgentPackageName: 'com.pge.overtimeapp',
+                        maxZoom: 21,
+                        maxNativeZoom: 20,
+                        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      ),
+                      RichAttributionWidget(
+                        attributions: [
+                          TextSourceAttribution(
+                            _isSatellite ? 'Google Satellite' : 'Google Maps',
+                            onTap: () => launchUrl(Uri.parse('https://maps.google.com')),
+                          ),
+                        ],
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: LatLng(widget.lat, widget.lng),
+                            width: 150,
+                            height: 100,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 2))],
+                                  ),
+                                  child: Text('📍 Lokasi Lembur',
+                                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B))),
+                                ),
+                                Container(width: 2, height: 6, color: Colors.red.withValues(alpha: 0.8)),
+                                const Icon(Icons.location_on_rounded, color: Color(0xFFEF4444), size: 40, shadows: [Shadow(color: Colors.black38, blurRadius: 6)]),
+                              ],
+                            ),
+                          ),
+                          Marker(
+                            point: LatLng(widget.lat, widget.lng),
+                            width: 80,
+                            height: 80,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.4), width: 2),
+                                color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Positioned(
+                    top: 12, right: 12,
+                    child: Column(
+                      children: [
+                        _buildToggleBtn(Icons.satellite_rounded, 'Satelit', _isSatellite, () => setState(() => _isSatellite = true)),
+                        const SizedBox(height: 6),
+                        _buildToggleBtn(Icons.map_rounded, 'Jalan', !_isSatellite, () => setState(() => _isSatellite = false)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _buildBottomBar(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToggleBtn(IconData icon, String label, bool isActive, VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: isActive ? const Color(0xFF6366F1) : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 6, offset: const Offset(0, 2))],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 16, color: isActive ? Colors.white : const Color(0xFF6366F1)),
+              const SizedBox(width: 4),
+              Text(label, style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: isActive ? Colors.white : const Color(0xFF6366F1))),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)], begin: Alignment.topLeft, end: Alignment.bottomRight),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(_isSatellite ? Icons.satellite_rounded : Icons.map_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Lokasi Lembur', style: GoogleFonts.poppins(fontSize: 14, fontWeight: FontWeight.w700, color: Colors.white))),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                child: Text(_isSatellite ? '🛰️ Satelit' : '🛣️ Jalan', style: GoogleFonts.poppins(fontSize: 9, color: Colors.white)),
+              ),
+              const SizedBox(width: 8),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => Navigator.pop(context),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
+                    child: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (widget.alamat.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(widget.alamat, style: GoogleFonts.poppins(fontSize: 11, color: Colors.white70, height: 1.3), maxLines: 2, overflow: TextOverflow.ellipsis),
+          ],
+          const SizedBox(height: 4),
+          Text('${widget.lat.toStringAsFixed(6)}, ${widget.lng.toStringAsFixed(6)}',
+              style: GoogleFonts.poppins(fontSize: 10, color: Colors.white.withValues(alpha: 0.8))),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(color: Colors.grey[50], border: Border(top: BorderSide(color: Colors.grey.shade200))),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 16, color: Colors.grey),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _isSatellite ? 'Tampilan satelit • Tap tombol untuk ganti ke peta jalan' : 'Tampilan jalan • Tap tombol untuk ganti ke satelit',
+              style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[600]),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

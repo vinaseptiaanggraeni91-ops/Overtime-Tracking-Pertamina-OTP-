@@ -1,4 +1,6 @@
 // lib/core/services/overtime_rate_service.dart
+// 🔥 FINAL VERSION - NO ROUNDING, PRESISI PENUH
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -129,14 +131,14 @@ class OvertimeRateService {
     }
   }
 
-  /// Default rates sesuai ketenagakerjaan
+  /// 🔥 PERBAIKAN: Default rates TANPA pembulatan rate_per_hour
   Map<String, dynamic> _getDefaultRates() {
     const defaultGaji = 3000000.0; // Rp 3.000.000
-    final upahPerJam = defaultGaji / jamKerjaPerBulan;
+    final upahPerJam = defaultGaji / jamKerjaPerBulan; // 17341.040462...
     
     return {
       'base_salary': defaultGaji,
-      'rate_per_hour': upahPerJam.roundToDouble(),
+      'rate_per_hour': upahPerJam, // 🔥 JANGAN dibulatkan! Biarkan presisi penuh
       'jam_kerja_per_bulan': jamKerjaPerBulan,
       'max_jam_lembur_per_bulan': maxJamLemburPerBulan,
       'last_updated': null,
@@ -259,6 +261,7 @@ class OvertimeRateService {
     }
   }
 
+  // 🔥 PERBAIKAN: JANGAN bulatkan jam ke atas, gunakan presisi penuh
   double _calculateWeekdayOvertime(
     double totalHours, 
     double ratePerHour, 
@@ -268,16 +271,16 @@ class OvertimeRateService {
     final firstHourMultiplier = (weekdayRates['first_hour_multiplier'] as num?)?.toDouble() ?? 1.5;
     final nextHoursMultiplier = (weekdayRates['next_hours_multiplier'] as num?)?.toDouble() ?? 2.0;
 
-    final roundedHours = totalHours.ceilToDouble();
     double totalCost = 0;
 
-    if (roundedHours <= 1) {
-      totalCost = roundedHours * ratePerHour * firstHourMultiplier;
+    if (totalHours <= 1) {
+      // 🔥 Gunakan totalHours ASLI, jangan dibulatkan
+      totalCost = totalHours * ratePerHour * firstHourMultiplier;
     } else {
       // Jam pertama
-      totalCost += ratePerHour * firstHourMultiplier;
-      // Jam berikutnya
-      final remainingHours = roundedHours - 1;
+      totalCost += 1 * ratePerHour * firstHourMultiplier;
+      // Jam berikutnya (presisi penuh)
+      final remainingHours = totalHours - 1;
       totalCost += remainingHours * ratePerHour * nextHoursMultiplier;
     }
 
@@ -293,19 +296,19 @@ class OvertimeRateService {
     final firstHourMultiplier = (weekdayRates['first_hour_multiplier'] as num?)?.toDouble() ?? 1.5;
     final nextHoursMultiplier = (weekdayRates['next_hours_multiplier'] as num?)?.toDouble() ?? 2.0;
 
-    final roundedHours = totalHours.ceilToDouble();
     double firstHourCost = 0;
     double remainingHoursCost = 0;
     double firstHourActual = 0;
     double remainingHoursActual = 0;
 
-    if (roundedHours <= 1) {
-      firstHourActual = roundedHours;
-      firstHourCost = roundedHours * ratePerHour * firstHourMultiplier;
+    if (totalHours <= 1) {
+      // 🔥 Gunakan totalHours ASLI
+      firstHourActual = totalHours;
+      firstHourCost = totalHours * ratePerHour * firstHourMultiplier;
     } else {
       firstHourActual = 1;
-      firstHourCost = ratePerHour * firstHourMultiplier;
-      remainingHoursActual = roundedHours - 1;
+      firstHourCost = 1 * ratePerHour * firstHourMultiplier;
+      remainingHoursActual = totalHours - 1;
       remainingHoursCost = remainingHoursActual * ratePerHour * nextHoursMultiplier;
     }
 
@@ -315,7 +318,7 @@ class OvertimeRateService {
       'total_cost': totalCost,
       'rate_per_hour': ratePerHour,
       'total_hours': totalHours,
-      'rounded_hours': roundedHours,
+      'rounded_hours': totalHours, // 🔥 Jangan dibulatkan
       'is_holiday': false,
       'breakdown': {
         'type': 'weekday',
@@ -333,6 +336,7 @@ class OvertimeRateService {
     };
   }
 
+  // 🔥 PERBAIKAN: JANGAN bulatkan jam, gunakan presisi penuh
   double _calculateHolidayOvertime(
     double totalHours,
     double ratePerHour,
@@ -343,22 +347,21 @@ class OvertimeRateService {
     final ninthMultiplier = (holidayRates['ninth_hour_multiplier'] as num?)?.toDouble() ?? 3.0;
     final tenthMultiplier = (holidayRates['tenth_plus_multiplier'] as num?)?.toDouble() ?? 4.0;
 
-    final roundedHours = totalHours.ceilToDouble();
     double totalCost = 0;
     
-    // 8 jam pertama
-    final first8Hours = roundedHours < 8 ? roundedHours : 8;
+    // 🔥 8 jam pertama (gunakan totalHours ASLI, bukan ceil)
+    final first8Hours = totalHours < 8 ? totalHours : 8;
     totalCost += first8Hours * ratePerHour * first8Multiplier;
     
     // Jam ke-9
-    if (roundedHours > 8) {
-      final ninthHour = roundedHours < 9 ? roundedHours - 8 : 1;
+    if (totalHours > 8) {
+      final ninthHour = totalHours < 9 ? totalHours - 8 : 1;
       totalCost += ninthHour * ratePerHour * ninthMultiplier;
     }
     
     // Jam ke-10 dan seterusnya
-    if (roundedHours > 9) {
-      final remainingHours = roundedHours - 9;
+    if (totalHours > 9) {
+      final remainingHours = totalHours - 9;
       totalCost += remainingHours * ratePerHour * tenthMultiplier;
     }
     
@@ -375,24 +378,22 @@ class OvertimeRateService {
     final ninthMultiplier = (holidayRates['ninth_hour_multiplier'] as num?)?.toDouble() ?? 3.0;
     final tenthMultiplier = (holidayRates['tenth_plus_multiplier'] as num?)?.toDouble() ?? 4.0;
 
-    final roundedHours = totalHours.ceilToDouble();
-    
     double first8Cost = 0, ninthHourCost = 0, tenthPlusCost = 0;
     double first8Actual = 0, ninthActual = 0, tenthActual = 0;
     
-    // 8 jam pertama
-    first8Actual = roundedHours < 8 ? roundedHours : 8;
+    // 🔥 8 jam pertama (gunakan totalHours ASLI)
+    first8Actual = totalHours < 8 ? totalHours : 8;
     first8Cost = first8Actual * ratePerHour * first8Multiplier;
     
     // Jam ke-9
-    if (roundedHours > 8) {
-      ninthActual = roundedHours < 9 ? roundedHours - 8 : 1;
+    if (totalHours > 8) {
+      ninthActual = totalHours < 9 ? totalHours - 8 : 1;
       ninthHourCost = ninthActual * ratePerHour * ninthMultiplier;
     }
     
     // Jam ke-10+
-    if (roundedHours > 9) {
-      tenthActual = roundedHours - 9;
+    if (totalHours > 9) {
+      tenthActual = totalHours - 9;
       tenthPlusCost = tenthActual * ratePerHour * tenthMultiplier;
     }
     
@@ -402,7 +403,7 @@ class OvertimeRateService {
       'total_cost': totalCost,
       'rate_per_hour': ratePerHour,
       'total_hours': totalHours,
-      'rounded_hours': roundedHours,
+      'rounded_hours': totalHours, // 🔥 Jangan dibulatkan
       'is_holiday': true,
       'breakdown': {
         'type': 'holiday',
@@ -475,6 +476,30 @@ class OvertimeRateService {
 
   // ==================== FORMATTING ====================
   
+  /// Format Rupiah ASLI (tanpa pembulatan, dengan 2 desimal)
+  /// Contoh: Rp 1.234.567,89
+  static String formatRupiahAsli(double amount) {
+    if (amount <= 0) return 'Rp 0';
+    final formatter = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 2,
+    );
+    return formatter.format(amount);
+  }
+
+  /// Format Rupiah FULL (tanpa desimal)
+  /// Contoh: Rp 1.234.567
+  static String formatRupiahFull(double amount) {
+    if (amount <= 0) return 'Rp 0';
+    final formatter = NumberFormat.currency(
+      locale: 'id_ID',
+      symbol: 'Rp ',
+      decimalDigits: 0,
+    );
+    return formatter.format(amount);
+  }
+
   /// Format ke Rupiah lengkap (Rp 1.000.000)
   String formatRupiah(dynamic value) {
     final amount = value is double ? value : (value as num).toDouble();
@@ -518,7 +543,7 @@ class OvertimeRateService {
   void debugPrintRates(Map<String, dynamic> rates) {
     debugPrint('========== OVERTIME RATES ==========');
     debugPrint('Base Salary: ${formatRupiah(rates['base_salary'])}');
-    debugPrint('Rate/Hour: ${formatRupiah(rates['rate_per_hour'])}');
+    debugPrint('Rate/Hour: ${formatRupiahAsli(getRatePerHour(rates))}'); // 🔥 Tampilkan presisi penuh
     debugPrint('Jam Kerja/Bulan: ${rates['jam_kerja_per_bulan']} jam');
     debugPrint('Max Lembur/Bulan: ${rates['max_jam_lembur_per_bulan']} jam');
     debugPrint('');

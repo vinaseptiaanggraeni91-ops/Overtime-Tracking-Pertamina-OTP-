@@ -28,8 +28,6 @@ class RegisterService {
     switch (fungsi) {
       case 'operation':
         return 'Operation';
-      case 'lab':
-        return 'Laboratorium';
       case 'maintenance':
         return 'Maintenance';
       case 'hsse':

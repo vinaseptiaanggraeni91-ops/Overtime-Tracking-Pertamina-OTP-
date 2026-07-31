@@ -49,85 +49,33 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
   static const Color backgroundColor = Color(0xFFF8FAFC);
 
   final List<Map<String, dynamic>> months = [
-    {
-      'name': 'Jan',
-      'icon': Icons.ac_unit_rounded,
-      'color': Color(0xFF3B82F6),
-    },
-    {
-      'name': 'Feb',
-      'icon': Icons.favorite_rounded,
-      'color': Color(0xFFEC4899),
-    },
-    {
-      'name': 'Mar',
-      'icon': Icons.eco_rounded,
-      'color': Color(0xFF22C55E),
-    },
-    {
-      'name': 'Apr',
-      'icon': Icons.water_drop_rounded,
-      'color': Color(0xFF06B6D4),
-    },
-    {
-      'name': 'Mei',
-      'icon': Icons.local_florist_rounded,
-      'color': Color(0xFF8B5CF6),
-    },
-    {
-      'name': 'Jun',
-      'icon': Icons.wb_sunny_rounded,
-      'color': Color(0xFFF59E0B),
-    },
-    {
-      'name': 'Jul',
-      'icon': Icons.beach_access_rounded,
-      'color': Color(0xFF0EA5E9),
-    },
-    {
-      'name': 'Agu',
-      'icon': Icons.flag_rounded,
-      'color': Color(0xFFEF4444),
-    },
-    {
-      'name': 'Sep',
-      'icon': Icons.school_rounded,
-      'color': Color(0xFF6366F1),
-    },
-    {
-      'name': 'Okt',
-      'icon': Icons.spa_rounded,
-      'color': Color(0xFFF97316),
-    },
-    {
-      'name': 'Nov',
-      'icon': Icons.coffee_rounded,
-      'color': Color(0xFF64748B),
-    },
-    {
-      'name': 'Des',
-      'icon': Icons.card_giftcard_rounded,
-      'color': Color(0xFF14B8A6),
-    },
+    {'name': 'Jan', 'icon': Icons.ac_unit_rounded, 'color': Color(0xFF3B82F6)},
+    {'name': 'Feb', 'icon': Icons.favorite_rounded, 'color': Color(0xFFEC4899)},
+    {'name': 'Mar', 'icon': Icons.eco_rounded, 'color': Color(0xFF22C55E)},
+    {'name': 'Apr', 'icon': Icons.water_drop_rounded, 'color': Color(0xFF06B6D4)},
+    {'name': 'Mei', 'icon': Icons.local_florist_rounded, 'color': Color(0xFF8B5CF6)},
+    {'name': 'Jun', 'icon': Icons.wb_sunny_rounded, 'color': Color(0xFFF59E0B)},
+    {'name': 'Jul', 'icon': Icons.beach_access_rounded, 'color': Color(0xFF0EA5E9)},
+    {'name': 'Agu', 'icon': Icons.flag_rounded, 'color': Color(0xFFEF4444)},
+    {'name': 'Sep', 'icon': Icons.school_rounded, 'color': Color(0xFF6366F1)},
+    {'name': 'Okt', 'icon': Icons.spa_rounded, 'color': Color(0xFFF97316)},
+    {'name': 'Nov', 'icon': Icons.coffee_rounded, 'color': Color(0xFF64748B)},
+    {'name': 'Des', 'icon': Icons.card_giftcard_rounded, 'color': Color(0xFF14B8A6)},
   ];
 
-  DateTime get _displayedYear =>
-      DateTime(DateTime.now().year + _yearOffset);
+  DateTime get _displayedYear => DateTime(DateTime.now().year + _yearOffset);
 
   @override
   void initState() {
     super.initState();
-
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 350),
     );
-
     _fadeAnimation = CurvedAnimation(
       parent: _controller,
       curve: Curves.easeOutCubic,
     );
-
     _controller.forward();
   }
 
@@ -146,8 +94,7 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
-    final currentMonth =
-        DateFormat('yyyy-MM').format(DateTime.now());
+    final currentMonth = DateFormat('yyyy-MM').format(DateTime.now());
 
     return FadeTransition(
       opacity: _fadeAnimation,
@@ -157,12 +104,10 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
           end: Offset.zero,
         ).animate(_fadeAnimation),
         child: Container(
-          height: size.height * 0.76,
+          height: size.height * 0.82, // 🔥 Tinggikan dari 0.76 ke 0.82
           decoration: const BoxDecoration(
             color: backgroundColor,
-            borderRadius: BorderRadius.vertical(
-              top: Radius.circular(30),
-            ),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
           ),
           child: Column(
             children: [
@@ -191,10 +136,7 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(18),
                         gradient: const LinearGradient(
-                          colors: [
-                            Color(0xFF1E293B),
-                            Color(0xFF0F172A),
-                          ],
+                          colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
                         ),
                         boxShadow: [
                           BoxShadow(
@@ -210,13 +152,10 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                         size: 26,
                       ),
                     ),
-
                     const SizedBox(width: 14),
-
                     Expanded(
                       child: Column(
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
                             'Pilih Bulan',
@@ -238,7 +177,6 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                         ],
                       ),
                     ),
-
                     GestureDetector(
                       onTap: () {
                         widget.onMonthSelected(currentMonth);
@@ -251,12 +189,10 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                         ),
                         decoration: BoxDecoration(
                           color: accentColor,
-                          borderRadius:
-                              BorderRadius.circular(14),
+                          borderRadius: BorderRadius.circular(14),
                           boxShadow: [
                             BoxShadow(
-                              color:
-                                  accentColor.withOpacity(.25),
+                              color: accentColor.withOpacity(.25),
                               blurRadius: 12,
                               offset: const Offset(0, 5),
                             ),
@@ -264,11 +200,7 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                         ),
                         child: Row(
                           children: [
-                            const Icon(
-                              Icons.today_rounded,
-                              size: 16,
-                              color: Colors.white,
-                            ),
+                            const Icon(Icons.today_rounded, size: 16, color: Colors.white),
                             const SizedBox(width: 6),
                             Text(
                               'Sekarang',
@@ -286,23 +218,17 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                 ),
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 20), // 🔥 Kurangi dari 24 ke 20
 
               // YEAR SELECTOR
               Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 20),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 10,
-                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(22),
-                    border: Border.all(
-                      color: Colors.grey.shade200,
-                    ),
+                    border: Border.all(color: Colors.grey.shade200),
                   ),
                   child: Row(
                     children: [
@@ -310,7 +236,6 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                         icon: Icons.chevron_left_rounded,
                         onTap: () => _changeYear(-1),
                       ),
-
                       Expanded(
                         child: Center(
                           child: Text(
@@ -323,57 +248,35 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                           ),
                         ),
                       ),
-
                       _yearButton(
                         icon: Icons.chevron_right_rounded,
-                        onTap: _yearOffset >= 2
-                            ? null
-                            : () => _changeYear(1),
+                        onTap: _yearOffset >= 2 ? null : () => _changeYear(1),
                       ),
                     ],
                   ),
                 ),
               ),
 
-              const SizedBox(height: 22),
+              const SizedBox(height: 18), // 🔥 Kurangi dari 22 ke 18
 
-              // GRID
+              // 🔥🔥🔥 GRID - PERBAIKAN UTAMA
               Expanded(
                 child: GridView.builder(
-                  padding: const EdgeInsets.fromLTRB(
-                    20,
-                    0,
-                    20,
-                    20,
-                  ),
-                  physics:
-                      const BouncingScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+                  physics: const BouncingScrollPhysics(),
                   itemCount: 12,
-                  gridDelegate:
-                      const SliverGridDelegateWithFixedCrossAxisCount(
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,
-                    crossAxisSpacing: 14,
-                    mainAxisSpacing: 14,
-                    childAspectRatio: .95,
+                    crossAxisSpacing: 12, // 🔥 Kurangi dari 14 ke 12
+                    mainAxisSpacing: 12, // 🔥 Kurangi dari 14 ke 12
+                    childAspectRatio: 1.15, // 🔥🔥🔥 UBAH dari 0.95 ke 1.15 (lebih tinggi)
                   ),
                   itemBuilder: (context, index) {
                     final month = index + 1;
-                    final monthDate = DateTime(
-                      _displayedYear.year,
-                      month,
-                    );
-
-                    final monthStr =
-                        DateFormat('yyyy-MM')
-                            .format(monthDate);
-
-                    final bool isSelected =
-                        widget.selectedMonth ==
-                            monthStr;
-
-                    final bool isCurrentMonth =
-                        currentMonth == monthStr;
-
+                    final monthDate = DateTime(_displayedYear.year, month);
+                    final monthStr = DateFormat('yyyy-MM').format(monthDate);
+                    final bool isSelected = widget.selectedMonth == monthStr;
+                    final bool isCurrentMonth = currentMonth == monthStr;
                     final data = months[index];
 
                     return _MonthCard(
@@ -384,9 +287,7 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
                       isSelected: isSelected,
                       isCurrentMonth: isCurrentMonth,
                       onTap: () {
-                        widget.onMonthSelected(
-                          monthStr,
-                        );
+                        widget.onMonthSelected(monthStr);
                         context.pop();
                       },
                     );
@@ -405,7 +306,6 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
     required VoidCallback? onTap,
   }) {
     final bool disabled = onTap == null;
-
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
@@ -413,22 +313,21 @@ class _MonthPickerContentState extends State<_MonthPickerContent>
         width: 44,
         height: 44,
         decoration: BoxDecoration(
-          color: disabled
-              ? Colors.grey.shade100
-              : const Color(0xFFF1F5F9),
+          color: disabled ? Colors.grey.shade100 : const Color(0xFFF1F5F9),
           borderRadius: BorderRadius.circular(14),
         ),
         child: Icon(
           icon,
-          color: disabled
-              ? Colors.grey.shade400
-              : primaryColor,
+          color: disabled ? Colors.grey.shade400 : primaryColor,
         ),
       ),
     );
   }
 }
 
+// ═══════════════════════════════════════════════════════════
+// 🔥🔥🔥 PERBAIKAN _MonthCard
+// ═══════════════════════════════════════════════════════════
 class _MonthCard extends StatefulWidget {
   final int month;
   final String title;
@@ -460,16 +359,11 @@ class _MonthCardState extends State<_MonthCard>
   @override
   void initState() {
     super.initState();
-
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 120),
     );
-
-    _scaleAnimation = Tween<double>(
-      begin: 1,
-      end: .96,
-    ).animate(_controller);
+    _scaleAnimation = Tween<double>(begin: 1, end: .96).animate(_controller);
   }
 
   @override
@@ -497,22 +391,17 @@ class _MonthCardState extends State<_MonthCard>
         },
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 250),
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.all(10), // 🔥 Kurangi padding dari 14 ke 10
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
             gradient: widget.isSelected
                 ? LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [
-                      widget.color,
-                      widget.color.withOpacity(.82),
-                    ],
+                    colors: [widget.color, widget.color.withOpacity(.82)],
                   )
                 : null,
-            color: widget.isSelected
-                ? null
-                : Colors.white,
+            color: widget.isSelected ? null : Colors.white,
             border: Border.all(
               color: widget.isSelected
                   ? widget.color
@@ -531,80 +420,76 @@ class _MonthCardState extends State<_MonthCard>
               ),
             ],
           ),
-          child: Column(
-            mainAxisAlignment:
-                MainAxisAlignment.center,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: widget.isSelected
-                      ? Colors.white.withOpacity(.18)
-                      : widget.color.withOpacity(.10),
-                ),
-                child: Icon(
-                  widget.icon,
-                  color: widget.isSelected
-                      ? Colors.white
-                      : widget.color,
-                  size: 24,
-                ),
-              ),
-
-              const SizedBox(height: 14),
-
-              Text(
-                widget.title,
-                style: GoogleFonts.poppins(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                  color: widget.isSelected
-                      ? Colors.white
-                      : const Color(0xFF0F172A),
-                ),
-              ),
-
-              const SizedBox(height: 3),
-
-              Text(
-                'Bulan ${widget.month}',
-                style: GoogleFonts.poppins(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w500,
-                  color: widget.isSelected
-                      ? Colors.white70
-                      : Colors.grey.shade500,
-                ),
-              ),
-
-              if (widget.isCurrentMonth &&
-                  !widget.isSelected) ...[
-                const SizedBox(height: 8),
+          // 🔥🔥🔥 GUNAKAN FittedBox atau Flexible untuk mencegah overflow
+          child: FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min, // 🔥 Gunakan min
+              children: [
+                // 🔥 ICON - perkecil ukuran
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
+                  width: 40, // 🔥 Kurangi dari 52 ke 40
+                  height: 40, // 🔥 Kurangi dari 52 ke 40
                   decoration: BoxDecoration(
-                    color: widget.color,
-                    borderRadius:
-                        BorderRadius.circular(20),
+                    shape: BoxShape.circle,
+                    color: widget.isSelected
+                        ? Colors.white.withOpacity(.18)
+                        : widget.color.withOpacity(.10),
                   ),
-                  child: Text(
-                    'CURRENT',
-                    style: GoogleFonts.poppins(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: .5,
+                  child: Icon(
+                    widget.icon,
+                    color: widget.isSelected ? Colors.white : widget.color,
+                    size: 20, // 🔥 Kurangi dari 24 ke 20
+                  ),
+                ),
+
+                const SizedBox(height: 8), // 🔥 Kurangi dari 14 ke 8
+
+                // 🔥 TITLE
+                Text(
+                  widget.title,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13, // 🔥 Kurangi dari 15 ke 13
+                    fontWeight: FontWeight.w700,
+                    color: widget.isSelected ? Colors.white : const Color(0xFF0F172A),
+                  ),
+                ),
+
+                const SizedBox(height: 2), // 🔥 Kurangi dari 3 ke 2
+
+                // 🔥 SUBTITLE
+                Text(
+                  'Bulan ${widget.month}',
+                  style: GoogleFonts.poppins(
+                    fontSize: 10, // 🔥 Kurangi dari 11 ke 10
+                    fontWeight: FontWeight.w500,
+                    color: widget.isSelected ? Colors.white70 : Colors.grey.shade500,
+                  ),
+                ),
+
+                // 🔥 CURRENT BADGE
+                if (widget.isCurrentMonth && !widget.isSelected) ...[
+                  const SizedBox(height: 4), // 🔥 Kurangi dari 8 ke 4
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2), // 🔥 Kurangi
+                    decoration: BoxDecoration(
+                      color: widget.color,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Text(
+                      'NOW', // 🔥 Singkat dari 'CURRENT' ke 'NOW'
+                      style: GoogleFonts.poppins(
+                        fontSize: 8, // 🔥 Kurangi dari 9 ke 8
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        letterSpacing: .5,
+                      ),
                     ),
                   ),
-                ),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),

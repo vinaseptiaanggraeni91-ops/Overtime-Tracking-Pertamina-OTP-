@@ -1,21 +1,16 @@
-// lib/widgets/overtime_history/overtime_detail_sheet.dart
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
-import 'package:open_file/open_file.dart';
-import 'package:printing/printing.dart';
+import 'package:open_filex/open_filex.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '/core/services/overtime_approval_service.dart';
 import '/core/services/overtime_history_service.dart';
 import '/core/services/overtime_rate_service.dart';
 import '/core/services/spkl_generator_service.dart';
 import '/widgets/overtime_history/overtime_helpers.dart';
-
-// ===========================================================================
-// PUBLIC API
-// ===========================================================================
 
 class OvertimeDetailSheet {
   static void show(
@@ -27,9 +22,6 @@ class OvertimeDetailSheet {
   ) {
     if (!context.mounted) return;
     try {
-      final hasSpkl = item.spklGenerated == true &&
-          item.status.toLowerCase() == 'disetujui';
-
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
@@ -46,7 +38,6 @@ class OvertimeDetailSheet {
               return _DetailSheetContent(
                 item: item,
                 rateService: rateService,
-                hasSpkl: hasSpkl,
                 scrollController: scrollController,
               );
             },
@@ -66,13 +57,11 @@ class OvertimeDetailSheet {
 class _DetailSheetContent extends StatefulWidget {
   final OvertimeHistory item;
   final OvertimeRateService rateService;
-  final bool hasSpkl;
   final ScrollController scrollController;
 
   const _DetailSheetContent({
     required this.item,
     required this.rateService,
-    required this.hasSpkl,
     required this.scrollController,
   });
 
@@ -116,8 +105,34 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
   }
 
   // ===========================================================================
+  // 🔥 SPKL STATUS CHECK - SIMPLIFIED
+  // ===========================================================================
+  
+  /// Cek apakah SPKL bisa diakses
+  /// SPKL bisa diakses jika:
+  /// 1. Status disetujui, ATAU
+  /// 2. Data SPKL tersedia (apapun statusnya)
+  bool get _spklAccessible {
+    // Status disetujui
+    if (widget.item.status.toLowerCase() == 'disetujui') return true;
+    
+    // Ada data SPKL (sudah pernah digenerate)
+    if (widget.item.spklGenerated == true) return true;
+    
+    // Ada nomor SPKL
+    if (widget.item.spklNomor != null && widget.item.spklNomor!.isNotEmpty) return true;
+    
+    // Ada group_id (bisa generate SPKL)
+    final groupId = _safeString(widget.item.groupId, '');
+    if (groupId.isNotEmpty) return true;
+    
+    return false;
+  }
+
+  // ===========================================================================
   // SAFE HELPERS
   // ===========================================================================
+
   String _safeString(dynamic val, [String fallback = '-']) {
     if (val == null) return fallback;
     final text = val.toString().trim();
@@ -160,131 +175,280 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
   }
 
   // ===========================================================================
-  // SNACKBAR
+  // 🔥🔥🔥 SPKL ACTION — LIHAT SPKL (MENGIKUTI POLA APPROVAL DETAIL)
   // ===========================================================================
-  void _showSnack(String message, {Color color = Colors.red}) {
+
+  Future<void> _viewSpkl() async {
+    if (_isLoading) return;
     if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(children: [
-          Icon(color == Colors.red ? Icons.error_outline : Icons.info_outline,
-              color: Colors.white, size: 20),
-          const SizedBox(width: 12),
-          Expanded(child: Text(message,
-              style: GoogleFonts.poppins(fontSize: 13, color: Colors.white))),
-        ]),
-        backgroundColor: color,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        duration: const Duration(seconds: 4),
+    
+    try {
+      setState(() { 
+        _isLoading = true; 
+        _loadingMessage = '⏳ Memproses SPKL...';
+      });
+
+      // 🔥 LANGKAH 1: Siapkan data lembur untuk generate SPKL
+      // Konversi OvertimeHistory ke Map seperti di approval detail
+      final overtimeData = _buildOvertimeDataMap();
+      
+      setState(() => _loadingMessage = '📄 Menyiapkan dokumen PDF...');
+      
+      // 🔥 LANGKAH 2: Generate SPKL dari data lembur (seperti approval detail)
+      final filePath = await _spklGenerator.generateSpklFromOvertimeData(overtimeData);
+      
+      if (filePath.isNotEmpty) {
+        setState(() => _loadingMessage = '📱 Membuka SPKL...');
+        
+        final result = await OpenFilex.open(filePath);
+        
+        if (result.type == ResultType.done) {
+          // ✅ Berhasil dibuka
+          if (mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(children: [
+                  const Icon(Icons.check_circle, color: Colors.white, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text('✅ SPKL berhasil dibuka', 
+                      style: GoogleFonts.poppins(fontSize: 13, color: Colors.white))),
+                ]),
+                backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          }
+        } else if (result.type == ResultType.noAppToOpen) {
+          // ⚠️ Tidak ada PDF reader
+          if (mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(child: Text('⚠️ Tidak ada aplikasi PDF reader.\nInstall PDF reader terlebih dahulu.',
+                      style: GoogleFonts.poppins(fontSize: 13, color: Colors.white))),
+                ]),
+                backgroundColor: Colors.orange,
+                behavior: SnackBarBehavior.floating,
+                margin: const EdgeInsets.all(16),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                duration: const Duration(seconds: 4),
+              ),
+            );
+          }
+        } else {
+          throw Exception('Gagal membuka PDF: ${result.message}');
+        }
+      } else {
+        throw Exception('Gagal generate SPKL dari data lembur');
+      }
+    } catch (e) {
+      debugPrint('❌ Error viewing SPKL: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(children: [
+              const Icon(Icons.error_outline, color: Colors.white, size: 20),
+              const SizedBox(width: 12),
+              Expanded(child: Text(
+                'Gagal membuka SPKL. Silakan coba lagi.\n\n'
+                '💡 SPKL dapat diakses di menu Riwayat Lembur',
+                style: GoogleFonts.poppins(fontSize: 13, color: Colors.white))),
+            ]),
+            backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            margin: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) { 
+        setState(() { 
+          _isLoading = false; 
+          _loadingMessage = ''; 
+        }); 
+      }
+    }
+  }
+
+  // 🔥 Konversi OvertimeHistory ke Map untuk SPKL Generator
+  Map<String, dynamic> _buildOvertimeDataMap() {
+    final data = <String, dynamic>{
+      // Data utama
+      'group_id': widget.item.groupId ?? '',
+      'status': widget.item.status ?? 'pending',
+      'tanggal': widget.item.tanggal,
+      'jam_mulai': widget.item.jamMulai ?? '',
+      'jam_selesai': widget.item.jamSelesai ?? '',
+      'total_jam_desimal': widget.item.totalJam ?? 0,
+      'alasan': widget.item.alasan ?? '',
+      'urgensi': 'normal',
+      
+      // Info pengawas
+      'nama_pengawas': widget.item.namaPengaju ?? '',
+      'pengawas_id': widget.item.pengawasId ?? '',
+      
+      // Info mitra (single)
+      'nama_mitra': widget.item.namaMitra ?? '',
+      'fungsi_mitra': widget.item.fungsiMitra ?? '',
+      
+      // Biaya
+      'estimasi_biaya_per_mitra': widget.item.estimasiBiayaPerMitra ?? 0,
+      'estimasi_biaya_total': widget.item.estimasiBiayaTotal ?? 0,
+      'total_mitra': widget.item.totalMitra ?? 1,
+      'is_multiple': widget.item.isMultiple ?? false,
+      
+      // SPKL info
+      'spkl_nomor': widget.item.spklNomor ?? '',
+      'spkl_generated': widget.item.spklGenerated ?? false,
+      
+      // Lokasi
+      'lokasi': widget.item.lokasi ?? {},
+      
+      // Created/Updated
+      'created_at': widget.item.createdAt,
+      'updated_at': widget.item.updatedAt,
+    };
+
+    // 🔥 Tambahkan mitra list jika multiple
+    if (widget.item.isMultiple == true && _mitraList.isNotEmpty) {
+      data['_mitra_list'] = _mitraList.map((mitra) => {
+        'nama_mitra': mitra.namaMitra ?? '',
+        'fungsi_mitra': mitra.fungsiMitra ?? '',
+        'estimasi_biaya_per_mitra': mitra.estimasiBiayaPerMitra ?? 0,
+      }).toList();
+    } else if (widget.item.isMultiple == true) {
+      // Jika mitra list belum load, buat dummy list dengan data yang ada
+      data['_mitra_list'] = [{
+        'nama_mitra': widget.item.namaMitra ?? 'Mitra 1',
+        'fungsi_mitra': widget.item.fungsiMitra ?? '',
+        'estimasi_biaya_per_mitra': widget.item.estimasiBiayaPerMitra ?? 0,
+      }];
+    }
+    
+    return data;
+  }
+
+  // ===========================================================================
+  // 🔥🔥🔥 PETA - MENGIKUTI POLA APPROVAL DETAIL BOTTOM SHEET
+  // ===========================================================================
+
+  void _showLokasiOptions(BuildContext context, double lat, double lng, String alamat) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Text(
+              'Lihat Lokasi',
+              style: GoogleFonts.poppins(
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 16),
+            ListTile(
+              leading: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.satellite_rounded, color: Color(0xFF6366F1)),
+              ),
+              title: Text('Lihat di Peta',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+              subtitle: Text('Tampilan satelit resolusi tinggi',
+                  style: GoogleFonts.poppins(fontSize: 12)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _showLokasiOnMap(context, lat, lng, alamat, isSatellite: true);
+              },
+            ),
+            const Divider(height: 8),
+            ListTile(
+              leading: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: Colors.green.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: const Icon(Icons.open_in_browser_rounded, color: Colors.green),
+              ),
+              title: Text('Buka di Google Maps',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w500)),
+              subtitle: Text('Buka lokasi dengan aplikasi Google Maps',
+                  style: GoogleFonts.poppins(fontSize: 12)),
+              onTap: () {
+                Navigator.pop(ctx);
+                _openInGoogleMaps(lat, lng, alamat);
+              },
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
       ),
     );
   }
 
-  // ===========================================================================
-  // SPKL ACTIONS
-  // ===========================================================================
-  Future<void> _viewSpkl() async {
-    if (_isLoading) return;
-    if (!mounted) return;
+  Future<void> _openInGoogleMaps(double lat, double lng, String label) async {
+    final encodedLabel = Uri.encodeComponent(label);
+    final appUri = Uri.parse('https://www.google.com/maps/search/?api=1&query=$lat,$lng');
+    final webUri = Uri.parse('https://www.google.com/maps?q=$lat,$lng($encodedLabel)');
+
     try {
-      setState(() { _isLoading = true; _loadingMessage = '⏳ Memuat data SPKL...'; });
-      final groupId = _safeString(widget.item.groupId, '');
-      if (groupId.isEmpty) { _showSnack('Group ID tidak ditemukan', color: Colors.orange); return; }
-      if (widget.item.status.toLowerCase() != 'disetujui') { _showSnack('SPKL hanya tersedia untuk lembur yang disetujui', color: Colors.orange); return; }
-      if (widget.item.spklGenerated != true) { _showSnack('SPKL belum dibuat', color: Colors.orange); return; }
-      setState(() => _loadingMessage = '📡 Mengambil data dari server...');
-      final spklData = await _approvalService.getSpkl(groupId);
-      if (spklData == null) { _showSnack('Data SPKL tidak ditemukan', color: Colors.orange); return; }
-      setState(() => _loadingMessage = '📄 Menyiapkan dokumen PDF...');
-      final filePath = await _spklGenerator.generateSpklPdf(spklData);
-      if (filePath.isEmpty) { _showSnack('Gagal membuat file PDF', color: Colors.red); return; }
-      setState(() => _loadingMessage = '📱 Membuka PDF...');
-      final result = await OpenFile.open(filePath);
-      if (result.type == ResultType.noAppToOpen) { _showSnack('Tidak ada aplikasi PDF reader', color: Colors.orange); }
-      else if (result.type != ResultType.done) { _showSnack('Gagal membuka PDF', color: Colors.red); }
+      if (await canLaunchUrl(appUri)) {
+        await launchUrl(appUri, mode: LaunchMode.externalApplication);
+      } else {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
     } catch (e) {
-      _showSnack('Gagal membuka SPKL: $e', color: Colors.red);
-    } finally {
-      if (mounted) { setState(() { _isLoading = false; _loadingMessage = ''; }); }
+      debugPrint('❌ Error opening Google Maps: $e');
+      if (await canLaunchUrl(webUri)) {
+        await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      }
     }
   }
 
-  Future<void> _shareSpkl() async {
-    if (_isLoading) return;
-    if (!mounted) return;
-    try {
-      setState(() { _isLoading = true; _loadingMessage = '⏳ Menyiapkan share SPKL...'; });
-      final groupId = _safeString(widget.item.groupId, '');
-      if (groupId.isEmpty) { _showSnack('Group ID tidak ditemukan', color: Colors.orange); return; }
-      if (widget.item.status.toLowerCase() != 'disetujui') { _showSnack('Hanya lembur yang disetujui yang bisa dibagikan', color: Colors.orange); return; }
-      setState(() => _loadingMessage = '📡 Mengambil data...');
-      final spklData = await _approvalService.getSpkl(groupId);
-      if (spklData == null) { _showSnack('Data SPKL tidak tersedia', color: Colors.orange); return; }
-      setState(() => _loadingMessage = '📄 Membuat PDF...');
-      final pdfBytes = await _spklGenerator.generatePdfBytes(spklData);
-      if (pdfBytes.isEmpty) { _showSnack('Gagal membuat PDF untuk share', color: Colors.red); return; }
-      setState(() => _loadingMessage = '📤 Membuka share dialog...');
-      final fileName = 'SPKL_${widget.item.spklNomor ?? 'document'}.pdf';
-      await Printing.sharePdf(bytes: pdfBytes, filename: fileName);
-    } catch (e) {
-      _showSnack('Gagal membagikan SPKL', color: Colors.red);
-    } finally {
-      if (mounted) { setState(() { _isLoading = false; _loadingMessage = ''; }); }
-    }
-  }
-
-  // ===========================================================================
-  // PETA DIALOG
-  // ===========================================================================
-  void _showLokasiOnMap(BuildContext context, double lat, double lng, String alamat) {
+  void _showLokasiOnMap(BuildContext context, double lat, double lng, String alamat, {bool isSatellite = true}) {
     showDialog(
       context: context,
-      builder: (context) => Dialog(
-        backgroundColor: Colors.transparent,
-        insetPadding: const EdgeInsets.all(10),
-        child: Container(
-          height: MediaQuery.of(context).size.height * 0.8,
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(20)),
-          child: Column(
-            children: [
-              AppBar(
-                title: Text(alamat.isNotEmpty ? alamat : 'Lokasi Lembur',
-                    style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
-                backgroundColor: const Color(0xFF0D47A1),
-                foregroundColor: Colors.white,
-                shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-                automaticallyImplyLeading: false,
-                actions: [
-                  IconButton(icon: const Icon(Icons.close, color: Colors.white), onPressed: () => Navigator.pop(context)),
-                ],
-              ),
-              Expanded(
-                child: FlutterMap(
-                  options: MapOptions(
-                    initialCenter: LatLng(lat, lng),
-                    initialZoom: 18.0,
-                    maxZoom: 19.0,
-                    interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
-                  ),
-                  children: [
-                    TileLayer(
-                      urlTemplate: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                      userAgentPackageName: 'com.pge.overtimeapp',
-                    ),
-                    MarkerLayer(markers: [
-                      Marker(point: LatLng(lat, lng), width: 50, height: 50,
-                          child: const Icon(Icons.location_pin, color: Colors.red, size: 44))
-                    ]),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
+      builder: (ctx) => _MapDialog(
+        lat: lat,
+        lng: lng,
+        alamat: alamat,
+        isSatellite: isSatellite,
       ),
     );
   }
@@ -292,8 +456,12 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
   // ===========================================================================
   // BUILD
   // ===========================================================================
+
   @override
   Widget build(BuildContext context) {
+    final spklAccessible = _spklAccessible;
+    final status = widget.item.status.toLowerCase();
+    
     return Container(
       decoration: const BoxDecoration(
         color: Color(0xFFF5F7FA),
@@ -306,7 +474,7 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
             children: [
               _buildHandle(),
               const SizedBox(height: 16),
-              _buildHeader(),
+              _buildHeader(spklAccessible),
               const SizedBox(height: 16),
               Expanded(
                 child: ListView(
@@ -323,7 +491,8 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
                     const SizedBox(height: 14),
                     _buildCostSection(),
                     const SizedBox(height: 14),
-                    if (widget.hasSpkl) _buildSpklActions(),
+                    // 🔥 SPKL Section - Selalu tampilkan
+                    _buildSpklSection(spklAccessible),
                     const SizedBox(height: 14),
                     _buildTimestampSection(),
                     const SizedBox(height: 40),
@@ -337,47 +506,77 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
     );
   }
 
-  // ---------- HEADER ----------
+  // ---------- HANDLE ----------
   Widget _buildHandle() => Center(
         child: Container(
           width: 50, height: 5,
-          decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(20)),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade300, 
+            borderRadius: BorderRadius.circular(20),
+          ),
         ),
       );
 
-  Widget _buildHeader() {
+  // ---------- HEADER ----------
+  Widget _buildHeader(bool spklAccessible) {
     return Row(
       children: [
-        Expanded(child: Text('Detail Lembur', style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87))),
-        if (widget.hasSpkl)
-          ElevatedButton.icon(
-            onPressed: _isLoading ? null : _viewSpkl,
-            icon: _isLoading ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Icons.picture_as_pdf, size: 18),
-            label: Text(_isLoading ? 'Loading...' : 'SPKL', style: GoogleFonts.poppins(fontSize: 13)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade700, foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              elevation: 2,
+        Expanded(
+          child: Text(
+            'Detail Lembur', 
+            style: GoogleFonts.poppins(
+              fontSize: 20, 
+              fontWeight: FontWeight.bold, 
+              color: Colors.black87,
             ),
           ),
+        ),
+        // 🔥 Tombol SPKL selalu tampil di header
+        ElevatedButton.icon(
+          onPressed: _isLoading ? null : _viewSpkl,
+          icon: _isLoading 
+            ? const SizedBox(
+                width: 16, height: 16, 
+                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              ) 
+            : const Icon(Icons.picture_as_pdf, size: 18),
+          label: Text(
+            _isLoading ? '...' : 'SPKL', 
+            style: GoogleFonts.poppins(fontSize: 13),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.red.shade700, 
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            elevation: 2,
+          ),
+        ),
       ],
     );
   }
 
   // ---------- SECTIONS ----------
+
   Widget _buildStatusSection() {
     final color = OvertimeHelpers.getStatusColor(widget.item.status);
     final statusText = OvertimeHelpers.getStatusText(widget.item.status);
     return _card(title: 'Status', icon: Icons.flag, child: Row(children: [
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(14), border: Border.all(color: color.withValues(alpha: 0.3))),
-        child: Text(statusText, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: color, fontSize: 13)),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.12), 
+          borderRadius: BorderRadius.circular(14), 
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Text(statusText, 
+          style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: color, fontSize: 13)),
       ),
       if (widget.item.spklNomor != null && widget.item.spklNomor!.isNotEmpty) ...[
         const SizedBox(width: 12),
-        Expanded(child: Text('No: ${widget.item.spklNomor}', style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey[600]), overflow: TextOverflow.ellipsis)),
+        Expanded(child: Text('No: ${widget.item.spklNomor}', 
+          style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey[600]), 
+          overflow: TextOverflow.ellipsis)),
       ],
     ]));
   }
@@ -400,31 +599,66 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
     final lat = _lokasi['latitude'];
     final lng = _lokasi['longitude'];
     final bool hasCoordinates = lat != null && lng != null;
-    return _card(title: 'Lokasi', icon: Icons.location_on, child: Column(children: [
-      _detailRow('Alamat', alamatLengkap.isNotEmpty ? alamatLengkap : 'Tidak diketahui'),
-      if (hasCoordinates) ...[
-        const SizedBox(height: 8),
-        Row(children: [
-          const Icon(Icons.pin_drop, size: 14, color: Colors.grey),
-          const SizedBox(width: 4),
-          Expanded(child: Text('${(lat as num).toDouble().toStringAsFixed(6)}, ${(lng as num).toDouble().toStringAsFixed(6)}', style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[500]))),
-          const SizedBox(width: 8),
-          InkWell(
-            onTap: () => _showLokasiOnMap(context, (lat).toDouble(), (lng).toDouble(), alamatLengkap),
-            borderRadius: BorderRadius.circular(8),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8), border: Border.all(color: Colors.blue.withValues(alpha: 0.3))),
-              child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.map, size: 14, color: Colors.blue),
-                SizedBox(width: 4),
-                Text('Lihat di Peta', style: TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.w600)),
-              ]),
-            ),
+
+    return _card(
+      title: 'Lokasi',
+      icon: Icons.location_on,
+      child: Column(children: [
+        _detailRow('Alamat', alamatLengkap.isNotEmpty ? alamatLengkap : 'Tidak diketahui'),
+        if (hasCoordinates) ...[
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              const Icon(Icons.pin_drop_rounded, size: 14, color: Colors.grey),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${(lat as num).toDouble().toStringAsFixed(6)}, ${(lng as num).toDouble().toStringAsFixed(6)}',
+                  style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[500]),
+                ),
+              ),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _showLokasiOptions(
+                    context,
+                    (lat).toDouble(),
+                    (lng).toDouble(),
+                    alamatLengkap,
+                  ),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF6366F1).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: const Color(0xFF6366F1).withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.map_rounded, size: 16, color: Color(0xFF6366F1)),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Peta',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: const Color(0xFF6366F1),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ]),
-      ],
-    ]));
+        ],
+      ]),
+    );
   }
 
   Widget _buildPersonnelSection() {
@@ -435,11 +669,16 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
         _detailRow('Mitra', '${widget.item.totalMitra} Orang'),
         const SizedBox(height: 8),
         if (_loadingMitra)
-          const Center(child: Padding(padding: EdgeInsets.all(8), child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))))
+          const Center(child: Padding(
+            padding: EdgeInsets.all(8), 
+            child: SizedBox(width: 16, height: 16, 
+              child: CircularProgressIndicator(strokeWidth: 2)),
+          ))
         else if (_mitraList.isNotEmpty)
           _buildMitraTable(_mitraList)
         else
-          Text('Daftar mitra tidak tersedia', style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey)),
+          Text('Daftar mitra tidak tersedia', 
+            style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey)),
       ] else ...[
         _detailRow('Nama Mitra', _safeString(widget.item.namaMitra)),
       ],
@@ -449,7 +688,11 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
   Widget _buildMitraTable(List<OvertimeHistory> mitraList) {
     return Table(
       border: TableBorder.all(color: Colors.grey.shade300, width: 0.5),
-      columnWidths: const {0: FlexColumnWidth(3), 1: FlexColumnWidth(2), 2: FlexColumnWidth(2)},
+      columnWidths: const {
+        0: FlexColumnWidth(3), 
+        1: FlexColumnWidth(2), 
+        2: FlexColumnWidth(2),
+      },
       children: [
         TableRow(decoration: BoxDecoration(color: Colors.grey[100]), children: [
           _tableCellHeader('Nama'), _tableCellHeader('Fungsi'), _tableCellHeader('Biaya'),
@@ -467,14 +710,20 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
   }
 
   Widget _tableCellHeader(String text) => Padding(
-        padding: const EdgeInsets.all(6),
-        child: Text(text, style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.black87)),
-      );
+    padding: const EdgeInsets.all(6),
+    child: Text(text, 
+      style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 11, color: Colors.black87)),
+  );
 
   Widget _tableCell(String text, {bool bold = false}) => Padding(
-        padding: const EdgeInsets.all(6),
-        child: Text(text, style: GoogleFonts.poppins(fontSize: 11, fontWeight: bold ? FontWeight.w600 : FontWeight.normal, color: Colors.black87)),
-      );
+    padding: const EdgeInsets.all(6),
+    child: Text(text, 
+      style: GoogleFonts.poppins(
+        fontSize: 11, 
+        fontWeight: bold ? FontWeight.w600 : FontWeight.normal, 
+        color: Colors.black87,
+      )),
+  );
 
   Widget _buildCostSection() {
     final isMitraDoc = widget.item.isMitraDocument;
@@ -490,51 +739,223 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
     ]));
   }
 
-  Widget _buildSpklActions() {
-    return Column(
-      children: [
-        if (_isLoading && _loadingMessage.isNotEmpty)
-          Container(
-            width: double.infinity, padding: const EdgeInsets.symmetric(vertical: 12),
-            decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.blue.shade200)),
-            child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-              const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+  // 🔥🔥🔥 SPKL SECTION - SELALU TAMPIL (MENGIKUTI POLA APPROVAL DETAIL)
+  Widget _buildSpklSection(bool spklAccessible) {
+    final spklNomor = widget.item.spklNomor ?? '';
+    final hasSpklNomor = spklNomor.isNotEmpty;
+    final status = widget.item.status.toLowerCase();
+    final isApproved = status == 'disetujui';
+    
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.blue.withValues(alpha: 0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03), 
+            blurRadius: 8, 
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header SPKL
+          Row(
+            children: [
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: spklAccessible 
+                    ? Colors.green.withValues(alpha: 0.1) 
+                    : Colors.blue.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  Icons.picture_as_pdf_rounded,
+                  color: spklAccessible ? Colors.green : Colors.blue,
+                  size: 22,
+                ),
+              ),
               const SizedBox(width: 12),
-              Text(_loadingMessage, style: GoogleFonts.poppins(fontSize: 13, color: Colors.blue.shade700)),
-            ]),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'SPKL 📄',
+                      style: GoogleFonts.poppins(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.black87,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      hasSpklNomor ? spklNomor : 'No. SPKL: Auto-Generate',
+                      style: GoogleFonts.poppins(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: const Color(0xFF475569),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: spklAccessible 
+                    ? Colors.green.withValues(alpha: 0.1) 
+                    : Colors.orange.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: spklAccessible 
+                      ? Colors.green.withValues(alpha: 0.3) 
+                      : Colors.orange.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Text(
+                  spklAccessible ? 'TERSEDIA' : 'BELUM',
+                  style: GoogleFonts.poppins(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    color: spklAccessible ? Colors.green : Colors.orange,
+                  ),
+                ),
+              ),
+            ],
           ),
-        if (_isLoading) const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: _isLoading ? null : _viewSpkl,
-            icon: const Icon(Icons.picture_as_pdf),
-            label: Text('Lihat SPKL', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade700, foregroundColor: Colors.white,
-              disabledBackgroundColor: Colors.grey.shade300, disabledForegroundColor: Colors.grey.shade500,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              elevation: 2,
+          const SizedBox(height: 14),
+          
+          // Loading indicator
+          if (_isLoading) ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const SizedBox(
+                    width: 16, height: 16, 
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      _loadingMessage.isNotEmpty ? _loadingMessage : 'Memproses...',
+                      style: GoogleFonts.poppins(fontSize: 13, color: Colors.blue.shade700),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ] else ...[
+            // 🔥 Tombol Lihat SPKL - Selalu aktif
+            SizedBox(
+              width: double.infinity,
+              child: ElevatedButton.icon(
+                onPressed: _viewSpkl,
+                icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
+                label: Text(
+                  spklAccessible ? 'Lihat SPKL' : 'Generate & Lihat SPKL',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w600),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF10B981),
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ),
+            
+            const SizedBox(height: 8),
+            
+            // Info note
+            if (spklAccessible && isApproved)
+              _buildSpklInfoNote(
+                icon: Icons.check_circle_outline, 
+                color: Colors.green, 
+                text: 'SPKL tersedia. Tap untuk melihat dokumen.',
+              )
+            else if (spklAccessible)
+              _buildSpklInfoNote(
+                icon: Icons.info_outline, 
+                color: Colors.blue, 
+                text: 'SPKL dapat digenerate. Tap tombol di atas.',
+              )
+            else
+              _buildSpklInfoNote(
+                icon: Icons.auto_awesome, 
+                color: Colors.orange, 
+                text: 'SPKL akan digenerate otomatis saat tombol ditekan.',
+              ),
+          ],
+          
+          const SizedBox(height: 8),
+          
+          // 🔥 Catatan: SPKL dapat diakses di menu Riwayat Lembur
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: Colors.blue.shade50,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.info_outline, size: 14, color: Colors.blue.shade600),
+                const SizedBox(width: 6),
+                Text(
+                  'SPKL dapat diakses di menu Riwayat Lembur',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    color: Colors.blue.shade600,
+                  ),
+                ),
+              ],
             ),
           ),
-        ),
-        const SizedBox(height: 10),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: _isLoading ? null : _shareSpkl,
-            icon: const Icon(Icons.share),
-            label: Text('Share SPKL', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: Colors.red.shade700, disabledForegroundColor: Colors.grey.shade400,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              side: BorderSide(color: _isLoading ? Colors.grey.shade300 : Colors.red.shade700),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSpklInfoNote({
+    required IconData icon, 
+    required Color color, 
+    required String text,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 14, color: color.withValues(alpha: 0.8)),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text, 
+              style: GoogleFonts.poppins(fontSize: 10, color: color.withValues(alpha: 0.8)),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -548,19 +969,29 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
   // ===========================================================================
   // REUSABLE COMPONENTS
   // ===========================================================================
+
   Widget _card({required String title, required IconData icon, required Widget child}) {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(18),
+        color: Colors.white, 
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.03), 
+            blurRadius: 8, 
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Icon(icon, size: 18, color: const Color(0xFF1976D2)),
           const SizedBox(width: 8),
-          Expanded(child: Text(title, overflow: TextOverflow.ellipsis, style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87))),
+          Expanded(child: Text(title, 
+            overflow: TextOverflow.ellipsis, 
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14, color: Colors.black87))),
         ]),
         const SizedBox(height: 14),
         child,
@@ -572,9 +1003,374 @@ class _DetailSheetContentState extends State<_DetailSheetContent> {
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        SizedBox(width: 110, child: Text(label, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]))),
+        SizedBox(
+          width: 110, 
+          child: Text(label, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600])),
+        ),
         Expanded(child: Text(value, style: GoogleFonts.poppins(fontSize: 13, color: Colors.black87))),
       ]),
+    );
+  }
+}
+
+// ===========================================================================
+// 🔥🔥🔥 MAP DIALOG - GOOGLE MAPS TILE
+// ===========================================================================
+
+class _MapDialog extends StatefulWidget {
+  final double lat;
+  final double lng;
+  final String alamat;
+  final bool isSatellite;
+
+  const _MapDialog({
+    required this.lat,
+    required this.lng,
+    required this.alamat,
+    required this.isSatellite,
+  });
+
+  @override
+  State<_MapDialog> createState() => _MapDialogState();
+}
+
+class _MapDialogState extends State<_MapDialog> {
+  late bool _isSatellite;
+
+  static const String _satelliteUrl =
+      'https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={z}';
+  static const String _streetUrl =
+      'https://mt1.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+
+  String get _currentTileUrl => _isSatellite ? _satelliteUrl : _streetUrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _isSatellite = widget.isSatellite;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.all(8),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        width: MediaQuery.of(context).size.width,
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          children: [
+            _buildHeader(),
+            Expanded(
+              child: Stack(
+                children: [
+                  FlutterMap(
+                    options: MapOptions(
+                      initialCenter: LatLng(widget.lat, widget.lng),
+                      initialZoom: 17.0,
+                      minZoom: 5.0,
+                      maxZoom: 21.0,
+                      interactionOptions: const InteractionOptions(flags: InteractiveFlag.all),
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate: _currentTileUrl,
+                        userAgentPackageName: 'com.pge.overtimeapp',
+                        maxZoom: 21,
+                        maxNativeZoom: 20,
+                        fallbackUrl: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      ),
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: LatLng(widget.lat, widget.lng),
+                            width: 150,
+                            height: 100,
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: Colors.black.withValues(alpha: 0.3),
+                                        blurRadius: 8,
+                                        offset: const Offset(0, 2),
+                                      ),
+                                    ],
+                                  ),
+                                  child: Text(
+                                    '📍 Lokasi Lembur',
+                                    style: GoogleFonts.poppins(
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                      color: const Color(0xFF1E293B),
+                                    ),
+                                  ),
+                                ),
+                                Container(
+                                  width: 2,
+                                  height: 6,
+                                  color: Colors.red.withValues(alpha: 0.8),
+                                ),
+                                const Icon(
+                                  Icons.location_on_rounded,
+                                  color: Color(0xFFEF4444),
+                                  size: 40,
+                                  shadows: [
+                                    Shadow(color: Colors.black38, blurRadius: 6),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          Marker(
+                            point: LatLng(widget.lat, widget.lng),
+                            width: 80,
+                            height: 80,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: const Color(0xFF6366F1).withValues(alpha: 0.4),
+                                  width: 2,
+                                ),
+                                color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  // Toggle buttons
+                  Positioned(
+                    top: 12,
+                    right: 12,
+                    child: Column(
+                      children: [
+                        _buildToggleBtn(
+                          Icons.satellite_rounded,
+                          'Satelit',
+                          _isSatellite,
+                          () => setState(() => _isSatellite = true),
+                        ),
+                        const SizedBox(height: 6),
+                        _buildToggleBtn(
+                          Icons.map_rounded,
+                          'Jalan',
+                          !_isSatellite,
+                          () => setState(() => _isSatellite = false),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            _buildBottomBar(),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildToggleBtn(IconData icon, String label, bool isActive, VoidCallback onTap) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          decoration: BoxDecoration(
+            color: isActive ? const Color(0xFF6366F1) : Colors.white,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.15),
+                blurRadius: 6,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                icon,
+                size: 16,
+                color: isActive ? Colors.white : const Color(0xFF6366F1),
+              ),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: GoogleFonts.poppins(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: isActive ? Colors.white : const Color(0xFF6366F1),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                _isSatellite ? Icons.satellite_rounded : Icons.map_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Lokasi Lembur',
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  _isSatellite ? '🛰️ Satelit' : '🛣️ Jalan',
+                  style: GoogleFonts.poppins(fontSize: 9, color: Colors.white),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => Navigator.pop(context),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (widget.alamat.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              widget.alamat,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                color: Colors.white70,
+                height: 1.3,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+          const SizedBox(height: 4),
+          Text(
+            '${widget.lat.toStringAsFixed(6)}, ${widget.lng.toStringAsFixed(6)}',
+            style: GoogleFonts.poppins(
+              fontSize: 10,
+              color: Colors.white.withValues(alpha: 0.8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBottomBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        border: Border(top: BorderSide(color: Colors.grey.shade200)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline_rounded, size: 16, color: Colors.grey),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _isSatellite
+                  ? 'Tampilan satelit • Tap tombol untuk ganti ke peta jalan'
+                  : 'Tampilan jalan • Tap tombol untuk ganti ke satelit',
+              style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[600]),
+            ),
+          ),
+          Material(
+            color: Colors.transparent,
+            child: InkWell(
+              onTap: () async {
+                final encodedLabel = Uri.encodeComponent(widget.alamat);
+                final uri = Uri.parse(
+                  'https://www.google.com/maps?q=${widget.lat},${widget.lng}($encodedLabel)',
+                );
+                if (await canLaunchUrl(uri)) {
+                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                }
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF6366F1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.open_in_browser_rounded, size: 14, color: Colors.white),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Google Maps',
+                      style: GoogleFonts.poppins(
+                        fontSize: 10,
+                        color: Colors.white,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -56,11 +56,14 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
   // GETTERS
   // ─────────────────────────────────────────────────────────────────────────
   
-  /// 🔥 Cek apakah user adalah Manager HSSE
+  /// Cek apakah user adalah Manager HSSE
   bool get _isHSSEManager => _userRole == 'manager' && _userFungsi == 'hsse';
   
-  /// 🔥 Cek apakah user adalah HSSE (Staff atau Manager)
+  /// Cek apakah user adalah HSSE (Staff atau Manager)
   bool get _isHSSE => _userFungsi == 'hsse';
+  
+  /// Cek apakah user adalah Pengawas (satu-satunya yang boleh membatalkan)
+  bool get _isPengawas => _userRole == 'pengawas';
 
   // ─────────────────────────────────────────────────────────────────────────
   // LIFECYCLE
@@ -109,10 +112,37 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // BATALKAN PENGAJUAN (Mitra & Pengawas)
+  // BATALKAN PENGAJUAN (HANYA PENGAWAS)
   // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _batalkanPengajuan(String documentId) async {
+    // Validasi: Hanya pengawas yang boleh membatalkan
+    if (!_isPengawas) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.info_outline, color: Colors.white, size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'Hanya pengawas yang dapat membatalkan pengajuan',
+                    style: GoogleFonts.poppins(),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.orange[700],
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -248,7 +278,7 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
         borderRadius: BorderRadius.vertical(bottom: Radius.circular(16)),
       ),
       actions: [
-        // 🔥 HSSE Mode Selector (untuk HSSE Staff & HSSE Manager)
+        // HSSE Mode Selector (untuk HSSE Staff & HSSE Manager)
         if (_isHSSE) _buildHSSEModeSelector(),
 
         // Filter Bulan
@@ -418,11 +448,14 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // BUILD LIST (berdasarkan role & mode) - 🔥 DIPERBAIKI
+  // BUILD LIST (berdasarkan role & mode) - FINAL
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildList() {
-    // ── 🔥 KHUSUS HSSE MANAGER ──
+    // Helper: fungsi batalkan hanya tersedia untuk pengawas
+    final batalkanCallback = _isPengawas ? _batalkanPengajuan : null;
+
+    // ── KHUSUS HSSE MANAGER ──
     if (_isHSSEManager) {
       // Mode 1: Semua Pengajuan Berisiko
       if (_hsseViewMode == HSSEViewMode.all) {
@@ -435,7 +468,7 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
           userName: _userName,
           selectedBulan: _showAllMonths ? '' : _selectedBulan,
           selectedStatus: _selectedStatus,
-          onBatalkanPengajuan: _batalkanPengajuan,
+          onBatalkanPengajuan: null, // HSSE tidak membatalkan
           showRiskyOnly: true,
           showHSSEStatus: true,
           showApprovalActions: false,
@@ -453,7 +486,7 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
           userName: _userName,
           selectedBulan: _showAllMonths ? '' : _selectedBulan,
           selectedStatus: _selectedStatus,
-          onBatalkanPengajuan: _batalkanPengajuan,
+          onBatalkanPengajuan: null, // HSSE tidak membatalkan
           showRiskyOnly: true,
           showHSSEStatus: true,
           showApprovalActions: false,
@@ -461,7 +494,7 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
         );
       }
       
-      // 🔥 Mode 3: Riwayat Persetujuan Saya (NEW)
+      // Mode 3: Riwayat Persetujuan Saya
       if (_hsseViewMode == HSSEViewMode.myHistory) {
         return _buildStreamList(
           stream: _historyService.getHSSEApprovedByMeStream(
@@ -522,7 +555,7 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
       );
     }
 
-    // ── Non-HSSE: Tampilan Normal ──
+    // ── Non-HSSE: Tampilan Normal (Mitra, Pengawas, Manager, Superadmin) ──
     return OvertimeListView(
       historyService: _historyService,
       rateService: _rateService,
@@ -532,7 +565,7 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
       userName: _userName,
       selectedBulan: _showAllMonths ? '' : _selectedBulan,
       selectedStatus: _selectedStatus,
-      onBatalkanPengajuan: _batalkanPengajuan,
+      onBatalkanPengajuan: batalkanCallback, // null jika bukan pengawas
       showRiskyOnly: false,
     );
   }
@@ -618,7 +651,7 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
                   userName: _userName,
                   selectedBulan: _showAllMonths ? '' : _selectedBulan,
                   selectedStatus: _selectedStatus,
-                  onBatalkanPengajuan: _batalkanPengajuan,
+                  onBatalkanPengajuan: null, // HSSE myHistory tidak membatalkan
                   showRiskyOnly: true,
                   hssData: data,
                   showHSSEStatus: true,
@@ -638,7 +671,7 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
           userName: _userName,
           selectedBulan: _showAllMonths ? '' : _selectedBulan,
           selectedStatus: _selectedStatus,
-          onBatalkanPengajuan: _batalkanPengajuan,
+          onBatalkanPengajuan: null, // HSSE mode tidak membatalkan
           showRiskyOnly: true,
           hssData: data,
           showHSSEStatus: true,
@@ -979,21 +1012,10 @@ class _OvertimeHistoryScreenState extends State<OvertimeHistoryScreen> {
   }
 
   int _getNavIndex() {
-    if (_userFungsi == 'hsse') return 1;
-    switch (_userRole) {
-      case 'superadmin':
-      case 'manager':
-        return 1;
-      case 'pengawas':
-      case 'mitra':
-        return 2;
-      default:
-        return 0;
-    }
+    return 1;
   }
 
   String _getTitle() {
-    // 🔥 Manager HSSE punya title dinamis
     if (_isHSSEManager) {
       switch (_hsseViewMode) {
         case HSSEViewMode.all:

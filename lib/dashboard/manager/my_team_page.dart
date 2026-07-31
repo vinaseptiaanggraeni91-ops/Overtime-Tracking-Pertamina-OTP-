@@ -67,7 +67,7 @@ class _MyTeamPageState extends State<MyTeamPage> {
       backgroundColor: const Color(0xFFF1F5F9),
       appBar: AppBar(
         title: const Text(
-          'Tim Saya',
+          'Tim',
           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
         ),
         centerTitle: true,

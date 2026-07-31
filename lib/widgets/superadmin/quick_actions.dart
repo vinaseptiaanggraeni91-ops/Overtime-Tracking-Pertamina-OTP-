@@ -46,9 +46,6 @@ class QuickActions extends StatelessWidget {
           const SizedBox(height: 12),
           _QuickActionItem('Broadcast', Icons.campaign, Colors.orange,
               () => _showBroadcastDialog(context)),
-          const SizedBox(height: 12),
-          _QuickActionItem('Kelola FAQ', Icons.help_center, Colors.purple,
-              () => _showManageFAQDialog(context)),
         ],
       ),
     );
@@ -234,9 +231,6 @@ class QuickActions extends StatelessWidget {
                           value: 'operation',
                           child: Text('⚙️ Operation')),
                       DropdownMenuItem(
-                          value: 'lab',
-                          child: Text('🔬 Laboratorium')),
-                      DropdownMenuItem(
                           value: 'maintenance',
                           child: Text('🔧 Maintenance')),
                       DropdownMenuItem(
@@ -244,7 +238,7 @@ class QuickActions extends StatelessWidget {
                       DropdownMenuItem(
                           value: 'gpr', child: Text('📊 GPR')),
                       DropdownMenuItem(
-                          value: 'bs', child: Text('📋 BS')),
+                          value: 'bs', child: Text('📋 Business Support')),
                     ],
                     onChanged: (v) {
                       if (v != null) setState(() => selectedFungsi = v);
@@ -561,172 +555,6 @@ class QuickActions extends StatelessWidget {
               label: isSending
                   ? const Text('Mengirim...')
                   : const Text('Kirim'),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.primaryBlue,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ==================== FAQ DIALOG ====================
-  void _showManageFAQDialog(BuildContext context) {
-    final questionController = TextEditingController();
-    final answerController = TextEditingController();
-    String selectedCategory = 'Umum';
-    final formKey = GlobalKey<FormState>();
-    final service = DashboardService();
-    bool isSaving = false;
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
-            children: [
-              Icon(Icons.help_center_rounded, color: Colors.purple),
-              SizedBox(width: 8),
-              Text('Kelola FAQ'),
-            ],
-          ),
-          content: Form(
-            key: formKey,
-            child: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<String>(
-                    initialValue: selectedCategory,
-                    decoration: InputDecoration(
-                      labelText: 'Kategori',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    items: [
-                      'Umum',
-                      'Lembur',
-                      'Absensi',
-                      'Akun',
-                      'Teknis'
-                    ]
-                        .map((c) => DropdownMenuItem<String>(
-                            value: c, child: Text(c)))
-                        .toList(),
-                    onChanged: (v) {
-                      if (v != null) setState(() => selectedCategory = v);
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: questionController,
-                    decoration: InputDecoration(
-                      labelText: 'Pertanyaan',
-                      hintText: 'Masukkan pertanyaan...',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    maxLines: 2,
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) {
-                        return 'Wajib diisi';
-                      }
-                      return null;
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: answerController,
-                    decoration: InputDecoration(
-                      labelText: 'Jawaban',
-                      hintText: 'Masukkan jawaban...',
-                      border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                      filled: true,
-                      fillColor: Colors.grey[50],
-                    ),
-                    maxLines: 3,
-                    validator: (v) {
-                      if (v == null || v.trim().isEmpty) {
-                        return 'Wajib diisi';
-                      }
-                      return null;
-                    },
-                  ),
-                ],
-              ),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed:
-                  isSaving ? null : () => Navigator.pop(context),
-              child: const Text('Batal'),
-            ),
-            ElevatedButton.icon(
-              onPressed: isSaving
-                  ? null
-                  : () async {
-                      if (formKey.currentState!.validate()) {
-                        setState(() => isSaving = true);
-                        try {
-                          await service.addFAQ(
-                            question: questionController.text.trim(),
-                            answer: answerController.text.trim(),
-                            category: selectedCategory,
-                          );
-                          if (context.mounted) {
-                            Navigator.pop(context);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: const Text(
-                                    '✅ FAQ berhasil ditambahkan!'),
-                                backgroundColor: Colors.green,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(10)),
-                              ),
-                            );
-                          }
-                        } catch (e) {
-                          debugPrint('❌ FAQ error: $e');
-                          setState(() => isSaving = false);
-                          if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content:
-                                    Text('❌ Gagal: ${e.toString()}'),
-                                backgroundColor: Colors.red,
-                                behavior: SnackBarBehavior.floating,
-                                shape: RoundedRectangleBorder(
-                                    borderRadius:
-                                        BorderRadius.circular(10)),
-                              ),
-                            );
-                          }
-                        }
-                      }
-                    },
-              icon: isSaving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: Colors.white))
-                  : const Icon(Icons.add, size: 18),
-              label: isSaving
-                  ? const Text('Menyimpan...')
-                  : const Text('Tambah'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primaryBlue,
                 foregroundColor: Colors.white,

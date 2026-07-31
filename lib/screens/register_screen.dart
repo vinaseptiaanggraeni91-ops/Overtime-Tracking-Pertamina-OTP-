@@ -8,7 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:go_router/go_router.dart';
 import '../core/app_colors.dart';
 import '../core/services/auth_service.dart';
-import '../../core/services/superadmin_service.dart'; // 🔥 NEW: Import DashboardService
+import '../../core/services/superadmin_service.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -17,22 +17,21 @@ class RegisterScreen extends StatefulWidget {
   State<RegisterScreen> createState() => _RegisterScreenState();
 }
 
-class _RegisterScreenState extends State<RegisterScreen> {
+class _RegisterScreenState extends State<RegisterScreen>
+    with SingleTickerProviderStateMixin {
   // ================= CONTROLLER =================
   final _formKey = GlobalKey<FormState>();
-  final _idPekerjaController = TextEditingController(); // 🔥 NEW: ID Pekerja
+  final _idPekerjaController = TextEditingController();
   final _namaController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmController = TextEditingController();
-  final _captchaController = TextEditingController();
 
   // ================= STATE =================
   bool _hidePass = true;
   bool _hideConfirm = true;
   bool _loading = false;
-  bool _agreeTerms = false;
 
   String _selectedFungsi = "operation";
   bool _showPasswordStrength = false;
@@ -40,7 +39,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   String _passwordStrengthText = "";
   Color _passwordStrengthColor = Colors.grey;
 
-  // 🔥 NEW: Validasi ID Pekerja
+  // Validasi ID Pekerja
   bool _isValidatingWorker = false;
   bool _workerValidated = false;
   Map<String, dynamic>? _validatedWorker;
@@ -53,20 +52,19 @@ class _RegisterScreenState extends State<RegisterScreen> {
   static const int _maxAttempts = 3;
   static const int _coolDownSeconds = 30;
 
-  // ================= CAPTCHA =================
-  String _captchaQuestion = "";
-  int _captchaAnswer = 0;
-  int _captchaDifficulty = 1;
-
   // ================= SERVICE =================
   final AuthService _authService = AuthService();
-  final DashboardService _dashboardService = DashboardService(); // 🔥 NEW
+  final DashboardService _dashboardService = DashboardService();
   late String _sessionId;
+
+  // ================= ANIMATION =================
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
 
   // ================= FUNGSI LIST =================
   final List<Map<String, String>> _fungsiList = [
     {"value": "operation",   "label": "Operation",      "icon": "⚙️", "description": "Operasional Lapangan"},
-    {"value": "lab",         "label": "Laboratorium",    "icon": "🔬", "description": "Laboratorium & Pengujian"},
     {"value": "maintenance", "label": "Maintenance",     "icon": "🔧", "description": "Perawatan & Perbaikan"},
     {"value": "hsse",        "label": "HSSE",            "icon": "🛡️", "description": "Keselamatan & K3"},
     {"value": "gpr",         "label": "GPR",             "icon": "📊", "description": "General Processing"},
@@ -77,10 +75,30 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   void initState() {
     super.initState();
+    
+    // Setup animasi yang selaras dengan LoginScreen
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOut,
+    );
+    
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+    ));
+    
+    _animationController.forward();
+    
     _passwordController.addListener(_calculatePasswordStrength);
-    _generateCaptcha();
     _sessionId = _authService.generateSessionId();
-    // 🔥 Reset validasi saat ID berubah
     _idPekerjaController.addListener(() {
       if (_workerValidated) {
         setState(() {
@@ -95,14 +113,14 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   void dispose() {
     _passwordController.removeListener(_calculatePasswordStrength);
-    _idPekerjaController.dispose(); // 🔥 NEW
+    _idPekerjaController.dispose();
     _namaController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
     _passwordController.dispose();
     _confirmController.dispose();
-    _captchaController.dispose();
     _coolDownTimer?.cancel();
+    _animationController.dispose();
     super.dispose();
   }
 
@@ -139,7 +157,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
     });
   }
 
-  // 🔥 ================= VALIDASI ID PEKERJA =================
+  // ================= VALIDASI ID PEKERJA =================
   Future<void> _validateWorkerId() async {
     final idPekerja = _idPekerjaController.text.trim();
 
@@ -161,7 +179,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (!mounted) return;
 
       if (result != null) {
-        // ID VALID
         setState(() {
           _isValidatingWorker = false;
           _workerValidated = true;
@@ -169,19 +186,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
           _workerValidationMessage = '✅ ID Valid - ${result['nama']}';
         });
 
-        // 🔥 Auto-fill Nama dari Master Data
         _namaController.text = result['nama'] ?? '';
         
-        // 🔥 Auto-fill Fungsi dari Master Data
         if (result['fungsi'] != null && result['fungsi'].toString().isNotEmpty) {
           setState(() {
             _selectedFungsi = result['fungsi'].toString();
           });
         }
 
-        _showSuccessSnackbar('ID Pekerja valid: ${result['nama']}');
+        _showSuccess("ID Pekerja valid: ${result['nama']}");
       } else {
-        // ID TIDAK VALID
         setState(() {
           _isValidatingWorker = false;
           _workerValidated = false;
@@ -199,83 +213,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
       _showError("Gagal validasi ID Pekerja. Periksa koneksi Anda.");
     }
-  }
-
-  void _showSuccessSnackbar(String msg) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).clearSnackBars();
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(children: [
-          const Icon(Icons.check_circle_rounded, color: Colors.white),
-          const SizedBox(width: 12),
-          Expanded(child: Text(msg, style: GoogleFonts.poppins(fontSize: 13))),
-        ]),
-        backgroundColor: Colors.green[700],
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(12),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-  }
-
-  // ================= CAPTCHA =================
-  void _generateCaptcha() {
-    final random = Random();
-    int num1, num2, result;
-    String op;
-
-    switch (_captchaDifficulty) {
-      case 1:
-        num1 = random.nextInt(10) + 1;
-        num2 = random.nextInt(10) + 1;
-        op = '+';
-        result = num1 + num2;
-        break;
-      case 2:
-        if (random.nextBool()) {
-          num1 = random.nextInt(15) + 5;
-          num2 = random.nextInt(10) + 1;
-          op = '+';
-          result = num1 + num2;
-        } else {
-          num1 = random.nextInt(20) + 10;
-          num2 = random.nextInt(10) + 1;
-          op = '-';
-          result = num1 - num2;
-        }
-        break;
-      case 3:
-        if (random.nextBool()) {
-          num1 = random.nextInt(30) + 10;
-          num2 = random.nextInt(20) + 1;
-          op = '+';
-          result = num1 + num2;
-        } else {
-          num1 = random.nextInt(40) + 20;
-          num2 = random.nextInt(15) + 1;
-          op = '-';
-          result = num1 - num2;
-        }
-        break;
-      default:
-        num1 = random.nextInt(10) + 1;
-        num2 = random.nextInt(10) + 1;
-        op = '+';
-        result = num1 + num2;
-    }
-
-    setState(() {
-      _captchaQuestion = "$num1 $op $num2 = ?";
-      _captchaAnswer = result;
-      _captchaController.clear();
-    });
-  }
-
-  bool _validateCaptcha() {
-    final userAnswer = int.tryParse(_captchaController.text.trim());
-    return userAnswer != null && userAnswer == _captchaAnswer;
   }
 
   // ================= RATE LIMITING =================
@@ -304,13 +241,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _register() async {
     FocusScope.of(context).unfocus();
 
-    // Validasi Terms
-    if (!_agreeTerms) {
-      _showError("Anda harus menyetujui Syarat & Ketentuan");
-      return;
-    }
-
-    // Rate Limiting
     final remaining = _getCooldownRemaining();
     if (remaining > 0) {
       _showError("Terlalu banyak percobaan. Tunggu $remaining detik.");
@@ -324,19 +254,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    // 🔥 Validasi ID Pekerja
     if (!_workerValidated) {
       _showError("ID Pekerja harus divalidasi terlebih dahulu. Klik tombol Validasi.");
       return;
     }
 
-    // 🔥 Pastikan ID yang divalidasi sama dengan yang diinput
     if (_validatedWorker?['id_pekerja'] != _idPekerjaController.text.trim()) {
       _showError("ID Pekerja berubah. Silakan validasi ulang.");
       return;
     }
 
-    // Validasi Form
     final formError = _authService.validateRegisterForm(
       nama: _namaController.text,
       email: _emailController.text,
@@ -348,29 +275,16 @@ class _RegisterScreenState extends State<RegisterScreen> {
       return;
     }
 
-    // Konfirmasi Password
     if (_passwordController.text != _confirmController.text) {
       _showError("Password dan konfirmasi tidak sama");
       return;
     }
 
-    // Password Strength
     if (_passwordStrength < 0.5) {
       _showError("Password terlalu lemah. Kombinasikan huruf besar, kecil, dan angka.");
       return;
     }
 
-    // Captcha
-    if (!_validateCaptcha()) {
-      _showError("Jawaban captcha salah");
-      if (_captchaDifficulty < 3) {
-        _captchaDifficulty++;
-      }
-      _generateCaptcha();
-      return;
-    }
-
-    // Track attempt
     setState(() {
       _registerAttempts++;
       _loading = true;
@@ -379,7 +293,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
     try {
       final result = await _authService.register(
-        idPekerja: _idPekerjaController.text.trim(), // 🔥 NEW: Kirim ID Pekerja
+        idPekerja: _idPekerjaController.text.trim(),
         nama: _namaController.text.trim(),
         email: _emailController.text.trim(),
         phone: _phoneController.text.trim(),
@@ -394,26 +308,21 @@ class _RegisterScreenState extends State<RegisterScreen> {
       if (result.success) {
         setState(() {
           _registerAttempts = 0;
-          _captchaDifficulty = 1;
         });
         await _showSuccessDialog();
       } else {
         setState(() {
           _registerAttempts--;
-          if (_captchaDifficulty < 3) _captchaDifficulty++;
         });
         _showError(result.message);
-        _generateCaptcha();
       }
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       setState(() {
         _loading = false;
         _registerAttempts--;
-        if (_captchaDifficulty < 3) _captchaDifficulty++;
       });
       _showError(_getFirebaseErrorMessage(e.code));
-      _generateCaptcha();
     } on TimeoutException {
       if (!mounted) return;
       setState(() {
@@ -421,7 +330,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
         _registerAttempts--;
       });
       _showError("Koneksi timeout. Periksa jaringan Anda.");
-      _generateCaptcha();
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -430,7 +338,6 @@ class _RegisterScreenState extends State<RegisterScreen> {
       });
       debugPrint("Registrasi error: $e");
       _showError("Terjadi kesalahan sistem. Silakan coba lagi.");
-      _generateCaptcha();
     }
   }
 
@@ -440,27 +347,62 @@ class _RegisterScreenState extends State<RegisterScreen> {
       context: context,
       barrierDismissible: false,
       builder: (_) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
         backgroundColor: Colors.white,
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(28),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // Success icon container
               Container(
-                width: 70, height: 70,
-                decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
-                child: const Icon(Icons.check_rounded, color: Colors.white, size: 40),
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Color(0xFF059669),
+                      Color(0xFF047857),
+                    ],
+                  ),
+                  shape: BoxShape.circle,
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF059669).withOpacity(0.3),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.check_rounded,
+                  color: Colors.white,
+                  size: 44,
+                ),
               ),
-              const SizedBox(height: 16),
-              Text("Registrasi Berhasil! 🎉",
-                style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.primaryBlue),
-                textAlign: TextAlign.center),
-              const SizedBox(height: 8),
-              Text("Akun Anda telah berhasil dibuat.\nSilakan login dengan akun yang telah dibuat.",
-                style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[600]),
-                textAlign: TextAlign.center),
               const SizedBox(height: 20),
+              Text(
+                "Registrasi Berhasil! 🎉",
+                style: GoogleFonts.poppins(
+                  fontSize: 22,
+                  fontWeight: FontWeight.bold,
+                  color: const Color(0xFF1E293B),
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                "Akun Anda telah berhasil dibuat.\nSilakan login dengan akun yang telah dibuat.",
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: const Color(0xFF64748B),
+                  height: 1.5,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -468,13 +410,28 @@ class _RegisterScreenState extends State<RegisterScreen> {
                     Navigator.of(context).pop(true);
                   },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.primaryBlue,
+                    backgroundColor: const Color(0xFF1E3C72),
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    elevation: 2,
                   ),
-                  child: Text("OK, Masuk Sekarang",
-                    style: GoogleFonts.poppins(fontSize: 15, fontWeight: FontWeight.w600)),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Masuk Sekarang",
+                        style: GoogleFonts.poppins(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Icon(Icons.arrow_forward_rounded, size: 20),
+                    ],
+                  ),
                 ),
               ),
             ],
@@ -488,22 +445,89 @@ class _RegisterScreenState extends State<RegisterScreen> {
     }
   }
 
-  // ================= ERROR =================
+  // ================= ERROR & SUCCESS SNACKBAR =================
   void _showError(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Row(children: [
-          const Icon(Icons.error_outline_rounded, color: Colors.white),
-          const SizedBox(width: 12),
-          Expanded(child: Text(msg, style: GoogleFonts.poppins(fontSize: 13))),
-        ]),
         backgroundColor: AppColors.softRed,
         behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
         duration: const Duration(seconds: 4),
+        content: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                msg,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSuccess(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFF059669),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(12),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+        ),
+        duration: const Duration(seconds: 2),
+        content: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.check_circle_outline_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                msg,
+                style: GoogleFonts.poppins(
+                  fontSize: 13,
+                  color: Colors.white,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -519,35 +543,62 @@ class _RegisterScreenState extends State<RegisterScreen> {
   }
 
   // =========================================================
-  // 🔥 UI BUILD
+  // 🔥 UI BUILD - SELARAS DENGAN LOGIN SCREEN
   // =========================================================
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final isSmallHeight = size.height < 700;
     final remaining = _getCooldownRemaining();
+
     return Scaffold(
-      backgroundColor: AppColors.backgroundWhite,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) => SingleChildScrollView(
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFF8FAFC),
+              Color(0xFFEFF6FF),
+              Color(0xFFF0F9FF),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: constraints.maxHeight),
-              child: IntrinsicHeight(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    _buildHeader(),
-                    const SizedBox(height: 16),
-                    _buildIllustration(),
-                    const SizedBox(height: 16),
-                    _buildTitle(),
-                    const SizedBox(height: 20),
-                    _buildRegisterForm(remaining),
-                    const SizedBox(height: 16),
-                    _buildFooter(),
-                  ],
-                ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                children: [
+                  const SizedBox(height: 8),
+                  
+                  // 🔥 HEADER DENGAN BACK BUTTON
+                  _buildHeader(),
+                  
+                  SizedBox(height: isSmallHeight ? 16 : 24),
+                  
+                  // 🔥 ILUSTRASI REGISTER
+                  _buildRegisterIllustration(isSmallHeight),
+                  
+                  SizedBox(height: isSmallHeight ? 20 : 28),
+                  
+                  // 🔥 WELCOME TEXT
+                  _buildWelcomeText(),
+                  
+                  SizedBox(height: isSmallHeight ? 16 : 24),
+                  
+                  // 🔥 REGISTER CARD
+                  _buildRegisterCard(remaining),
+                  
+                  SizedBox(height: isSmallHeight ? 20 : 28),
+                  
+                  // 🔥 FOOTER
+                  _buildFooter(),
+                  
+                  const SizedBox(height: 16),
+                ],
               ),
             ),
           ),
@@ -556,524 +607,1182 @@ class _RegisterScreenState extends State<RegisterScreen> {
     );
   }
 
-  Widget _buildHeader() => Row(children: [
-    GestureDetector(
-      onTap: () => context.pop(),
-      child: Container(
-        width: 40, height: 40,
-        decoration: BoxDecoration(color: Colors.grey[100], borderRadius: BorderRadius.circular(12)),
-        child: const Icon(Icons.arrow_back_ios_new_rounded, size: 18, color: AppColors.primaryBlue),
+  // =========================================================
+  // 🔥 HEADER
+  // =========================================================
+  Widget _buildHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        // Back button dengan glass effect
+        GestureDetector(
+          onTap: () => context.go('/login'),
+          child: Container(
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primaryBlue.withOpacity(0.08),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+              border: Border.all(
+                color: Colors.grey.shade200,
+                width: 1,
+              ),
+            ),
+            child: const Icon(
+              Icons.arrow_back_ios_new_rounded,
+              size: 18,
+              color: AppColors.primaryBlue,
+            ),
+          ),
+        ),
+
+        // Logo container
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primaryBlue.withOpacity(0.06),
+                blurRadius: 15,
+                offset: const Offset(0, 4),
+              ),
+            ],
+            border: Border.all(
+              color: Colors.grey.shade100,
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.asset(
+                  'assets/images/logo_pertamina.png',
+                  height: 30,
+                ),
+              ),
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 12),
+                width: 1.5,
+                height: 24,
+                color: Colors.grey.shade300,
+              ),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  height: 28,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // =========================================================
+  // 🔥 ILUSTRASI REGISTER - MODERN
+  // =========================================================
+  Widget _buildRegisterIllustration(bool isSmallHeight) {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: Container(
+          height: isSmallHeight ? 140 : 180,
+          width: double.infinity,
+          margin: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                const Color(0xFF059669).withOpacity(0.06),
+                const Color(0xFF047857).withOpacity(0.04),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: const Color(0xFF059669).withOpacity(0.08),
+              width: 1.5,
+            ),
+          ),
+          child: Stack(
+            children: [
+              // Decorative circles
+              Positioned(
+                top: -20,
+                right: -20,
+                child: Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFF059669).withOpacity(0.1),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                bottom: -30,
+                left: -30,
+                child: Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFF047857).withOpacity(0.08),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              
+              // Main illustration
+              Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Icon container dengan tema register (hijau)
+                    Container(
+                      width: isSmallHeight ? 64 : 80,
+                      height: isSmallHeight ? 64 : 80,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            Color(0xFF059669),
+                            Color(0xFF047857),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF059669).withOpacity(0.3),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.app_registration_rounded,
+                        color: Colors.white,
+                        size: 38,
+                      ),
+                    ),
+                    
+                    SizedBox(height: isSmallHeight ? 12 : 16),
+                    
+                    // Security badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.9),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.05),
+                            blurRadius: 10,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.verified_user_rounded,
+                            size: 14,
+                            color: const Color(0xFF059669),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            "Verifikasi ID Pekerja",
+                            style: GoogleFonts.poppins(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF059669),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
-    ),
-    const Spacer(),
-    Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+    );
+  }
+
+  // =========================================================
+  // 🔥 WELCOME TEXT
+  // =========================================================
+  Widget _buildWelcomeText() {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Column(
+        children: [
+          // Badge
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 4,
+            ),
+            decoration: BoxDecoration(
+              color: const Color(0xFF059669).withOpacity(0.08),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.person_add_rounded,
+                  size: 14,
+                  color: const Color(0xFF059669),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  "Overtime Tracking Pertamina",
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: const Color(0xFF059669),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          
+          const SizedBox(height: 12),
+          
+          Text(
+            "Daftar Akun Baru 👤",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF1E293B),
+              height: 1.2,
+            ),
+          ),
+          
+          const SizedBox(height: 8),
+          
+          Text(
+            "Verifikasi ID Pekerja TAD Anda\nuntuk membuat akun baru",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              color: const Color(0xFF64748B),
+              height: 1.5,
+              fontWeight: FontWeight.w400,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================
+  // 🔥 REGISTER CARD - GLASSMORPHISM
+  // =========================================================
+  Widget _buildRegisterCard(int remaining) {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF1E3C72),
+                Color(0xFF2A5298),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF1E3C72).withOpacity(0.3),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+            ],
+            border: Border.all(
+              color: Colors.white.withOpacity(0.1),
+              width: 1.5,
+            ),
+          ),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                // Form header
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.app_registration_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      "Registrasi",
+                      style: GoogleFonts.poppins(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(height: 6),
+                
+                Text(
+                  "Verifikasi ID Pekerja terlebih dahulu",
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.8),
+                  ),
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // Cooldown banner
+                if (remaining > 0) _buildCooldownBanner(remaining),
+                
+                // ID Pekerja field
+                _buildIdPekerjaField(),
+                
+                // Validation info
+                if (_workerValidationMessage.isNotEmpty) _buildValidationInfo(),
+                
+                const SizedBox(height: 12),
+                
+                // Nama field
+                _buildNamaField(),
+                
+                const SizedBox(height: 12),
+                
+                // Email field
+                _buildEmailField(),
+                
+                const SizedBox(height: 12),
+                
+                // Phone field
+                _buildPhoneField(),
+                
+                const SizedBox(height: 12),
+                
+                // Password field
+                _buildPasswordField(),
+                
+                // Password strength
+                if (_showPasswordStrength) _buildPasswordStrength(),
+                
+                const SizedBox(height: 12),
+                
+                // Confirm password
+                _buildConfirmPasswordField(),
+                
+                const SizedBox(height: 16),
+                
+                // Fungsi field
+                _buildFungsiField(),
+                
+                const SizedBox(height: 24),
+                
+                // Register button
+                _buildRegisterButton(remaining),
+                
+                const SizedBox(height: 16),
+                
+                // Login link
+                _buildLoginLink(),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // =========================================================
+  // COOLDOWN BANNER
+  // =========================================================
+  Widget _buildCooldownBanner(int remaining) {
+    final progress = remaining > 0
+        ? 1.0 - (remaining / _coolDownSeconds)
+        : 1.0;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: Colors.green.withAlpha(25),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.green.withAlpha(76)),
+        color: Colors.orange.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: Colors.orange.withOpacity(0.4),
+          width: 1,
+        ),
       ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.security_rounded, color: Colors.green, size: 14),
-        const SizedBox(width: 4),
-        Text("Keamanan Terenkripsi",
-          style: GoogleFonts.poppins(fontSize: 10, color: Colors.green[700], fontWeight: FontWeight.w600)),
-      ]),
-    ),
-  ]);
-
-  Widget _buildIllustration() => SizedBox(height: 100, child: Stack(alignment: Alignment.center, children: [
-    Icon(Icons.app_registration_rounded, size: 80, color: AppColors.primaryBlue.withAlpha(76)),
-    Positioned(
-      right: 0, top: 0,
-      child: Container(
-        padding: const EdgeInsets.all(4),
-        decoration: const BoxDecoration(color: Colors.green, shape: BoxShape.circle),
-        child: const Icon(Icons.shield_rounded, color: Colors.white, size: 16),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.timer_outlined,
+                  color: Colors.orange,
+                  size: 18,
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  "Terlalu banyak percobaan",
+                  style: GoogleFonts.poppins(
+                    color: Colors.orange,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: progress,
+              minHeight: 4,
+              backgroundColor: Colors.orange.withOpacity(0.2),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Colors.orange,
+              ),
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            "Silakan tunggu $remaining detik",
+            style: GoogleFonts.poppins(
+              color: Colors.orange.withOpacity(0.9),
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ],
       ),
-    ),
-  ]));
+    );
+  }
 
-  Widget _buildTitle() => Column(children: [
-    Text("Daftar Akun Baru 👤", textAlign: TextAlign.center,
-      style: GoogleFonts.poppins(fontSize: 24, fontWeight: FontWeight.bold, color: AppColors.primaryBlue)),
-    const SizedBox(height: 4),
-    Text("Verifikasi ID Pekerja TAD untuk bergabung",
-      textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600])),
-  ]);
+  // =========================================================
+  // ID PEKERJA FIELD
+  // =========================================================
+  Widget _buildIdPekerjaField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("ID Pekerja"),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _idPekerjaController,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 14,
+          ),
+          decoration: _inputDecoration(
+            hint: "Masukkan ID Pekerja",
+            icon: Icons.badge_rounded,
+          ).copyWith(
+            suffixIcon: _buildValidateButton(),
+          ),
+          validator: (v) {
+            if (v == null || v.isEmpty) return "ID Pekerja wajib diisi";
+            if (!_workerValidated) return "ID Pekerja harus divalidasi";
+            return null;
+          },
+        ),
+      ],
+    );
+  }
 
-  Widget _buildRegisterForm(int remaining) => Container(
-    width: double.infinity, padding: const EdgeInsets.all(20),
-    decoration: BoxDecoration(
-      color: AppColors.primaryBlue,
-      borderRadius: BorderRadius.circular(20),
-      boxShadow: [BoxShadow(color: AppColors.primaryBlue.withAlpha(89), blurRadius: 20, offset: const Offset(0, 8))],
-    ),
-    child: Form(
-      key: _formKey,
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        _buildFormHeader(), const SizedBox(height: 16),
-        // 🔥 ID PEKERJA - PALING ATAS!
-        _buildIdPekerjaField(),
-        // 🔥 Info validasi
-        if (_workerValidationMessage.isNotEmpty) _buildValidationInfo(),
-        const SizedBox(height: 12),
-        _buildNamaField(), const SizedBox(height: 12),
-        _buildEmailField(), const SizedBox(height: 12),
-        _buildPhoneField(), const SizedBox(height: 12),
-        _buildPasswordField(),
-        if (_showPasswordStrength) _buildPasswordStrength(),
-        const SizedBox(height: 12),
-        _buildConfirmPasswordField(), const SizedBox(height: 16),
-        _buildFungsiField(), const SizedBox(height: 16),
-        _buildCaptchaField(), const SizedBox(height: 16),
-        _buildTermsCheckbox(), const SizedBox(height: 16),
-        _buildRegisterButton(remaining), const SizedBox(height: 12),
-        _buildLoginLink(),
-      ]),
-    ),
-  );
-
-  Widget _buildFormHeader() => Column(children: [
-    Text("REGISTRASI", style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-    const SizedBox(height: 4),
-    Text("Verifikasi ID Pekerja terlebih dahulu", textAlign: TextAlign.center,
-      style: GoogleFonts.poppins(fontSize: 11, color: Colors.white70)),
-  ]);
-
-  // 🔥 FIELD ID PEKERJA
-  Widget _buildIdPekerjaField() => _fieldColumn(
-    "ID Pekerja", _idPekerjaController, Icons.badge_rounded, "Masukkan ID Pekerja (contoh: P12345)",
-    validator: (v) {
-      if (v == null || v.isEmpty) return "ID Pekerja wajib diisi";
-      if (!_workerValidated) return "ID Pekerja harus divalidasi";
-      return null;
-    },
-    suffix: _buildValidateButton(),
-  );
-
-  // 🔥 TOMBOL VALIDASI
   Widget _buildValidateButton() {
     if (_isValidatingWorker) {
-      return const Padding(
-        padding: EdgeInsets.all(12),
+      return Padding(
+        padding: const EdgeInsets.all(14),
         child: SizedBox(
-          width: 20, height: 20,
-          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+          width: 20,
+          height: 20,
+          child: CircularProgressIndicator(
+            strokeWidth: 2,
+            color: Colors.white.withOpacity(0.9),
+          ),
         ),
       );
     }
 
     if (_workerValidated) {
-      return const Padding(
-        padding: EdgeInsets.all(8),
-        child: Icon(Icons.check_circle_rounded, color: Colors.greenAccent, size: 24),
+      return Padding(
+        padding: const EdgeInsets.all(10),
+        child: Container(
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: Colors.green.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: const Icon(
+            Icons.check_circle_rounded,
+            color: Colors.greenAccent,
+            size: 22,
+          ),
+        ),
       );
     }
 
-    return TextButton(
-      onPressed: _validateWorkerId,
-      style: TextButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        backgroundColor: Colors.white.withAlpha(40),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    return Padding(
+      padding: const EdgeInsets.all(4),
+      child: Container(
+        margin: const EdgeInsets.all(4),
+        child: TextButton(
+          onPressed: _validateWorkerId,
+          style: TextButton.styleFrom(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            backgroundColor: Colors.white.withOpacity(0.15),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+          ),
+          child: Text(
+            "Validasi",
+            style: GoogleFonts.poppins(
+              color: Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ),
-      child: Text("Validasi", style: GoogleFonts.poppins(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
     );
   }
 
-  // 🔥 INFO VALIDASI
-  Widget _buildValidationInfo() => Container(
-    margin: const EdgeInsets.only(bottom: 8),
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    decoration: BoxDecoration(
-      color: _workerValidated ? Colors.green.withAlpha(30) : Colors.red.withAlpha(30),
-      borderRadius: BorderRadius.circular(8),
-      border: Border.all(color: _workerValidated ? Colors.greenAccent.withAlpha(100) : Colors.redAccent.withAlpha(100)),
-    ),
-    child: Row(children: [
-      Icon(_workerValidated ? Icons.verified : Icons.warning_rounded,
-        color: _workerValidated ? Colors.greenAccent : Colors.redAccent, size: 16),
-      const SizedBox(width: 8),
-      Expanded(
-        child: Text(_workerValidationMessage,
-          style: GoogleFonts.poppins(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w500)),
-      ),
-    ]),
-  );
-
-  Widget _buildNamaField() => _fieldColumn(
-    "Nama Lengkap", _namaController, Icons.person_outline, "Masukkan nama lengkap",
-    validator: (v) => _authService.validateNama(v),
-  );
-
-  Widget _buildEmailField() => _fieldColumn(
-    "Email", _emailController, Icons.email_outlined, "contoh@email.com",
-    type: TextInputType.emailAddress,
-    validator: (v) => _authService.validateEmail(v),
-  );
-
-  Widget _buildPhoneField() => _fieldColumn(
-    "Nomor HP", _phoneController, Icons.phone_iphone_rounded, "081234567890 atau 6281234567890",
-    type: TextInputType.phone,
-    formatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(15)],
-    validator: (v) => _authService.validatePhone(v),
-  );
-
-  Widget _buildPasswordField() => _fieldColumn(
-    "Password", _passwordController, Icons.lock_outline, "Buat password",
-    obscure: _hidePass,
-    suffix: IconButton(
-      icon: Icon(_hidePass ? Icons.visibility_off : Icons.visibility, color: Colors.white, size: 20),
-      onPressed: () => setState(() => _hidePass = !_hidePass),
-    ),
-    validator: (v) => _authService.validatePassword(v),
-  );
-
-  Widget _buildPasswordStrength() => Padding(
-    padding: const EdgeInsets.only(top: 6, bottom: 2),
-    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      Row(children: [
-        Expanded(child: ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: _passwordStrength,
-            backgroundColor: Colors.white24,
-            valueColor: AlwaysStoppedAnimation<Color>(_passwordStrengthColor),
-            minHeight: 4,
-          ),
-        )),
-        const SizedBox(width: 8),
-        Text(_passwordStrengthText,
-          style: GoogleFonts.poppins(color: _passwordStrengthColor, fontSize: 10, fontWeight: FontWeight.w600)),
-      ]),
-      const SizedBox(height: 2),
-      Text("Minimal 8 karakter: Huruf besar, kecil, angka",
-        style: GoogleFonts.poppins(color: Colors.white70, fontSize: 8)),
-    ]),
-  );
-
-  Widget _buildConfirmPasswordField() => _fieldColumn(
-    "Konfirmasi Password", _confirmController, Icons.lock_reset_rounded, "Ulangi password Anda",
-    obscure: _hideConfirm,
-    suffix: IconButton(
-      icon: Icon(_hideConfirm ? Icons.visibility_off : Icons.visibility, color: Colors.white, size: 20),
-      onPressed: () => setState(() => _hideConfirm = !_hideConfirm),
-    ),
-    validator: (v) {
-      if (v == null || v.isEmpty) return "Wajib diisi";
-      if (v != _passwordController.text) return "Password tidak cocok";
-      return null;
-    },
-  );
-
-  Widget _buildFungsiField() => _fieldColumn(
-    "Fungsi Kerja", null, Icons.work_outline, "",
-    customField: Container(
-      height: 60,
+  Widget _buildValidationInfo() {
+    return Container(
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        border: Border.all(color: Colors.white54),
-        borderRadius: BorderRadius.circular(12),
-        color: Colors.white.withAlpha(25),
-      ),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: _selectedFungsi,
-          isExpanded: true,
-          icon: const Padding(
-            padding: EdgeInsets.only(right: 12),
-            child: Icon(Icons.expand_more_rounded, color: Colors.white),
-          ),
-          style: GoogleFonts.poppins(fontSize: 13, color: Colors.white),
-          dropdownColor: AppColors.primaryBlue,
-          borderRadius: BorderRadius.circular(12),
-          items: _fungsiList.map((item) => DropdownMenuItem<String>(
-            value: item['value'],
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12),
-              child: Row(children: [
-                Text(item['icon']!, style: const TextStyle(fontSize: 18)),
-                const SizedBox(width: 8),
-                Expanded(child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Text(item['label']!,
-                      style: GoogleFonts.poppins(fontSize: 13, color: Colors.white, fontWeight: FontWeight.w600)),
-                    Text(item['description']!,
-                      style: GoogleFonts.poppins(fontSize: 9, color: Colors.white70),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  ],
-                )),
-              ]),
-            ),
-          )).toList(),
-          onChanged: (v) {
-            if (v != null) setState(() => _selectedFungsi = v);
-          },
+        color: _workerValidated
+            ? Colors.green.withOpacity(0.15)
+            : Colors.red.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _workerValidated
+              ? Colors.greenAccent.withOpacity(0.4)
+              : Colors.redAccent.withOpacity(0.4),
+          width: 1,
         ),
       ),
-    ),
-  );
-
-  Widget _buildCaptchaField() => _fieldColumn(
-    "Verifikasi Keamanan", null, Icons.security, "",
-    customField: Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white.withAlpha(25),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white54),
+      child: Row(
+        children: [
+          Icon(
+            _workerValidated ? Icons.verified_rounded : Icons.warning_rounded,
+            color: _workerValidated ? Colors.greenAccent : Colors.redAccent,
+            size: 16,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _workerValidationMessage,
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                color: Colors.white,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
       ),
-      child: Column(mainAxisSize: MainAxisSize.min, children: [
-        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-            decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
-            child: Text(_captchaQuestion,
-              style: GoogleFonts.poppins(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.primaryBlue)),
-          ),
-          Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(color: Colors.white.withAlpha(25), borderRadius: BorderRadius.circular(8)),
-            child: Text("Level $_captchaDifficulty",
-              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 10)),
-          ),
-        ]),
-        const SizedBox(height: 8),
+    );
+  }
+
+  // =========================================================
+  // FORM FIELDS
+  // =========================================================
+  Widget _buildNamaField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("Nama Lengkap"),
+        const SizedBox(height: 6),
         TextFormField(
-          controller: _captchaController,
-          keyboardType: TextInputType.number,
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: "Masukkan jawaban",
-            hintStyle: const TextStyle(color: Colors.white54, fontSize: 12),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Colors.white54),
+          controller: _namaController,
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+          decoration: _inputDecoration(
+            hint: "Masukkan nama lengkap",
+            icon: Icons.person_outline_rounded,
+          ),
+          validator: (v) => _authService.validateNama(v),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEmailField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("Email"),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _emailController,
+          keyboardType: TextInputType.emailAddress,
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+          decoration: _inputDecoration(
+            hint: "contoh@email.com",
+            icon: Icons.email_outlined,
+          ),
+          validator: (v) => _authService.validateEmail(v),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPhoneField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("Nomor HP"),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _phoneController,
+          keyboardType: TextInputType.phone,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(15),
+          ],
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+          decoration: _inputDecoration(
+            hint: "081234567890",
+            icon: Icons.phone_iphone_rounded,
+          ),
+          validator: (v) => _authService.validatePhone(v),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPasswordField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("Password"),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _passwordController,
+          obscureText: _hidePass,
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+          decoration: _inputDecoration(
+            hint: "Buat password",
+            icon: Icons.lock_outline_rounded,
+          ).copyWith(
+            suffixIcon: IconButton(
+              onPressed: () => setState(() => _hidePass = !_hidePass),
+              icon: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  _hidePass
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
+                  color: Colors.white.withOpacity(0.9),
+                  size: 18,
+                ),
+              ),
             ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Colors.white),
+          ),
+          validator: (v) => _authService.validatePassword(v),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildPasswordStrength() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: _passwordStrength,
+                    backgroundColor: Colors.white24,
+                    valueColor: AlwaysStoppedAnimation<Color>(_passwordStrengthColor),
+                    minHeight: 4,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _passwordStrengthText,
+                style: GoogleFonts.poppins(
+                  color: _passwordStrengthColor,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Minimal 8 karakter: Huruf besar, kecil, angka",
+            style: GoogleFonts.poppins(
+              color: Colors.white70,
+              fontSize: 9,
             ),
-            errorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppColors.softRed),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConfirmPasswordField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("Konfirmasi Password"),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _confirmController,
+          obscureText: _hideConfirm,
+          style: GoogleFonts.poppins(color: Colors.white, fontSize: 14),
+          decoration: _inputDecoration(
+            hint: "Ulangi password Anda",
+            icon: Icons.lock_reset_rounded,
+          ).copyWith(
+            suffixIcon: IconButton(
+              onPressed: () => setState(() => _hideConfirm = !_hideConfirm),
+              icon: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  _hideConfirm
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
+                  color: Colors.white.withOpacity(0.9),
+                  size: 18,
+                ),
+              ),
             ),
-            focusedErrorBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppColors.softRed),
-            ),
-            errorStyle: const TextStyle(color: AppColors.softRed, fontSize: 10),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-            filled: true,
-            fillColor: Colors.white.withAlpha(25),
           ),
           validator: (v) {
             if (v == null || v.isEmpty) return "Wajib diisi";
-            if (!_validateCaptcha()) return "Jawaban salah";
+            if (v != _passwordController.text) return "Password tidak cocok";
             return null;
           },
         ),
-        const SizedBox(height: 4),
-        Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-          TextButton(
-            onPressed: _generateCaptcha,
-            child: Text("Refresh Captcha",
-              style: GoogleFonts.poppins(color: Colors.white70, fontSize: 10, decoration: TextDecoration.underline)),
+      ],
+    );
+  }
+
+  Widget _buildFungsiField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("Fungsi Kerja"),
+        const SizedBox(height: 6),
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: Colors.white.withOpacity(0.15),
+              width: 1,
+            ),
           ),
-        ]),
-      ]),
-    ),
-  );
-
-  Widget _buildTermsCheckbox() => Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-    Transform.scale(
-      scale: 0.8,
-      child: Checkbox(
-        value: _agreeTerms,
-        activeColor: Colors.white,
-        checkColor: AppColors.primaryBlue,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-        onChanged: (v) => setState(() => _agreeTerms = v ?? false),
-      ),
-    ),
-    Expanded(child: GestureDetector(
-      onTap: () => setState(() => _agreeTerms = !_agreeTerms),
-      child: RichText(
-        text: TextSpan(
-          text: "Saya setuju dengan ",
-          style: GoogleFonts.poppins(color: Colors.white, fontSize: 11),
-          children: [
-            TextSpan(
-              text: "Syarat & Ketentuan",
-              style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600,
-                decoration: TextDecoration.underline, fontSize: 11),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: _selectedFungsi,
+              isExpanded: true,
+              icon: const Padding(
+                padding: EdgeInsets.only(right: 12),
+                child: Icon(
+                  Icons.expand_more_rounded,
+                  color: Colors.white,
+                ),
+              ),
+              style: GoogleFonts.poppins(
+                fontSize: 14,
+                color: Colors.white,
+              ),
+              dropdownColor: const Color(0xFF1E3C72),
+              borderRadius: BorderRadius.circular(14),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              items: _fungsiList.map((item) {
+                return DropdownMenuItem<String>(
+                  value: item['value'],
+                  child: Row(
+                    children: [
+                      Text(
+                        item['icon']!,
+                        style: const TextStyle(fontSize: 18),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              item['label']!,
+                              style: GoogleFonts.poppins(
+                                fontSize: 13,
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            Text(
+                              item['description']!,
+                              style: GoogleFonts.poppins(
+                                fontSize: 9,
+                                color: Colors.white70,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+              onChanged: (v) {
+                if (v != null) setState(() => _selectedFungsi = v);
+              },
             ),
-            const TextSpan(text: " dan "),
-            TextSpan(
-              text: "Kebijakan Privasi",
-              style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w600,
-                decoration: TextDecoration.underline, fontSize: 11),
-            ),
-          ],
+          ),
         ),
-      ),
-    )),
-  ]);
+      ],
+    );
+  }
 
+  // =========================================================
+  // REGISTER BUTTON
+  // =========================================================
   Widget _buildRegisterButton(int remaining) {
-    final isDisabled = _loading || remaining > 0 || !_workerValidated; // 🔥 Harus validasi dulu
-    return SizedBox(
+    final isDisabled = _loading || remaining > 0 || !_workerValidated;
+
+    return Container(
       width: double.infinity,
-      height: 44,
+      height: 52,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: isDisabled
+            ? null
+            : const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white,
+                  Color(0xFFF1F5F9),
+                ],
+              ),
+        boxShadow: isDisabled
+            ? []
+            : [
+                BoxShadow(
+                  color: Colors.white.withOpacity(0.3),
+                  blurRadius: 15,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+      ),
       child: ElevatedButton(
         onPressed: isDisabled ? null : _register,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white,
-          foregroundColor: AppColors.primaryBlue,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          elevation: isDisabled ? 0 : 2,
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          disabledBackgroundColor: Colors.white.withOpacity(0.1),
         ),
         child: _loading
             ? const SizedBox(
-                width: 20, height: 20,
-                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primaryBlue),
+                width: 22,
+                height: 22,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: Color(0xFF1E3C72),
+                ),
               )
             : remaining > 0
-                ? Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    const Icon(Icons.timer_outlined, size: 16),
-                    const SizedBox(width: 4),
-                    Text("Tunggu $remaining detik",
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  ])
-                : const Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                    Text("DAFTAR", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                    SizedBox(width: 4),
-                    Icon(Icons.arrow_forward_rounded, size: 16),
-                  ]),
+                ? Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.timer_outlined,
+                        size: 16,
+                        color: Colors.white54,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        "Tunggu $remaining detik",
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white54,
+                        ),
+                      ),
+                    ],
+                  )
+                : Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        "Daftar Sekarang",
+                        style: GoogleFonts.poppins(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: const Color(0xFF1E3C72),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E3C72).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 18,
+                          color: Color(0xFF1E3C72),
+                        ),
+                      ),
+                    ],
+                  ),
       ),
     );
   }
 
-  Widget _buildLoginLink() => Center(
-    child: TextButton(
-      onPressed: () => context.pop(),
-      style: TextButton.styleFrom(
-        padding: EdgeInsets.zero,
-        minimumSize: const Size(50, 30),
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-      child: Text("Sudah punya akun? Masuk sekarang",
-        style: GoogleFonts.poppins(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 12)),
-    ),
-  );
-
-  Widget _buildFooter() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-    decoration: BoxDecoration(color: Colors.grey[50], borderRadius: BorderRadius.circular(12)),
-    child: Row(children: [
-      Container(
-        padding: const EdgeInsets.all(6),
-        decoration: BoxDecoration(color: AppColors.primaryBlue.withAlpha(25), shape: BoxShape.circle),
-        child: const Icon(Icons.shield_rounded, color: AppColors.primaryBlue, size: 16),
-      ),
-      const SizedBox(width: 8),
-      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-        Text("Keamanan Terenkripsi 🔒",
-          style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryBlue)),
-        Text("SHA-256 + Rate Limiting 30 detik",
-          style: GoogleFonts.poppins(fontSize: 9, color: Colors.grey[600])),
-      ])),
-    ]),
-  );
-
-  // ================= WIDGET HELPER =================
-  Widget _fieldColumn(
-    String label,
-    TextEditingController? controller,
-    IconData icon,
-    String hint, {
-    bool obscure = false,
-    TextInputType type = TextInputType.text,
-    List<TextInputFormatter>? formatters,
-    String? Function(String?)? validator,
-    Widget? suffix,
-    Widget? prefixWidget,
-    Widget? customField,
-  }) {
-    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-      _buildLabelWithAsterisk(label),
-      const SizedBox(height: 4),
-      customField ?? _buildInputField(
-        controller: controller!,
-        icon: icon,
-        hint: hint,
-        obscure: obscure,
-        type: type,
-        formatters: formatters,
-        validator: validator,
-        suffix: suffix,
-        prefixWidget: prefixWidget,
-      ),
-    ]);
+  // =========================================================
+  // LOGIN LINK
+  // =========================================================
+  Widget _buildLoginLink() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Text(
+          "Sudah punya akun? ",
+          style: GoogleFonts.poppins(
+            color: Colors.white.withOpacity(0.7),
+            fontSize: 12,
+          ),
+        ),
+        GestureDetector(
+          onTap: () => context.go('/login'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 6,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.2),
+                width: 1,
+              ),
+            ),
+            child: Text(
+              "Masuk Sekarang",
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
-  Widget _buildLabelWithAsterisk(String label) => RichText(
-    text: TextSpan(
-      text: label,
-      style: GoogleFonts.poppins(color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w500),
-      children: const [TextSpan(text: " *",
-        style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 12))],
-    ),
-  );
+  // =========================================================
+  // FOOTER
+  // =========================================================
+  Widget _buildFooter() {
+    return Column(
+      children: [
+        Text(
+          "© 2026 Overtime Tracking Pertamina",
+          textAlign: TextAlign.center,
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            color: const Color(0xFF94A3B8),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          "PT Pertamina (Persero) - All Rights Reserved",
+          textAlign: TextAlign.center,
+          style: GoogleFonts.poppins(
+            fontSize: 10,
+            color: const Color(0xFFCBD5E1),
+          ),
+        ),
+      ],
+    );
+  }
 
-  Widget _buildInputField({
-    required TextEditingController controller,
-    required IconData icon,
+  // =========================================================
+  // HELPER METHODS
+  // =========================================================
+  
+  Widget _buildLabel(String text) {
+    return Row(
+      children: [
+        Text(
+          text,
+          style: GoogleFonts.poppins(
+            color: Colors.white.withOpacity(0.9),
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
+          ),
+        ),
+        const Text(
+          " *",
+          style: TextStyle(
+            color: Colors.redAccent,
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+      ],
+    );
+  }
+
+  InputDecoration _inputDecoration({
     required String hint,
-    bool obscure = false,
-    TextInputType type = TextInputType.text,
-    List<TextInputFormatter>? formatters,
-    String? Function(String?)? validator,
-    Widget? suffix,
-    Widget? prefixWidget,
+    required IconData icon,
   }) {
-    return TextFormField(
-      controller: controller,
-      obscureText: obscure,
-      keyboardType: type,
-      inputFormatters: formatters,
-      validator: validator,
-      style: const TextStyle(color: Colors.white, fontSize: 13),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: Colors.white54, fontSize: 12),
-        prefixIcon: prefixWidget != null ? null : Icon(icon, color: Colors.white, size: 18),
-        prefix: prefixWidget,
-        suffixIcon: suffix != null ? Padding(padding: const EdgeInsets.only(right: 4), child: suffix) : null,
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.white54),
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: GoogleFonts.poppins(
+        color: Colors.white.withOpacity(0.4),
+        fontSize: 13,
+      ),
+      prefixIcon: Container(
+        margin: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Colors.white),
+        child: Icon(
+          icon,
+          color: Colors.white.withOpacity(0.9),
+          size: 18,
         ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.softRed),
+      ),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.08),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 16,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(
+          color: Colors.white.withOpacity(0.15),
+          width: 1,
         ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppColors.softRed),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(
+          color: Colors.white.withOpacity(0.4),
+          width: 1.5,
         ),
-        errorStyle: const TextStyle(color: AppColors.softRed, fontSize: 10),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        filled: true,
-        fillColor: Colors.white.withAlpha(25),
-        isDense: true,
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: Colors.redAccent,
+          width: 1,
+        ),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: Colors.redAccent,
+          width: 1.5,
+        ),
+      ),
+      errorStyle: GoogleFonts.poppins(
+        fontSize: 10,
+        color: Colors.redAccent,
       ),
     );
   }

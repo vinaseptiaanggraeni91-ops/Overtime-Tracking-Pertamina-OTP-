@@ -70,7 +70,7 @@ class PendingSummary extends StatelessWidget {
               padding: const EdgeInsets.only(top: 8),
               child: Center(
                 child: TextButton(
-                  onPressed: () => Navigator.pushNamed(context, '/approval-lembur'),
+                  onPressed: () => Navigator.pushNamed(context, '/approval'),
                   child: Text('Lihat ${pendingList.length - 5} lainnya...'),
                 ),
               ),

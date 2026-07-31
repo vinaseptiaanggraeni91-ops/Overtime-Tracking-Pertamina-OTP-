@@ -82,36 +82,45 @@ class RecentActivities extends StatelessWidget {
                   ),
                 ],
               ),
-              // 🔥 BADGE COUNT
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      const Color(0xFF10B981).withValues(alpha: 0.15),
-                      const Color(0xFF10B981).withValues(alpha: 0.05),
+              // 🔥 BADGE COUNT - FIXED: Added text and proper constraints
+              if (activities.isNotEmpty)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        const Color(0xFF10B981).withValues(alpha: 0.15),
+                        const Color(0xFF10B981).withValues(alpha: 0.05),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(
+                      color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: Color(0xFF10B981),
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        '${activities.length > 5 ? 5 : activities.length}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: Color(0xFF10B981),
+                        ),
+                      ),
                     ],
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.3),
-                  ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 8,
-                      height: 8,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF10B981),
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  
-                  ],
-                ),
-              ),
             ],
           ),
           
@@ -121,7 +130,7 @@ class RecentActivities extends StatelessWidget {
           if (activities.isEmpty)
             _buildEmptyState()
           else ...[
-            // 🔥 ACTIVITY LIST DENGAN DIVIDER
+            // 🔥 ACTIVITY LIST DENGAN DIVIDER - HANYA 5 ITEM
             ...List.generate(
               activities.length > 5 ? 5 : activities.length,
               (index) => Column(
@@ -140,7 +149,7 @@ class RecentActivities extends StatelessWidget {
             ),
           ],
 
-          // 🔥 "LIHAT SEMUA" BUTTON
+          // 🔥 "LIHAT SEMUA" BUTTON - ARAHKAN KE SYSTEM LOGS
           if (activities.length > 5) ...[
             const SizedBox(height: 12),
             Center(
@@ -226,7 +235,7 @@ class RecentActivities extends StatelessWidget {
     );
   }
 
-  // 🔥 ACTIVITY ITEM
+  // 🔥 ACTIVITY ITEM - FIXED: Mengatasi overflow dengan Flexible
   Widget _buildActivityItem(Map<String, dynamic> activity, DashboardService service, int index) {
     final type = activity['type'] ?? 'info';
     final description = activity['description'] ?? 'Tidak ada deskripsi';
@@ -265,7 +274,7 @@ class RecentActivities extends StatelessWidget {
           ),
           const SizedBox(width: 12),
 
-          // 🔥 CONTENT
+          // 🔥 CONTENT - FIXED: Mengatasi overflow dengan Expanded dan Flexible
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -284,7 +293,7 @@ class RecentActivities extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
 
-                // User + Time
+                // User + Time - FIXED: Menggunakan Flexible untuk mencegah overflow
                 Row(
                   children: [
                     // User icon
@@ -294,30 +303,36 @@ class RecentActivities extends StatelessWidget {
                       color: Colors.grey[400],
                     ),
                     const SizedBox(width: 4),
-                    Text(
-                      user,
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.grey[500],
+                    Flexible(
+                      child: Text(
+                        user,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.grey[500],
+                        ),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
                     // Role badge
                     if (userRole.isNotEmpty && userRole != 'system') ...[
                       const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: service.getRoleColor(userRole).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(6),
-                        ),
-                        child: Text(
-                          userRole.toUpperCase(),
-                          style: TextStyle(
-                            fontSize: 8,
-                            fontWeight: FontWeight.w700,
-                            color: service.getRoleColor(userRole),
-                            letterSpacing: 0.5,
+                      Flexible(
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: service.getRoleColor(userRole).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            userRole.toUpperCase(),
+                            style: TextStyle(
+                              fontSize: 8,
+                              fontWeight: FontWeight.w700,
+                              color: service.getRoleColor(userRole),
+                              letterSpacing: 0.5,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ),

@@ -1,3 +1,4 @@
+// lib/widgets/bottom_nav/manager_bottom_nav.dart
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -13,15 +14,12 @@ class ManagerBottomNav extends StatelessWidget {
   void _onTabTapped(BuildContext context, int index) {
     switch (index) {
       case 0:
-        // Dashboard - pop all and go to dashboard
         context.go('/manager-dashboard');
         break;
       case 1:
-        // Approval
         context.push('/approval');
         break;
       case 2:
-        // Profile
         context.push('/profile');
         break;
     }
@@ -38,12 +36,12 @@ class ManagerBottomNav extends StatelessWidget {
       _NavItem(
         icon: Icons.pending_actions_outlined,
         activeIcon: Icons.pending_actions_rounded,
-        label: 'Persetujuan Lembur',
+        label: 'Persetujuan', // 🔥 DIPER PENDEK
       ),
       _NavItem(
         icon: Icons.person_outline_rounded,
         activeIcon: Icons.person_rounded,
-        label: 'Profile',
+        label: 'Profil',
       ),
     ];
 
@@ -134,6 +132,7 @@ class ManagerBottomNav extends StatelessWidget {
                                   item.label,
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 1,
+                                  textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: isSelected ? 11 : 10,

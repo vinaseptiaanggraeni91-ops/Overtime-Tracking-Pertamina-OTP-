@@ -2,6 +2,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:go_router/go_router.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -16,7 +17,7 @@ import '../../widgets/user_management/user_card.dart';
 import '../../widgets/user_management/user_detail_sheet.dart';
 import '../../widgets/user_management/user_form_sheet.dart';
 import '../../widgets/user_management/user_delete_dialog.dart';
-import '../../widgets/user_management/user_status_dialog.dart'; // 🔥 Dialog baru untuk status
+import '../../widgets/user_management/user_status_dialog.dart';
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({super.key});
@@ -48,7 +49,7 @@ class _UserManagementScreenState extends State<UserManagementScreen>
   String _selectedStatus = 'Semua';
   String _selectedFungsi = 'Semua';
   bool _showFilterPanel = false;
-  
+
   List<Map<String, dynamic>> _availableWorkers = [];
 
   @override
@@ -109,7 +110,7 @@ class _UserManagementScreenState extends State<UserManagementScreen>
       }
     }
   }
-  
+
   Future<void> _loadAvailableWorkers() async {
     try {
       final result = await _dashboardService.getWorkersList(limit: 500);
@@ -118,15 +119,17 @@ class _UserManagementScreenState extends State<UserManagementScreen>
       // Silent fail
     }
   }
-  
+
   Future<Map<String, dynamic>?> _validateWorkerId(String idPekerja) async {
     if (idPekerja.trim().isEmpty) return null;
     return await _dashboardService.validateWorkerId(idPekerja.trim());
   }
 
   // ================= PERMISSIONS =================
-  bool get canAdd => _currentUserRole == 'superadmin' || _currentUserRole == 'manager';
-  bool get canEdit => _currentUserRole == 'superadmin' || _currentUserRole == 'manager';
+  bool get canAdd =>
+      _currentUserRole == 'superadmin' || _currentUserRole == 'manager';
+  bool get canEdit =>
+      _currentUserRole == 'superadmin' || _currentUserRole == 'manager';
   bool get canDelete => _currentUserRole == 'superadmin';
 
   // ================= SNACKBAR =================
@@ -140,7 +143,8 @@ class _UserManagementScreenState extends State<UserManagementScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: (isError ? UserHelpers.accentRed : UserHelpers.accentGreen).withOpacity(0.1),
+                color: (isError ? UserHelpers.accentRed : UserHelpers.accentGreen)
+                    .withOpacity(0.1),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
@@ -185,14 +189,27 @@ class _UserManagementScreenState extends State<UserManagementScreen>
     setState(() {
       _filteredUsers = _users.where((user) {
         final searchMatch = _searchQuery.isEmpty ||
-            (user['nama_lengkap']?.toString().toLowerCase().contains(_searchQuery) == true) ||
-            (user['email']?.toString().toLowerCase().contains(_searchQuery) == true) ||
-            (user['phone']?.toString().toLowerCase().contains(_searchQuery) == true) ||
-            (user['id_pekerja']?.toString().toLowerCase().contains(_searchQuery) == true);
+            (user['nama_lengkap']
+                    ?.toString()
+                    .toLowerCase()
+                    .contains(_searchQuery) ==
+                true) ||
+            (user['email']?.toString().toLowerCase().contains(_searchQuery) ==
+                true) ||
+            (user['phone']?.toString().toLowerCase().contains(_searchQuery) ==
+                true) ||
+            (user['id_pekerja']
+                    ?.toString()
+                    .toLowerCase()
+                    .contains(_searchQuery) ==
+                true);
 
-        final roleMatch = _selectedRole == 'Semua' || user['role'] == _selectedRole;
-        final statusMatch = _selectedStatus == 'Semua' || user['status_akun'] == _selectedStatus;
-        final fungsiMatch = _selectedFungsi == 'Semua' || user['fungsi'] == _selectedFungsi;
+        final roleMatch =
+            _selectedRole == 'Semua' || user['role'] == _selectedRole;
+        final statusMatch = _selectedStatus == 'Semua' ||
+            user['status_akun'] == _selectedStatus;
+        final fungsiMatch = _selectedFungsi == 'Semua' ||
+            user['fungsi'] == _selectedFungsi;
 
         return searchMatch && roleMatch && statusMatch && fungsiMatch;
       }).toList();
@@ -260,14 +277,11 @@ class _UserManagementScreenState extends State<UserManagementScreen>
     }
   }
 
-  // 🔥 Hapus Pengguna dengan Konfirmasi
   Future<void> _deleteUser(String id, String name) async {
-    // Tampilkan dialog konfirmasi
     final confirmed = await UserDeleteDialog.show(context, userName: name);
-    
-    if (confirmed != true) return; // Jika batal, kembali ke daftar pengguna
-    
-    // Tampilkan loading
+
+    if (confirmed != true) return;
+
     if (!mounted) return;
     showDialog(
       context: context,
@@ -278,16 +292,23 @@ class _UserManagementScreenState extends State<UserManagementScreen>
           decoration: BoxDecoration(
             color: UserHelpers.surfaceWhite,
             borderRadius: BorderRadius.circular(20),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 4))],
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4)),
+            ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const CircularProgressIndicator(color: UserHelpers.accentRed, strokeWidth: 3),
+              const CircularProgressIndicator(
+                  color: UserHelpers.accentRed, strokeWidth: 3),
               const SizedBox(height: 16),
               Text(
                 'Menghapus pengguna...',
-                style: GoogleFonts.inter(color: UserHelpers.textSecondary, fontSize: 14),
+                style: GoogleFonts.inter(
+                    color: UserHelpers.textSecondary, fontSize: 14),
               ),
             ],
           ),
@@ -295,13 +316,12 @@ class _UserManagementScreenState extends State<UserManagementScreen>
       ),
     );
 
-    // Proses penghapusan
     final result = await _authService.deleteUser(
       userId: id,
       sessionId: UserHelpers.generateSessionId(),
     );
 
-    if (mounted) context.pop(); // Tutup loading
+    if (mounted) context.pop();
 
     if (result.success) {
       setState(() {
@@ -314,22 +334,20 @@ class _UserManagementScreenState extends State<UserManagementScreen>
     }
   }
 
-  // 🔥 Aktifkan/Nonaktifkan Pengguna dengan Konfirmasi
-  Future<void> _toggleUserStatus(String id, String currentStatus, String userName) async {
+  Future<void> _toggleUserStatus(
+      String id, String currentStatus, String userName) async {
     final isActivating = currentStatus != 'active';
-    
-    // Tampilkan dialog konfirmasi
+
     final confirmed = await UserStatusDialog.show(
       context,
       userName: userName,
       isActivating: isActivating,
     );
-    
-    if (confirmed != true) return; // Jika batal, kembali ke daftar pengguna
-    
+
+    if (confirmed != true) return;
+
     final newStatus = isActivating ? 'active' : 'inactive';
-    
-    // Tampilkan loading
+
     if (!mounted) return;
     showDialog(
       context: context,
@@ -340,44 +358,53 @@ class _UserManagementScreenState extends State<UserManagementScreen>
           decoration: BoxDecoration(
             color: UserHelpers.surfaceWhite,
             borderRadius: BorderRadius.circular(20),
-            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 20, offset: const Offset(0, 4))],
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 20,
+                  offset: const Offset(0, 4)),
+            ],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               CircularProgressIndicator(
-                color: isActivating ? UserHelpers.accentGreen : UserHelpers.accentOrange,
+                color: isActivating
+                    ? UserHelpers.accentGreen
+                    : UserHelpers.accentOrange,
                 strokeWidth: 3,
               ),
               const SizedBox(height: 16),
               Text(
-                isActivating ? 'Mengaktifkan pengguna...' : 'Menonaktifkan pengguna...',
-                style: GoogleFonts.inter(color: UserHelpers.textSecondary, fontSize: 14),
+                isActivating
+                    ? 'Mengaktifkan pengguna...'
+                    : 'Menonaktifkan pengguna...',
+                style: GoogleFonts.inter(
+                    color: UserHelpers.textSecondary, fontSize: 14),
               ),
             ],
           ),
         ),
       ),
     );
-    
-    // Proses perubahan status
+
     final result = await _authService.toggleUserStatus(
       userId: id,
       newStatus: newStatus,
       sessionId: UserHelpers.generateSessionId(),
     );
-    
-    if (mounted) context.pop(); // Tutup loading
-    
+
+    if (mounted) context.pop();
+
     if (result.success) {
       setState(() {
         final index = _users.indexWhere((user) => user['id'] == id);
         if (index != -1) _users[index]['status_akun'] = newStatus;
         _applyFilters();
       });
-      _showMsg(isActivating 
-        ? 'Akun pengguna berhasil diaktifkan' 
-        : 'Akun pengguna berhasil dinonaktifkan');
+      _showMsg(isActivating
+          ? 'Akun pengguna berhasil diaktifkan'
+          : 'Akun pengguna berhasil dinonaktifkan');
     } else {
       _showMsg(result.message, true);
     }
@@ -407,9 +434,12 @@ class _UserManagementScreenState extends State<UserManagementScreen>
   // ================= BUILD =================
   @override
   Widget build(BuildContext context) {
-    final activeCount = _users.where((e) => e['status_akun'] == 'active').length;
-    final inactiveCount = _users.where((e) => e['status_akun'] == 'inactive').length;
-    final blockedCount = _users.where((e) => e['status_akun'] == 'blocked').length;
+    final activeCount =
+        _users.where((e) => e['status_akun'] == 'active').length;
+    final inactiveCount =
+        _users.where((e) => e['status_akun'] == 'inactive').length;
+    final blockedCount =
+        _users.where((e) => e['status_akun'] == 'blocked').length;
 
     return Scaffold(
       backgroundColor: UserHelpers.bgWhite,
@@ -428,7 +458,8 @@ class _UserManagementScreenState extends State<UserManagementScreen>
             searchQuery: _searchQuery,
             activeFilterCount: _activeFilterCount,
             showFilterPanel: _showFilterPanel,
-            onFilterToggle: () => setState(() => _showFilterPanel = !_showFilterPanel),
+            onFilterToggle: () =>
+                setState(() => _showFilterPanel = !_showFilterPanel),
             onClearSearch: () {
               _searchController.clear();
               _applyFilters();
@@ -460,90 +491,219 @@ class _UserManagementScreenState extends State<UserManagementScreen>
     );
   }
 
-  // ================= APP BAR =================
+  // ================= APP BAR - TANPA BACKGROUND PADA ICON BACK & RELOAD =================
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       elevation: 0,
       backgroundColor: Colors.transparent,
-      leading: IconButton(
-        icon: Container(
-          padding: const EdgeInsets.all(8),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
-        ),
-        onPressed: () => context.pop(),
+      toolbarHeight: 72,
+      systemOverlayStyle: const SystemUiOverlayStyle(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+        statusBarBrightness: Brightness.dark,
       ),
+      // ============ BACK BUTTON - TANPA BACKGROUND ============
+      leading: Padding(
+        padding: const EdgeInsets.only(left: 12, top: 4),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: () => context.pop(),
+            child: const Padding(
+              padding: EdgeInsets.all(8.0),
+              child: Icon(
+                Icons.arrow_back_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+            ),
+          ),
+        ),
+      ),
+      // ============ BACKGROUND ============
       flexibleSpace: Container(
         decoration: BoxDecoration(
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [UserHelpers.headerBlue, Color(0xFF2A5298)],
+            colors: [
+              Color(0xFF0F172A),
+              Color(0xFF1E3A8A),
+              Color(0xFF3B82F6),
+            ],
+            stops: [0.0, 0.4, 1.0],
           ),
           borderRadius: const BorderRadius.only(
-            bottomLeft: Radius.circular(40),
-            bottomRight: Radius.circular(40),
+            bottomLeft: Radius.circular(32),
+            bottomRight: Radius.circular(32),
           ),
           boxShadow: [
             BoxShadow(
-              color: UserHelpers.headerBlue.withOpacity(0.3),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: const Color(0xFF1E3A8A).withOpacity(0.3),
+              blurRadius: 20,
+              offset: const Offset(0, 6),
+            ),
+          ],
+        ),
+        child: Stack(
+          children: [
+            // Decorative elements
+            Positioned(
+              right: -20,
+              top: -30,
+              child: Container(
+                width: 120,
+                height: 120,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      Colors.white.withOpacity(0.08),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              left: -10,
+              bottom: -20,
+              child: Container(
+                width: 80,
+                height: 80,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [
+                      Colors.white.withOpacity(0.06),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              right: 30,
+              bottom: 10,
+              child: Row(
+                children: List.generate(
+                  3,
+                  (index) => Container(
+                    margin: const EdgeInsets.only(left: 4),
+                    width: 4,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Colors.white.withOpacity(0.2 + (index * 0.15)),
+                    ),
+                  ),
+                ),
+              ),
             ),
           ],
         ),
       ),
+      centerTitle: true,
+      // ============ TITLE - ICON KELOLA PENGGUNA DENGAN BACKGROUND PERSEGI ============
       title: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
+          // Icon kelola pengguna dengan background persegi
           Container(
-            padding: const EdgeInsets.all(8),
+            width: 36,
+            height: 36,
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(12),
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.2),
+                width: 1,
+              ),
             ),
-            child: const Icon(Icons.admin_panel_settings_rounded, color: Colors.white, size: 20),
+            child: const Center(
+              child: Icon(
+                Icons.manage_accounts_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
+            ),
           ),
-          const SizedBox(width: 12),
-          Text(
-            'Kelola Pengguna', // 🔥 Diubah ke Bahasa Indonesia
-            style: GoogleFonts.inter(fontWeight: FontWeight.w700, fontSize: 20, color: Colors.white),
+          const SizedBox(width: 10),
+          // Teks
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Kelola Pengguna',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                  color: Colors.white,
+                  letterSpacing: -0.3,
+                ),
+              ),
+              Text(
+                'Manajemen Akun',
+                style: GoogleFonts.inter(
+                  fontWeight: FontWeight.w400,
+                  fontSize: 10,
+                  color: Colors.white.withOpacity(0.7),
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
           ),
         ],
       ),
-      centerTitle: false,
+      // ============ RELOAD BUTTON - TANPA BACKGROUND ============
       actions: [
-        Container(
-          margin: const EdgeInsets.only(right: 4),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: IconButton(
-            onPressed: _loadUsers,
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 20),
-            tooltip: 'Muat Ulang',
+        Padding(
+          padding: const EdgeInsets.only(right: 12, top: 4),
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(8),
+              onTap: _loadUsers,
+              child: const Padding(
+                padding: EdgeInsets.all(8.0),
+                child: Icon(
+                  Icons.refresh_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
           ),
         ),
-        const SizedBox(width: 8),
       ],
     );
   }
 
-  // ================= FAB =================
+  // ================= FAB - DESAIN BARU =================
   Widget _buildFAB() {
     return FloatingActionButton.extended(
       onPressed: () => _showForm(),
-      backgroundColor: UserHelpers.headerBlue,
-      icon: const Icon(Icons.add_rounded, color: Colors.white),
+      backgroundColor: const Color(0xFF1E40AF),
+      icon: const Icon(Icons.person_add_rounded, color: Colors.white, size: 22),
       label: Text(
-        'Tambah Pengguna', // 🔥 Diubah ke Bahasa Indonesia
-        style: GoogleFonts.inter(color: Colors.white, fontWeight: FontWeight.w600),
+        'Tambah Pengguna',
+        style: GoogleFonts.inter(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+          fontSize: 14,
+        ),
       ),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      elevation: 8,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: const BorderSide(
+          color: Color(0xFF3B82F6),
+          width: 1.5,
+        ),
+      ),
     );
   }
 
@@ -554,8 +714,8 @@ class _UserManagementScreenState extends State<UserManagementScreen>
 
     return RefreshIndicator(
       onRefresh: _loadUsers,
-      color: UserHelpers.headerBlue,
-      backgroundColor: UserHelpers.surfaceWhite,
+      color: const Color(0xFF1E40AF),
+      backgroundColor: Colors.white,
       child: ListView.builder(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
         itemCount: _filteredUsers.length,
@@ -571,9 +731,9 @@ class _UserManagementScreenState extends State<UserManagementScreen>
             onToggleStatus: () => _toggleUserStatus(
               _filteredUsers[i]['id'],
               _filteredUsers[i]['status_akun'],
-              _filteredUsers[i]['nama_lengkap'] ?? 'Pengguna', // 🔥 Kirim nama untuk dialog
+              _filteredUsers[i]['nama_lengkap'] ?? 'Pengguna',
             ),
-            onDelete: () => _deleteUser( // 🔥 Langsung panggil delete dengan konfirmasi
+            onDelete: () => _deleteUser(
               _filteredUsers[i]['id'],
               _filteredUsers[i]['nama_lengkap'] ?? 'Pengguna',
             ),
@@ -586,93 +746,182 @@ class _UserManagementScreenState extends State<UserManagementScreen>
   // ================= LOADING STATE =================
   Widget _buildLoadingState() {
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          TweenAnimationBuilder<double>(
-            tween: Tween<double>(begin: 0.8, end: 1.0),
-            duration: const Duration(milliseconds: 1000),
-            builder: (context, value, child) => Transform.scale(
-              scale: value,
-              child: Container(
-                width: 70,
-                height: 70,
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [UserHelpers.headerBlue, Color(0xFF2A5298)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            TweenAnimationBuilder<double>(
+              tween: Tween<double>(begin: 0.8, end: 1.0),
+              duration: const Duration(milliseconds: 1000),
+              builder: (context, value, child) => Transform.scale(
+                scale: value,
+                child: Container(
+                  width: 70,
+                  height: 70,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF1E3A8A), Color(0xFF3B82F6)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: const Color(0xFF3B82F6).withOpacity(0.3),
+                        blurRadius: 25,
+                        spreadRadius: 3,
+                      ),
+                    ],
                   ),
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(color: UserHelpers.headerBlue.withOpacity(0.3), blurRadius: 20),
-                  ],
-                ),
-                child: const CircularProgressIndicator(
-                  color: Colors.white,
-                  strokeWidth: 3,
+                  child: const Center(
+                    child: SizedBox(
+                      width: 30,
+                      height: 30,
+                      child: CircularProgressIndicator(
+                        color: Colors.white,
+                        strokeWidth: 3,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(height: 20),
-          Text(
-            'Memuat data pengguna...',
-            style: GoogleFonts.inter(fontSize: 14, color: UserHelpers.textLight),
-          ),
-        ],
+            const SizedBox(height: 20),
+            Text(
+              'Memuat Data Pengguna',
+              style: GoogleFonts.inter(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: const Color(0xFF1E293B),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Mohon tunggu sebentar...',
+              style: GoogleFonts.inter(
+                fontSize: 12,
+                color: const Color(0xFF64748B),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  // ================= EMPTY STATE =================
+  // ================= EMPTY STATE - PERBAIKAN OVERFLOW =================
   Widget _buildEmptyState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: UserHelpers.headerBlue.withOpacity(0.05),
-              shape: BoxShape.circle,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.only(
+            left: 20,
+            right: 20,
+            top: constraints.maxHeight * 0.05,
+            bottom: constraints.maxHeight * 0.1,
+          ),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              minHeight: constraints.maxHeight,
             ),
-            child: Icon(
-              Icons.people_outline_rounded,
-              size: 64,
-              color: UserHelpers.headerBlue.withOpacity(0.2),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Ikon yang lebih kecil untuk menghemat space
+                Container(
+                  padding: EdgeInsets.all(
+                    constraints.maxHeight < 200 ? 20 : 30,
+                  ),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        const Color(0xFF3B82F6).withOpacity(0.08),
+                        const Color(0xFF60A5FA).withOpacity(0.05),
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: const Color(0xFF3B82F6).withOpacity(0.15),
+                      width: 2,
+                    ),
+                  ),
+                  child: Icon(
+                    _searchQuery.isNotEmpty || _activeFilterCount > 0
+                        ? Icons.search_off_rounded
+                        : Icons.people_outline_rounded,
+                    size: constraints.maxHeight < 200 ? 40 : 56,
+                    color: const Color(0xFF3B82F6).withOpacity(0.3),
+                  ),
+                ),
+                SizedBox(height: constraints.maxHeight < 200 ? 12 : 20),
+                // Judul dengan ukuran font responsif
+                Text(
+                  _searchQuery.isNotEmpty || _activeFilterCount > 0
+                      ? 'Tidak Ada Hasil'
+                      : 'Belum Ada Pengguna',
+                  style: GoogleFonts.inter(
+                    fontSize: constraints.maxHeight < 200 ? 16 : 18,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF1E293B),
+                    letterSpacing: -0.5,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                SizedBox(height: constraints.maxHeight < 200 ? 4 : 8),
+                // Deskripsi
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Text(
+                    _searchQuery.isNotEmpty || _activeFilterCount > 0
+                        ? 'Coba sesuaikan kata kunci atau filter yang digunakan'
+                        : 'Tambahkan pengguna baru untuk memulai manajemen akun',
+                    style: GoogleFonts.inter(
+                      color: const Color(0xFF64748B),
+                      fontSize: constraints.maxHeight < 200 ? 11 : 12,
+                      height: 1.4,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                if (_activeFilterCount > 0) ...[
+                  SizedBox(height: constraints.maxHeight < 200 ? 12 : 20),
+                  ElevatedButton.icon(
+                    onPressed: _resetFilters,
+                    icon: Icon(
+                      Icons.filter_alt_off_rounded,
+                      size: constraints.maxHeight < 200 ? 14 : 16,
+                    ),
+                    label: Text(
+                      'Reset Filter',
+                      style: TextStyle(
+                        fontSize: constraints.maxHeight < 200 ? 11 : 13,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFEF4444),
+                      foregroundColor: Colors.white,
+                      padding: EdgeInsets.symmetric(
+                        horizontal: constraints.maxHeight < 200 ? 14 : 18,
+                        vertical: constraints.maxHeight < 200 ? 8 : 10,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      elevation: 0,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
-          const SizedBox(height: 20),
-          Text(
-            _searchQuery.isNotEmpty || _activeFilterCount > 0
-                ? 'Tidak ada pengguna yang sesuai filter'
-                : 'Belum ada pengguna',
-            style: GoogleFonts.inter(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-              color: UserHelpers.textSecondary,
-            ),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            _searchQuery.isNotEmpty || _activeFilterCount > 0
-                ? 'Coba sesuaikan pencarian atau filter'
-                : 'Klik tombol di bawah untuk menambah pengguna',
-            style: GoogleFonts.inter(color: UserHelpers.textHint, fontSize: 13),
-            textAlign: TextAlign.center,
-          ),
-          if (_activeFilterCount > 0) ...[
-            const SizedBox(height: 20),
-            TextButton.icon(
-              onPressed: _resetFilters,
-              icon: const Icon(Icons.clear_all_rounded, size: 16),
-              label: const Text('Reset Filter'),
-              style: TextButton.styleFrom(foregroundColor: UserHelpers.accentRed),
-            ),
-          ],
-        ],
-      ),
+        );
+      },
     );
   }
 }

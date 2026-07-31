@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../screens/register_screen.dart';
 import '../screens/login_screen.dart';
+import 'package:otp_apk/core/services/push_notification_service.dart';
 
 class WelcomeScreen extends StatelessWidget {
   const WelcomeScreen({super.key});
@@ -107,7 +108,29 @@ Image.asset(
                         ),
                       ),
 
-                      const SizedBox(height: 36),
+                      // ⬇️⬇️⬇️ TOMBOL TEST NOTIFIKASI ⬇️⬇️⬇️
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          PushNotificationService().testLocalNotification();
+                        },
+                        icon: const Icon(Icons.notifications_active),
+                        label: const Text('🔔 TEST NOTIFIKASI'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 20,
+                            vertical: 10,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                      ),
+                      // ⬆️⬆️⬆️ TOMBOL TEST NOTIFIKASI ⬆️⬆️⬆️
+
+                      const SizedBox(height: 20),
 
                       /// 🔥 CARD BIRU (WRAPPER)
                       Container(
@@ -205,7 +228,7 @@ Image.asset(
                                     );
                                   },
                                   child: const Text(
-                                    "Register",
+                                    "Registrasi",
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w700,
@@ -223,7 +246,7 @@ Image.asset(
 
                       /// FOOTER (SEKARANG BISA DISCROLL)
                       Text(
-                        "© 2025 Overtime Tracking Pertamina",
+                        "© 2026 Overtime Tracking Pertamina",
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 12,

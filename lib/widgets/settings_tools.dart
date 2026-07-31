@@ -54,7 +54,7 @@ class SettingsTools extends StatelessWidget {
                 () => _clearCache(context),
               ),
               _buildChip(
-                'System Logs',
+                'Sistem Log',
                 Icons.list_alt,
                 () => _viewSystemLogs(context),
               ),

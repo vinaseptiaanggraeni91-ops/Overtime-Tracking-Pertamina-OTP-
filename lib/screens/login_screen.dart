@@ -1,5 +1,4 @@
 // lib/screens/login_screen.dart
-
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -15,7 +14,8 @@ class LoginScreen extends StatefulWidget {
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen> {
+class _LoginScreenState extends State<LoginScreen>
+    with SingleTickerProviderStateMixin {
   // ================= SERVICE =================
   final AuthService _authService = AuthService();
 
@@ -40,11 +40,43 @@ class _LoginScreenState extends State<LoginScreen> {
   static const int _maxAttempts = 3;
   static const int _coolDownSeconds = 30;
 
+  // ================= ANIMATION =================
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
+
+  // 🔥 TAMBAHKAN: Flag untuk mencegah auto login jika ada intent khusus
+  bool _shouldAutoLogin = true;
+
   @override
   void initState() {
     super.initState();
+    
+    // Setup animasi
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    );
+    
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOut,
+    );
+    
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOutCubic,
+    ));
+    
+    _animationController.forward();
+    
     _loadRememberMe();
-    _checkAutoLogin();
+    
+    // 🔥 HANYA AUTO LOGIN JIKA TIDAK ADA INTENT KHUSUS
+    _checkAutoLoginIfNeeded();
   }
 
   @override
@@ -52,6 +84,7 @@ class _LoginScreenState extends State<LoginScreen> {
     _identityController.dispose();
     _passwordController.dispose();
     _coolDownTimer?.cancel();
+    _animationController.dispose();
     super.dispose();
   }
 
@@ -74,17 +107,31 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // =========================================================
-  // AUTO LOGIN
+  // 🔥 AUTO LOGIN - DIPERBAIKI
   // =========================================================
 
-  Future<void> _checkAutoLogin() async {
+  Future<void> _checkAutoLoginIfNeeded() async {
+    // 🔥 Cek apakah ada intent khusus (reset password, dll)
+    // Jika ada, skip auto login
+    if (!_shouldAutoLogin) {
+      debugPrint('🔄 Auto login skipped - special intent detected');
+      return;
+    }
+
+    // 🔥 Cek apakah user sebelumnya sudah login
     final result = await _authService.tryAutoLogin();
 
     if (!mounted) return;
 
     if (result != null && result.success) {
       _showSuccess("Selamat datang kembali, ${result.nama}!");
-      _navigateToDashboard(result.role);
+      
+      // 🔥 Delay sebentar agar animasi sempat terlihat
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      if (mounted) {
+        _navigateToDashboard(result.role);
+      }
     }
   }
 
@@ -131,10 +178,6 @@ class _LoginScreenState extends State<LoginScreen> {
       _loginAttempts = 0;
     });
   }
-
-  // =========================================================
-  // LOGIN
-  // =========================================================
 
   Future<void> _login() async {
     FocusScope.of(context).unfocus();
@@ -226,18 +269,10 @@ class _LoginScreenState extends State<LoginScreen> {
     }
   }
 
-  // =========================================================
-  // NAVIGASI
-  // =========================================================
-
   void _navigateToDashboard(String role) {
     final path = _authService.getDashboardPath(role);
     context.go(path);
   }
-
-  // =========================================================
-  // SNACKBAR
-  // =========================================================
 
   void _showError(String message) {
     if (!mounted) return;
@@ -255,17 +290,26 @@ class _LoginScreenState extends State<LoginScreen> {
         duration: const Duration(seconds: 4),
         content: Row(
           children: [
-            const Icon(
-              Icons.error_outline_rounded,
-              color: Colors.white,
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.error_outline_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 message,
                 style: GoogleFonts.poppins(
                   fontSize: 13,
                   color: Colors.white,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
@@ -282,7 +326,7 @@ class _LoginScreenState extends State<LoginScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: Colors.green,
+        backgroundColor: const Color(0xFF059669),
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(12),
         shape: RoundedRectangleBorder(
@@ -291,17 +335,26 @@ class _LoginScreenState extends State<LoginScreen> {
         duration: const Duration(seconds: 3),
         content: Row(
           children: [
-            const Icon(
-              Icons.check_circle_outline_rounded,
-              color: Colors.white,
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.2),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.check_circle_outline_rounded,
+                color: Colors.white,
+                size: 18,
+              ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 message,
                 style: GoogleFonts.poppins(
                   fontSize: 13,
                   color: Colors.white,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ),
@@ -311,85 +364,95 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // =========================================================
-  // BUILD
-  // =========================================================
-
   @override
   Widget build(BuildContext context) {
-    final isSmallHeight =
-        MediaQuery.of(context).size.height < 750;
+    final size = MediaQuery.of(context).size;
+    final isSmallHeight = size.height < 700;
 
     return Scaffold(
-      backgroundColor: AppColors.backgroundWhite,
-      resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            return SingleChildScrollView(
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.symmetric(
-                horizontal: 20,
-                vertical: 14,
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              Color(0xFFF8FAFC),
+              Color(0xFFEFF6FF),
+              Color(0xFFF0F9FF),
+            ],
+          ),
+        ),
+        child: SafeArea(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            keyboardDismissBehavior:
+                ScrollViewKeyboardDismissBehavior.onDrag,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                children: [
+                  const SizedBox(height: 8),
+                  
+                  // 🔥 HEADER DENGAN LOGO
+                  _buildHeader(),
+                  
+                  SizedBox(height: isSmallHeight ? 16 : 24),
+                  
+                  // 🔥 ILUSTRASI MODERN
+                  _buildModernIllustration(isSmallHeight),
+                  
+                  SizedBox(height: isSmallHeight ? 20 : 28),
+                  
+                  // 🔥 WELCOME TEXT
+                  _buildWelcomeText(),
+                  
+                  SizedBox(height: isSmallHeight ? 16 : 24),
+                  
+                  // 🔥 LOGIN CARD
+                  _buildLoginCard(),
+                  
+                  SizedBox(height: isSmallHeight ? 20 : 28),
+                  
+                  // 🔥 FOOTER
+                  _buildFooter(),
+                  
+                  const SizedBox(height: 16),
+                ],
               ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: constraints.maxHeight,
-                ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    _buildHeader(),
-
-                    SizedBox(
-                      height: isSmallHeight ? 10 : 16,
-                    ),
-
-                    _buildIllustration(isSmallHeight),
-
-                    SizedBox(
-                      height: isSmallHeight ? 10 : 16,
-                    ),
-
-                    _buildTitle(),
-
-                    SizedBox(
-                      height: isSmallHeight ? 14 : 20,
-                    ),
-
-                    _buildLoginForm(),
-
-                    const SizedBox(height: 16),
-
-                    _buildFooter(),
-
-                    const SizedBox(height: 20),
-                  ],
-                ),
-              ),
-            );
-          },
+            ),
+          ),
         ),
       ),
     );
   }
 
   // =========================================================
-  // HEADER
+  // 🔥 HEADER DENGAN LOGO - MODERN & ELEGANT
   // =========================================================
-
   Widget _buildHeader() {
     return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
+        // Back button dengan glass effect
         GestureDetector(
           onTap: () => context.pop(),
           child: Container(
-            width: 42,
-            height: 42,
+            width: 44,
+            height: 44,
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
-              borderRadius: BorderRadius.circular(12),
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.primaryBlue.withOpacity(0.08),
+                  blurRadius: 12,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+              border: Border.all(
+                color: Colors.grey.shade200,
+                width: 1,
+              ),
             ),
             child: const Icon(
               Icons.arrow_back_ios_new_rounded,
@@ -399,35 +462,47 @@ class _LoginScreenState extends State<LoginScreen> {
           ),
         ),
 
-        const Spacer(),
-
+        // Logo container dengan background subtle
         Container(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 12,
-            vertical: 6,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
-            color: Colors.green.withAlpha(25),
-            borderRadius: BorderRadius.circular(20),
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.primaryBlue.withOpacity(0.06),
+                blurRadius: 15,
+                offset: const Offset(0, 4),
+              ),
+            ],
             border: Border.all(
-              color: Colors.green.withAlpha(70),
+              color: Colors.grey.shade100,
+              width: 1,
             ),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.security_rounded,
-                color: Colors.green,
-                size: 14,
+              // Logo Pertamina
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.asset(
+                  'assets/images/logo_pertamina.png',
+                  height: 30,
+                ),
               ),
-              const SizedBox(width: 4),
-              Text(
-                "Login Aman",
-                style: GoogleFonts.poppins(
-                  fontSize: 10,
-                  color: Colors.green.shade700,
-                  fontWeight: FontWeight.w600,
+              Container(
+                margin: const EdgeInsets.symmetric(horizontal: 12),
+                width: 1.5,
+                height: 24,
+                color: Colors.grey.shade300,
+              ),
+              // Logo App
+              ClipRRect(
+                borderRadius: BorderRadius.circular(6),
+                child: Image.asset(
+                  'assets/images/logo.png',
+                  height: 28,
                 ),
               ),
             ],
@@ -438,34 +513,175 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // =========================================================
-  // ILLUSTRATION
+  // 🔥 ILUSTRASI MODERN DENGAN ANIMASI
   // =========================================================
-
-  Widget _buildIllustration(bool isSmallHeight) {
-    return SizedBox(
-      height: isSmallHeight ? 70 : 100,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Icon(
-            Icons.login_rounded,
-            size: isSmallHeight ? 60 : 80,
-            color: AppColors.primaryBlue.withAlpha(70),
+  Widget _buildModernIllustration(bool isSmallHeight) {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: Container(
+          height: isSmallHeight ? 140 : 180,
+          width: double.infinity,
+          margin: const EdgeInsets.symmetric(horizontal: 8),
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                AppColors.primaryBlue.withOpacity(0.06),
+                const Color(0xFF4B79A1).withOpacity(0.04),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(24),
+            border: Border.all(
+              color: AppColors.primaryBlue.withOpacity(0.08),
+              width: 1.5,
+            ),
           ),
-          Positioned(
-            right: 0,
-            top: 0,
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: const BoxDecoration(
-                color: Colors.green,
-                shape: BoxShape.circle,
+          child: Stack(
+            children: [
+              // Decorative circles
+              Positioned(
+                top: -20,
+                right: -20,
+                child: Container(
+                  width: 100,
+                  height: 100,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        AppColors.primaryBlue.withOpacity(0.1),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
               ),
-              child: const Icon(
-                Icons.shield_rounded,
-                color: Colors.white,
-                size: 16,
+              Positioned(
+                bottom: -30,
+                left: -30,
+                child: Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: RadialGradient(
+                      colors: [
+                        const Color(0xFF4B79A1).withOpacity(0.08),
+                        Colors.transparent,
+                      ],
+                    ),
+                  ),
+                ),
               ),
+              
+              // Main illustration
+              Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    // Icon container
+                    Container(
+                      width: isSmallHeight ? 64 : 80,
+                      height: isSmallHeight ? 64 : 80,
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [
+                            AppColors.primaryBlue,
+                            Color(0xFF4B79A1),
+                          ],
+                        ),
+                        borderRadius: BorderRadius.circular(20),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppColors.primaryBlue.withOpacity(0.3),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.login_rounded,
+                        color: Colors.white,
+                        size: 38,
+                      ),
+                    ),
+                    
+                    SizedBox(height: isSmallHeight ? 12 : 16),
+                    
+                    // Security badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 4,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // =========================================================
+  // 🔥 WELCOME TEXT - LEBIH HIERARKI
+  // =========================================================
+  Widget _buildWelcomeText() {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: Column(
+        children: [
+          // Small badge
+          Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 4,
+            ),
+            decoration: BoxDecoration(
+              color: AppColors.primaryBlue.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              "Overtime Tracking Pertamina",
+              style: GoogleFonts.poppins(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primaryBlue,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 12),
+          
+          Text(
+            "Selamat Datang Kembali! 👋",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 26,
+              fontWeight: FontWeight.bold,
+              color: const Color(0xFF1E293B),
+              height: 1.2,
+            ),
+          ),
+          
+          const SizedBox(height: 8),
+          
+          Text(
+            "Silakan masuk untuk mengakses\ndashboard pengajuan lembur Anda",
+            textAlign: TextAlign.center,
+            style: GoogleFonts.poppins(
+              fontSize: 13,
+              color: const Color(0xFF64748B),
+              height: 1.5,
+              fontWeight: FontWeight.w400,
             ),
           ),
         ],
@@ -474,117 +690,126 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // =========================================================
-  // TITLE
+  // 🔥 LOGIN CARD - GLASSMORPHISM & MODERN
   // =========================================================
-
-  Widget _buildTitle() {
-    return Column(
-      children: [
-        Text(
-          "Selamat Datang Kembali 👋",
-          textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(
-            fontSize: 24,
-            fontWeight: FontWeight.bold,
-            color: AppColors.primaryBlue,
+  Widget _buildLoginCard() {
+    return FadeTransition(
+      opacity: _fadeAnimation,
+      child: SlideTransition(
+        position: _slideAnimation,
+        child: Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                Color(0xFF1E3C72),
+                Color(0xFF2A5298),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(28),
+            boxShadow: [
+              BoxShadow(
+                color: const Color(0xFF1E3C72).withOpacity(0.3),
+                blurRadius: 30,
+                offset: const Offset(0, 15),
+              ),
+            ],
+            border: Border.all(
+              color: Colors.white.withOpacity(0.1),
+              width: 1.5,
+            ),
+          ),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                // Form header dengan icon
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(
+                        Icons.lock_outline_rounded,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      "Masuk ke Akun",
+                      style: GoogleFonts.poppins(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(height: 6),
+                
+                Text(
+                  "Gunakan email terdaftar",
+                  style: GoogleFonts.poppins(
+                    fontSize: 12,
+                    color: Colors.white.withOpacity(0.8),
+                  ),
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // Cooldown banner
+                if (_isBlocked) _buildCooldownBanner(),
+                
+                // Error message
+                if (_errorMessage.isNotEmpty && !_isBlocked)
+                  _buildErrorMessage(),
+                
+                // Identity field
+                _buildIdentityField(),
+                
+                const SizedBox(height: 16),
+                
+                // Password field
+                _buildPasswordField(),
+                
+                const SizedBox(height: 12),
+                
+                // Remember & Forgot
+                _buildRememberAndForgot(),
+                
+                const SizedBox(height: 22),
+                
+                // Login button
+                _buildLoginButton(),
+                
+                const SizedBox(height: 18),
+                
+                // Register link
+                _buildRegisterLink(),
+                
+                // 🔥 TAMBAHKAN: Reset Aplikasi link
+                const SizedBox(height: 12),
+                _buildResetAppLink(),
+              ],
+            ),
           ),
         ),
-
-        const SizedBox(height: 6),
-
-        Text(
-          "Masuk untuk mengakses sistem pengajuan lembur",
-          textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(
-            fontSize: 12,
-            color: Colors.grey.shade600,
-          ),
-        ),
-      ],
-    );
-  }
-
-  // =========================================================
-  // LOGIN FORM
-  // =========================================================
-
-  Widget _buildLoginForm() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: AppColors.primaryBlue,
-        borderRadius: BorderRadius.circular(22),
-        boxShadow: [
-          BoxShadow(
-            color: AppColors.primaryBlue.withAlpha(70),
-            blurRadius: 20,
-            offset: const Offset(0, 10),
-          ),
-        ],
       ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          children: [
-            _buildFormHeader(),
-
-            const SizedBox(height: 18),
-
-            if (_isBlocked)
-              _buildCooldownBanner(),
-
-            if (_errorMessage.isNotEmpty && !_isBlocked)
-              _buildErrorMessage(),
-
-            _buildIdentityField(),
-
-            const SizedBox(height: 14),
-
-            _buildPasswordField(),
-
-            const SizedBox(height: 8),
-
-            _buildRememberAndForgot(),
-
-            const SizedBox(height: 18),
-
-            _buildLoginButton(),
-
-            const SizedBox(height: 14),
-
-            _buildRegisterLink(),
-          ],
-        ),
-      ),
     );
   }
 
-  Widget _buildFormHeader() {
-    return Column(
-      children: [
-        Text(
-          "LOGIN",
-          style: GoogleFonts.poppins(
-            fontSize: 22,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-
-        const SizedBox(height: 4),
-
-        Text(
-          "Masukkan kredensial Anda",
-          style: GoogleFonts.poppins(
-            fontSize: 11,
-            color: Colors.white70,
-          ),
-        ),
-      ],
-    );
-  }
-
+  // =========================================================
+  // COOLDOWN BANNER
+  // =========================================================
   Widget _buildCooldownBanner() {
     final progress = _cooldownRemaining > 0
         ? 1.0 - (_cooldownRemaining / _coolDownSeconds)
@@ -592,30 +817,38 @@ class _LoginScreenState extends State<LoginScreen> {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: AppColors.accentOrange.withAlpha(25),
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.orange.withOpacity(0.15),
+        borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: AppColors.accentOrange.withAlpha(70),
+          color: Colors.orange.withOpacity(0.4),
+          width: 1,
         ),
       ),
       child: Column(
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.timer_outlined,
-                color: AppColors.accentOrange,
-                size: 20,
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(
+                  Icons.timer_outlined,
+                  color: Colors.orange,
+                  size: 18,
+                ),
               ),
-              const SizedBox(width: 8),
+              const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  "Terlalu banyak percobaan gagal",
+                  "Terlalu banyak percobaan",
                   style: GoogleFonts.poppins(
-                    color: AppColors.accentOrange,
+                    color: Colors.orange,
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                   ),
@@ -623,29 +856,23 @@ class _LoginScreenState extends State<LoginScreen> {
               ),
             ],
           ),
-
           const SizedBox(height: 10),
-
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: progress,
-              minHeight: 6,
-              backgroundColor:
-                  AppColors.accentOrange.withAlpha(40),
-              valueColor:
-                  const AlwaysStoppedAnimation<Color>(
-                AppColors.accentOrange,
+              minHeight: 4,
+              backgroundColor: Colors.orange.withOpacity(0.2),
+              valueColor: const AlwaysStoppedAnimation<Color>(
+                Colors.orange,
               ),
             ),
           ),
-
           const SizedBox(height: 6),
-
           Text(
-            "Silakan tunggu $_cooldownRemaining detik lagi...",
+            "Silakan tunggu $_cooldownRemaining detik",
             style: GoogleFonts.poppins(
-              color: AppColors.accentOrange,
+              color: Colors.orange.withOpacity(0.9),
               fontSize: 11,
               fontWeight: FontWeight.w500,
             ),
@@ -655,33 +882,42 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
+  // =========================================================
+  // ERROR MESSAGE
+  // =========================================================
   Widget _buildErrorMessage() {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(10),
-      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: AppColors.softRed.withAlpha(20),
-        borderRadius: BorderRadius.circular(10),
+        color: Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: AppColors.softRed.withAlpha(60),
+          color: Colors.red.withOpacity(0.3),
+          width: 1,
         ),
       ),
       child: Row(
         children: [
-          const Icon(
-            Icons.error_outline_rounded,
-            color: AppColors.softRed,
-            size: 18,
+          Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: Colors.red.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: const Icon(
+              Icons.error_outline_rounded,
+              color: Colors.red,
+              size: 16,
+            ),
           ),
-
-          const SizedBox(width: 8),
-
+          const SizedBox(width: 10),
           Expanded(
             child: Text(
               _errorMessage,
               style: GoogleFonts.poppins(
-                color: AppColors.softRed,
+                color: Colors.red.shade300,
                 fontSize: 11,
                 fontWeight: FontWeight.w500,
               ),
@@ -693,99 +929,151 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // =========================================================
-  // FIELD
+  // IDENTITY FIELD
   // =========================================================
-
   Widget _buildIdentityField() {
-    return _fieldColumn(
-      "Email atau Nomor HP",
-      _identityController,
-      Icons.person_outline_rounded,
-      "contoh@email.com",
-      validator: (v) {
-        if (v == null || v.trim().isEmpty) {
-          return 'Wajib diisi';
-        }
-
-        if (v.contains('@')) {
-          return _authService.validateEmail(v);
-        }
-
-        return _authService.validatePhone(v);
-      },
-    );
-  }
-
-  Widget _buildPasswordField() {
-    return _fieldColumn(
-      "Password",
-      _passwordController,
-      Icons.lock_outline_rounded,
-      "Masukkan password",
-      obscure: _obscurePassword,
-      validator: (v) => _authService.validatePassword(v),
-      suffix: IconButton(
-        onPressed: () {
-          setState(() {
-            _obscurePassword = !_obscurePassword;
-          });
-        },
-        icon: Icon(
-          _obscurePassword
-              ? Icons.visibility_off
-              : Icons.visibility,
-          color: Colors.white,
-          size: 20,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("Email"),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _identityController,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 14,
+          ),
+          decoration: _inputDecoration(
+            hint: "contoh@email.com",
+            icon: Icons.person_outline_rounded,
+          ),
+          validator: (v) {
+            if (v == null || v.trim().isEmpty) {
+              return 'Wajib diisi';
+            }
+            if (v.contains('@')) {
+              return _authService.validateEmail(v);
+            }
+            return _authService.validatePhone(v);
+          },
         ),
-      ),
+      ],
     );
   }
 
+  // =========================================================
+  // PASSWORD FIELD
+  // =========================================================
+  Widget _buildPasswordField() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _buildLabel("Password"),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: _passwordController,
+          obscureText: _obscurePassword,
+          style: GoogleFonts.poppins(
+            color: Colors.white,
+            fontSize: 14,
+          ),
+          decoration: _inputDecoration(
+            hint: "Masukkan password",
+            icon: Icons.lock_outline_rounded,
+          ).copyWith(
+            suffixIcon: IconButton(
+              onPressed: () {
+                setState(() {
+                  _obscurePassword = !_obscurePassword;
+                });
+              },
+              icon: Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  _obscurePassword
+                      ? Icons.visibility_off_rounded
+                      : Icons.visibility_rounded,
+                  color: Colors.white.withOpacity(0.9),
+                  size: 18,
+                ),
+              ),
+            ),
+          ),
+          validator: (v) => _authService.validatePassword(v),
+        ),
+      ],
+    );
+  }
+
+  // =========================================================
+  // REMEMBER & FORGOT
+  // =========================================================
   Widget _buildRememberAndForgot() {
     return Row(
       children: [
-        Row(
-          children: [
-            Transform.scale(
-              scale: 0.75,
-              child: Checkbox(
-                value: _rememberMe,
-                activeColor: Colors.white,
-                checkColor: AppColors.primaryBlue,
-                onChanged: (v) {
-                  setState(() {
-                    _rememberMe = v ?? false;
-                  });
-                },
+        GestureDetector(
+          onTap: () {
+            setState(() {
+              _rememberMe = !_rememberMe;
+            });
+          },
+          child: Row(
+            children: [
+              Container(
+                width: 20,
+                height: 20,
+                decoration: BoxDecoration(
+                  color: _rememberMe
+                      ? Colors.white
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(
+                    color: _rememberMe
+                        ? Colors.white
+                        : Colors.white.withOpacity(0.5),
+                    width: 2,
+                  ),
+                ),
+                child: _rememberMe
+                    ? const Icon(
+                        Icons.check_rounded,
+                        color: Color(0xFF1E3C72),
+                        size: 14,
+                      )
+                    : null,
               ),
-            ),
-
-            Text(
-              "Ingat saya",
-              style: GoogleFonts.poppins(
-                color: Colors.white70,
-                fontSize: 11,
+              const SizedBox(width: 8),
+              Text(
+                "Ingat saya",
+                style: GoogleFonts.poppins(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-
         const Spacer(),
-
-        TextButton(
-          onPressed: () {
-            context.push(
-              '/reset-password',
-              extra: _identityController.text.trim(),
-            );
+        GestureDetector(
+          onTap: () {
+            
+            _shouldAutoLogin = false;
+            final email = _identityController.text.trim();
+            context.push('/reset-password?email=$email');
           },
           child: Text(
             "Lupa Password?",
             style: GoogleFonts.poppins(
               color: Colors.white,
-              fontSize: 11,
+              fontSize: 12,
               fontWeight: FontWeight.w600,
               decoration: TextDecoration.underline,
+              decorationColor: Colors.white.withOpacity(0.5),
             ),
           ),
         ),
@@ -796,67 +1084,96 @@ class _LoginScreenState extends State<LoginScreen> {
   // =========================================================
   // LOGIN BUTTON
   // =========================================================
-
   Widget _buildLoginButton() {
     final isDisabled = _isLoading || _isBlocked;
 
-    return SizedBox(
+    return Container(
       width: double.infinity,
-      height: 48,
+      height: 52,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: isDisabled
+            ? null
+            : const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Colors.white,
+                  Color(0xFFF1F5F9),
+                ],
+              ),
+        boxShadow: isDisabled
+            ? []
+            : [
+                BoxShadow(
+                  color: Colors.white.withOpacity(0.3),
+                  blurRadius: 15,
+                  offset: const Offset(0, 8),
+                ),
+              ],
+      ),
       child: ElevatedButton(
         onPressed: isDisabled ? null : _login,
         style: ElevatedButton.styleFrom(
-          backgroundColor:
-              isDisabled ? Colors.grey.shade400 : Colors.white,
-          foregroundColor: AppColors.primaryBlue,
-          elevation: isDisabled ? 0 : 2,
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(16),
           ),
+          disabledBackgroundColor: Colors.white.withOpacity(0.1),
         ),
         child: _isLoading
             ? const SizedBox(
                 width: 22,
                 height: 22,
                 child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  color: AppColors.primaryBlue,
+                  strokeWidth: 2.5,
+                  color: Color(0xFF1E3C72),
                 ),
               )
             : _isBlocked
                 ? Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       const Icon(
                         Icons.lock_outline_rounded,
                         size: 16,
+                        color: Colors.white54,
                       ),
-                      const SizedBox(width: 6),
+                      const SizedBox(width: 8),
                       Text(
                         "Terkunci $_cooldownRemaining detik",
                         style: GoogleFonts.poppins(
-                          fontSize: 13,
-                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white54,
                         ),
                       ),
                     ],
                   )
                 : Row(
-                    mainAxisAlignment:
-                        MainAxisAlignment.center,
+                    mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       Text(
-                        "LOGIN",
+                        "Login",
                         style: GoogleFonts.poppins(
                           fontWeight: FontWeight.bold,
-                          fontSize: 14,
+                          fontSize: 15,
+                          color: const Color(0xFF1E3C72),
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      const Icon(
-                        Icons.arrow_forward_rounded,
-                        size: 18,
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E3C72).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.arrow_forward_rounded,
+                          size: 18,
+                          color: Color(0xFF1E3C72),
+                        ),
                       ),
                     ],
                   ),
@@ -865,214 +1182,213 @@ class _LoginScreenState extends State<LoginScreen> {
   }
 
   // =========================================================
-  // REGISTER
+  // REGISTER LINK
   // =========================================================
-
   Widget _buildRegisterLink() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         Text(
-          "Belum punya akun?",
+          "Belum punya akun? ",
           style: GoogleFonts.poppins(
-            color: Colors.white70,
+            color: Colors.white.withOpacity(0.7),
             fontSize: 12,
           ),
         ),
-
-        TextButton(
-          onPressed: () => context.push('/register'),
-          child: Text(
-            "Daftar Sekarang",
-            style: GoogleFonts.poppins(
-              color: Colors.white,
-              fontWeight: FontWeight.bold,
-              fontSize: 12,
-              decoration: TextDecoration.underline,
+        GestureDetector(
+          onTap: () => context.push('/register'),
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: 6,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.15),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: Colors.white.withOpacity(0.2),
+                width: 1,
+              ),
+            ),
+            child: Text(
+              "Daftar Sekarang",
+              style: GoogleFonts.poppins(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 12,
+              ),
             ),
           ),
         ),
       ],
+    );
+  }
+
+  // =========================================================
+  // 🔥 RESET APLIKASI LINK - DITAMBAHKAN
+  // =========================================================
+  Widget _buildResetAppLink() {
+    return GestureDetector(
+      onTap: () {
+        // 🔥 NONAKTIFKAN AUTO LOGIN SAAT NAVIGASI KE RESET APLIKASI
+        _shouldAutoLogin = false;
+        context.push('/reset-app');
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 8,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.1),
+            width: 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.refresh_rounded,
+              color: Colors.white.withOpacity(0.6),
+              size: 14,
+            ),
+            const SizedBox(width: 6),
+            Text(
+              "Reset Aplikasi",
+              style: GoogleFonts.poppins(
+                color: Colors.white.withOpacity(0.6),
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 
   // =========================================================
   // FOOTER
   // =========================================================
-
   Widget _buildFooter() {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: 12,
-        vertical: 10,
-      ),
-      decoration: BoxDecoration(
-        color: Colors.grey.shade50,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(
-              color: AppColors.primaryBlue.withAlpha(20),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(
-              Icons.shield_rounded,
-              size: 16,
-              color: AppColors.primaryBlue,
-            ),
-          ),
-
-          const SizedBox(width: 8),
-
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Login Aman Terenkripsi 🔒",
-                  style: GoogleFonts.poppins(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.primaryBlue,
-                  ),
-                ),
-
-                Text(
-                  "3x gagal → terkunci 30 detik",
-                  style: GoogleFonts.poppins(
-                    fontSize: 9,
-                    color: Colors.grey.shade600,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // =========================================================
-  // HELPER
-  // =========================================================
-
-  Widget _fieldColumn(
-    String label,
-    TextEditingController controller,
-    IconData icon,
-    String hint, {
-    bool obscure = false,
-    String? Function(String?)? validator,
-    Widget? suffix,
-  }) {
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _buildLabelWithAsterisk(label),
-
+        Text(
+          "© 2026 Overtime Tracking Pertamina",
+          textAlign: TextAlign.center,
+          style: GoogleFonts.poppins(
+            fontSize: 11,
+            color: const Color(0xFF94A3B8),
+            fontWeight: FontWeight.w500,
+          ),
+        ),
         const SizedBox(height: 4),
-
-        _buildInputField(
-          controller: controller,
-          icon: icon,
-          hint: hint,
-          obscure: obscure,
-          validator: validator,
-          suffix: suffix,
+        Text(
+          "PT Pertamina (Persero) - All Rights Reserved",
+          textAlign: TextAlign.center,
+          style: GoogleFonts.poppins(
+            fontSize: 10,
+            color: const Color(0xFFCBD5E1),
+          ),
         ),
       ],
     );
   }
 
-  Widget _buildLabelWithAsterisk(String label) {
-    return RichText(
-      text: TextSpan(
-        text: label,
-        style: GoogleFonts.poppins(
-          color: Colors.white70,
-          fontSize: 12,
-          fontWeight: FontWeight.w500,
-        ),
-        children: const [
-          TextSpan(
-            text: " *",
-            style: TextStyle(
-              color: Colors.redAccent,
-              fontWeight: FontWeight.bold,
-            ),
+  // =========================================================
+  // HELPER METHODS
+  // =========================================================
+  
+  Widget _buildLabel(String text) {
+    return Row(
+      children: [
+        Text(
+          text,
+          style: GoogleFonts.poppins(
+            color: Colors.white.withOpacity(0.9),
+            fontSize: 12,
+            fontWeight: FontWeight.w500,
           ),
-        ],
-      ),
+        ),
+        const Text(
+          " *",
+          style: TextStyle(
+            color: Colors.redAccent,
+            fontWeight: FontWeight.bold,
+            fontSize: 14,
+          ),
+        ),
+      ],
     );
   }
 
-  Widget _buildInputField({
-    required TextEditingController controller,
-    required IconData icon,
+  InputDecoration _inputDecoration({
     required String hint,
-    bool obscure = false,
-    String? Function(String?)? validator,
-    Widget? suffix,
+    required IconData icon,
   }) {
-    return TextFormField(
-      controller: controller,
-      obscureText: obscure,
-      validator: validator,
-      style: const TextStyle(
-        color: Colors.white,
+    return InputDecoration(
+      hintText: hint,
+      hintStyle: GoogleFonts.poppins(
+        color: Colors.white.withOpacity(0.4),
         fontSize: 13,
       ),
-      decoration: InputDecoration(
-        hintText: hint,
-        hintStyle: GoogleFonts.poppins(
-          color: Colors.white54,
-          fontSize: 12,
+      prefixIcon: Container(
+        margin: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(10),
         ),
-        prefixIcon: Icon(
+        child: Icon(
           icon,
-          color: Colors.white,
+          color: Colors.white.withOpacity(0.9),
           size: 18,
         ),
-        suffixIcon: suffix,
-        filled: true,
-        fillColor: Colors.white.withAlpha(20),
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 14,
-          vertical: 14,
+      ),
+      filled: true,
+      fillColor: Colors.white.withOpacity(0.08),
+      contentPadding: const EdgeInsets.symmetric(
+        horizontal: 16,
+        vertical: 16,
+      ),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide.none,
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(
+          color: Colors.white.withOpacity(0.15),
+          width: 1,
         ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: Colors.white54,
-          ),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(
+          color: Colors.white.withOpacity(0.4),
+          width: 1.5,
         ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: Colors.white,
-          ),
+      ),
+      errorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: Colors.redAccent,
+          width: 1,
         ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: AppColors.softRed,
-          ),
+      ),
+      focusedErrorBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(
+          color: Colors.redAccent,
+          width: 1.5,
         ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(
-            color: AppColors.softRed,
-          ),
-        ),
-        errorStyle: GoogleFonts.poppins(
-          fontSize: 10,
-          color: AppColors.softRed,
-        ),
+      ),
+      errorStyle: GoogleFonts.poppins(
+        fontSize: 10,
+        color: Colors.redAccent,
       ),
     );
   }

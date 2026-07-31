@@ -62,7 +62,7 @@ class AboutAppScreen extends StatelessWidget {
       ),
       body: SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 100), // Extra bottom padding untuk nav
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 100),
         child: Column(
           children: [
             const SizedBox(height: 10),
@@ -86,13 +86,13 @@ class AboutAppScreen extends StatelessWidget {
                 icon: Icons.verified_rounded,
                 iconColor: const Color(0xFF22C55E),
                 title: 'Versi Aplikasi',
-                subtitle: 'v1.0.0 (Build 2024.12)',
+                subtitle: 'v1.2.0 (Build 2026.07)', // ✅ UPDATE VERSI
               ),
               _InfoItem(
                 icon: Icons.update_rounded,
                 iconColor: const Color(0xFFF97316),
                 title: 'Terakhir Diperbarui',
-                subtitle: '20 Desember 2024',
+                subtitle: '23 Juli 2026', // ✅ UPDATE TANGGAL KE 2026
               ),
               _InfoItem(
                 icon: Icons.category_rounded,
@@ -371,7 +371,7 @@ class AboutAppScreen extends StatelessWidget {
     final technologies = [
       _TechItem(
         name: 'Flutter',
-        version: '3.19+',
+        version: '3.27+', // ✅ UPDATE VERSI FLUTTER TERBARU
         icon: Icons.flutter_dash_rounded,
         color: const Color(0xFF02569B),
         description: 'Framework pengembangan aplikasi mobile cross-platform',
@@ -594,20 +594,20 @@ class AboutAppScreen extends StatelessWidget {
                 color: const Color(0xFF4CAF50).withOpacity(0.3),
               ),
             ),
-            child: Row(
+            child: const Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   Icons.energy_savings_leaf_rounded,
                   size: 18,
-                  color: const Color(0xFF2E7D32),
+                  color: Color(0xFF2E7D32),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Text(
                   'Energi Panas Bumi untuk Indonesia',
-                  style: GoogleFonts.poppins(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: const Color(0xFF2E7D32),
+                    color: Color(0xFF2E7D32),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -951,7 +951,7 @@ class AboutAppScreen extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(
-            'Hak Cipta © 2024',
+            'Hak Cipta © 2026', // ✅ UPDATE TAHUN COPYRIGHT
             style: GoogleFonts.poppins(
               fontSize: 14,
               fontWeight: FontWeight.w600,
@@ -988,20 +988,20 @@ class AboutAppScreen extends StatelessWidget {
                 color: const Color(0xFFF59E0B).withOpacity(0.3),
               ),
             ),
-            child: Row(
+            child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   Icons.lock_rounded,
                   size: 16,
-                  color: const Color(0xFFF59E0B),
+                  color: Color(0xFFF59E0B),
                 ),
-                const SizedBox(width: 8),
+                SizedBox(width: 8),
                 Text(
                   'Internal Use Only',
-                  style: GoogleFonts.poppins(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: const Color(0xFF92400E),
+                    color: Color(0xFF92400E),
                     fontWeight: FontWeight.w600,
                   ),
                 ),

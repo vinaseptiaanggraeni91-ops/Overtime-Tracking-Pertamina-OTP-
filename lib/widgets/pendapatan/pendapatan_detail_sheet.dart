@@ -1,8 +1,4 @@
 // lib/widgets/pendapatan/pendapatan_detail_sheet.dart
-// ============================================================================
-// PENDAPATAN DETAIL SHEET - Bottom sheet detail pendapatan
-// ============================================================================
-
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -201,13 +197,15 @@ class PendapatanDetailSheet extends StatelessWidget {
                                   label: item.absensiStatusLabel,
                                   color: item.absensiStatusColor,
                                 ),
-                                const SizedBox(width: 8),
                                 if (item.statusLembur != null &&
-                                    item.statusLembur!.isNotEmpty)
+                                    item.statusLembur!.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
                                   _buildMiniBadge(
                                     label: item.statusLemburLabel,
-                                    color: item.statusLemburColor,
+                                    color: _getStatusLemburColor(
+                                        item.statusLembur ?? ''),
                                   ),
+                                ],
                               ],
                             ),
                           ],
@@ -232,7 +230,8 @@ class PendapatanDetailSheet extends StatelessWidget {
                           _buildDetailRow(
                             icon: Icons.access_time_rounded,
                             label: 'Jam Lembur',
-                            value: '${item.jamMulai ?? "-"} - ${item.jamSelesai ?? "-"}',
+                            value:
+                                '${item.jamMulai ?? "-"} - ${item.jamSelesai ?? "-"}',
                           ),
                           _buildDetailRow(
                             icon: Icons.hourglass_bottom_rounded,
@@ -327,7 +326,8 @@ class PendapatanDetailSheet extends StatelessWidget {
                           _buildDetailRow(
                             icon: Icons.photo_outlined,
                             label: 'Foto Absensi',
-                            value: item.fotoUrl != null ? 'Tersedia 📸' : 'Tidak ada',
+                            value:
+                                item.fotoUrl != null ? 'Tersedia 📸' : 'Tidak ada',
                             valueColor: item.fotoUrl != null
                                 ? const Color(0xFF1B5E20)
                                 : Colors.grey,
@@ -403,8 +403,7 @@ class PendapatanDetailSheet extends StatelessWidget {
                             if (item.jenisLembur == 'hari_libur') ...[
                               _buildFormulaStep(
                                 step: '🏖',
-                                text:
-                                    'Termasuk multiplier Hari Libur (2x)',
+                                text: 'Termasuk multiplier Hari Libur (2x)',
                                 isNote: true,
                               ),
                               const SizedBox(height: 6),
@@ -525,9 +524,10 @@ class PendapatanDetailSheet extends StatelessWidget {
     );
   }
 
- 
+  // ═══════════════════════════════════════════════════════
   // SECTION CARD
- 
+  // ═══════════════════════════════════════════════════════
+
   Widget _buildSectionCard({
     required String title,
     required IconData icon,
@@ -590,9 +590,10 @@ class PendapatanDetailSheet extends StatelessWidget {
     );
   }
 
- 
+  // ═══════════════════════════════════════════════════════
   // DETAIL ROW
- 
+  // ═══════════════════════════════════════════════════════
+
   Widget _buildDetailRow({
     required IconData icon,
     required String label,
@@ -641,9 +642,10 @@ class PendapatanDetailSheet extends StatelessWidget {
     );
   }
 
- 
+  // ═══════════════════════════════════════════════════════
   // MINI BADGE
- 
+  // ═══════════════════════════════════════════════════════
+
   Widget _buildMiniBadge({
     required String label,
     required Color color,
@@ -668,9 +670,10 @@ class PendapatanDetailSheet extends StatelessWidget {
     );
   }
 
- 
+  // ═══════════════════════════════════════════════════════
   // FORMULA STEP
- 
+  // ═══════════════════════════════════════════════════════
+
   Widget _buildFormulaStep({
     required String step,
     required String text,
@@ -727,9 +730,38 @@ class PendapatanDetailSheet extends StatelessWidget {
     );
   }
 
- 
+  // ═══════════════════════════════════════════════════════
+  // ✅ HELPER: STATUS LEMBUR COLOR (FIX)
+  // ═══════════════════════════════════════════════════════
+
+  Color _getStatusLemburColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'disetujui':
+      case 'approved':
+        return Colors.green;
+      case 'ditolak':
+      case 'rejected':
+        return Colors.red;
+      case 'pending':
+        return Colors.orange;
+      case 'selesai':
+      case 'completed':
+        return Colors.blue;
+      case 'kadaluarsa':
+      case 'expired':
+        return Colors.grey;
+      case 'dibatalkan':
+      case 'cancelled':
+        return Colors.red.shade300;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
   // FORMATTING HELPERS
- 
+  // ═══════════════════════════════════════════════════════
+
   String _formatRupiah(double amount) {
     if (amount == 0) return 'Rp 0';
     final formatter = NumberFormat.currency(

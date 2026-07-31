@@ -29,6 +29,21 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
   final OvertimeApprovalService _approvalService = OvertimeApprovalService();
   Stream<List<Map<String, dynamic>>>? _stream;
 
+  // ✅ STATUS YANG HARUS DIEXCLUDE
+  static const List<String> _excludedStatuses = [
+    'dibatalkan',
+    'canceled',
+    'draft',
+  ];
+
+  // ✅ STATUS YANG VALID UNTUK RISKY LIST
+  static const List<String> _validRiskyStatuses = [
+    'pending',
+    'pending_hsse',
+    'manager_approval_pending_hsse',
+    'manager_approved_pending_hsse',
+  ];
+
   @override
   bool get wantKeepAlive => true;
 
@@ -48,8 +63,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
   }
 
   void _loadStream() {
-    debugPrint(
-        '🔄 Loading risky overtime: search="${widget.searchQuery}", fungsi="${widget.fungsiFilter}"');
+    debugPrint('🔄 Loading risky overtime: search="${widget.searchQuery}", fungsi="${widget.fungsiFilter}"');
     _stream = _approvalService.getAllRiskyOvertimeForHSSE(
       searchQuery: widget.searchQuery.isNotEmpty ? widget.searchQuery : null,
       fungsiFilter: widget.fungsiFilter,
@@ -76,14 +90,23 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
           return _buildErrorState(snapshot.error.toString());
         }
 
+        // ✅ FILTER: Exclude status dibatalkan/canceled/draft
+        final rawData = snapshot.data ?? [];
+        final filteredData = rawData.where((item) {
+          final status = item['status']?.toString() ?? '';
+          if (_excludedStatuses.contains(status)) {
+            debugPrint('⚠️ EXCLUDED from risky list: ${item['group_id']} (status=$status)');
+            return false;
+          }
+          return true;
+        }).toList();
+
         // Empty state
-        final data = snapshot.data ?? [];
-        if (data.isEmpty) {
+        if (filteredData.isEmpty) {
           return _buildEmptyState();
         }
 
-        debugPrint(
-            '✅ RiskyOvertimeList loaded: ${data.length} items, fungsi=${widget.fungsiFilter ?? "semua"}');
+        debugPrint('✅ RiskyOvertimeList loaded: ${filteredData.length} items (filtered from ${rawData.length}), fungsi=${widget.fungsiFilter ?? "semua"}');
 
         // Data list
         return RefreshIndicator(
@@ -94,9 +117,9 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
           child: ListView.builder(
             physics: const AlwaysScrollableScrollPhysics(),
             padding: const EdgeInsets.fromLTRB(16, 8, 16, 100),
-            itemCount: data.length,
+            itemCount: filteredData.length,
             itemBuilder: (context, index) {
-              final item = data[index];
+              final item = filteredData[index];
               return _buildRiskyCard(item, index);
             },
           ),
@@ -105,33 +128,35 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
     );
   }
 
-  // ================================================================
+  // ===================================================================
   // 🔥 CARD WIDGET
-  // ================================================================
+  // ===================================================================
   Widget _buildRiskyCard(Map<String, dynamic> item, int index) {
     final groupId = item['group_id']?.toString() ??
         item['id']?.toString() ??
         item['docId']?.toString() ??
         '';
-    final namaPengawas = item['pengawas_nama_lengkap']?.toString() ??
-        item['nama_pengawas']?.toString() ??
-        '-';
-    final fungsi = item['pengawas_fungsi']?.toString() ?? '-';
+
+    // ✅ Ambil data
+    final namaMitra = _getNamaMitra(item);
+    final fungsi = _getFungsi(item);
     final status = item['status']?.toString() ?? '';
     final riskLevel = item['risk_level']?.toString().toLowerCase() ?? 'low';
     final isFlagged = item['is_flagged_for_hsse'] == true;
     final isPendingHSSE = item['is_pending_hsse'] == true;
     final tanggal = _formatTanggal(item['tanggal'] ?? item['tanggal_lembur']);
-    final lokasi = item['lokasi'] is Map
-        ? (item['lokasi']['alamat']?.toString() ?? 'Lokasi tidak tersedia')
-        : (item['lokasi']?.toString() ?? '-');
+    final lokasi = _getLokasi(item);
     final estimasiBiaya = _parseDouble(item['estimasi_biaya_total']);
     final totalJam = _parseDouble(item['total_jam_desimal']);
-    final riskFactors =
-        (item['risk_factors'] as List?)?.cast<String>() ?? [];
+    final riskFactors = (item['risk_factors'] as List?)?.cast<String>() ?? [];
+
+    // ✅ Cek apakah dibatalkan
+    final isCanceled = _excludedStatuses.contains(status);
 
     final riskColor = _getRiskColor(riskLevel);
     final fungsiColor = _getFungsiColor(fungsi);
+
+    debugPrint('📝 Risky Card: groupId=$groupId, namaMitra=$namaMitra, status=$status, isCanceled=$isCanceled');
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
@@ -139,15 +164,17 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
         color: widget.isDarkMode ? const Color(0xFF1E293B) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isFlagged
-              ? const Color(0xFF9C27B0).withValues(alpha: 0.4)
-              : riskColor.withValues(alpha: 0.3),
+          color: isCanceled
+              ? Colors.grey.withValues(alpha: 0.4)
+              : isFlagged
+                  ? const Color(0xFF9C27B0).withValues(alpha: 0.4)
+                  : riskColor.withValues(alpha: 0.3),
           width: isFlagged ? 2 : 1,
         ),
         boxShadow: [
           BoxShadow(
-            color:
-                riskColor.withValues(alpha: widget.isDarkMode ? 0.15 : 0.06),
+            color: (isCanceled ? Colors.grey : riskColor).withValues(
+                alpha: widget.isDarkMode ? 0.15 : 0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -159,223 +186,271 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
         child: InkWell(
           onTap: () => widget.onTap(groupId),
           borderRadius: BorderRadius.circular(16),
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header: Nama Pengawas + Badge
-                Row(
-                  children: [
-                    Container(
-                      width: 12,
-                      height: 12,
-                      decoration: BoxDecoration(
-                        color: riskColor,
-                        shape: BoxShape.circle,
-                        boxShadow: [
-                          BoxShadow(
-                            color: riskColor.withValues(alpha: 0.5),
-                            blurRadius: 6,
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            namaPengawas,
-                            style: GoogleFonts.poppins(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: widget.isDarkMode
-                                  ? Colors.white
-                                  : const Color(0xFF1E293B),
+          child: Opacity(
+            opacity: isCanceled ? 0.55 : 1.0, // ✅ Greyed out untuk canceled
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Header: Nama Mitra + Badge
+                  Row(
+                    children: [
+                      Container(
+                        width: 12,
+                        height: 12,
+                        decoration: BoxDecoration(
+                          color: isCanceled ? Colors.grey : riskColor,
+                          shape: BoxShape.circle,
+                          boxShadow: [
+                            BoxShadow(
+                              color: (isCanceled ? Colors.grey : riskColor)
+                                  .withValues(alpha: 0.5),
+                              blurRadius: 6,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          Text(
-                            'ID: ${groupId.length > 10 ? '${groupId.substring(0, 10)}...' : groupId}',
-                            style: GoogleFonts.poppins(
-                              fontSize: 9,
-                              color: Colors.grey[500],
-                            ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    _buildStatusBadge(isPendingHSSE, isFlagged, status),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                // Info grid
-                Row(
-                  children: [
-                    _buildInfoChip(Icons.business, fungsi, fungsiColor),
-                    const SizedBox(width: 8),
-                    _buildInfoChip(Icons.warning_amber_rounded,
-                        _getRiskLabel(riskLevel), riskColor),
-                    const SizedBox(width: 8),
-                    _buildInfoChip(Icons.access_time,
-                        '${totalJam.toStringAsFixed(1)}j', Colors.blue),
-                  ],
-                ),
-                const SizedBox(height: 10),
-                // Lokasi & Tanggal
-                Row(
-                  children: [
-                    Icon(Icons.location_on_outlined,
-                        size: 14, color: Colors.grey[500]),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        lokasi,
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              namaMitra,
+                              style: GoogleFonts.poppins(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                                color: widget.isDarkMode
+                                    ? Colors.white
+                                    : const Color(0xFF1E293B),
+                                decoration: isCanceled
+                                    ? TextDecoration.lineThrough
+                                    : null, // ✅ Coret untuk canceled
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            Text(
+                              'ID: ${groupId.length > 10 ? '${groupId.substring(0, 10)}...' : groupId}',
+                              style: GoogleFonts.poppins(
+                                fontSize: 9,
+                                color: Colors.grey[500],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // ✅ Badge status
+                      if (isCanceled)
+                        _buildCanceledBadge()
+                      else
+                        _buildStatusBadge(isPendingHSSE, isFlagged, status),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  // Info grid
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 6,
+                    children: [
+                      _buildInfoChip(
+                        Icons.business,
+                        fungsi,
+                        isCanceled ? Colors.grey : fungsiColor,
+                      ),
+                      _buildInfoChip(
+                        Icons.warning_amber_rounded,
+                        _getRiskLabel(riskLevel),
+                        isCanceled ? Colors.grey : riskColor,
+                      ),
+                      _buildInfoChip(
+                        Icons.access_time,
+                        '${totalJam.toStringAsFixed(1)}j',
+                        isCanceled ? Colors.grey : Colors.blue,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  // Lokasi & Tanggal
+                  Row(
+                    children: [
+                      Icon(Icons.location_on_outlined,
+                          size: 14, color: Colors.grey[500]),
+                      const SizedBox(width: 4),
+                      Expanded(
+                        child: Text(
+                          lokasi,
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            color: widget.isDarkMode
+                                ? Colors.grey[400]
+                                : Colors.grey[600],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Icon(Icons.calendar_today,
+                          size: 14, color: Colors.grey[500]),
+                      const SizedBox(width: 4),
+                      Text(
+                        tanggal,
                         style: GoogleFonts.poppins(
                           fontSize: 11,
                           color: widget.isDarkMode
                               ? Colors.grey[400]
                               : Colors.grey[600],
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Icon(Icons.calendar_today,
-                        size: 14, color: Colors.grey[500]),
-                    const SizedBox(width: 4),
-                    Text(
-                      tanggal,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: widget.isDarkMode
-                            ? Colors.grey[400]
-                            : Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-                // Estimasi biaya
-                if (estimasiBiaya > 0) ...[
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Icon(Icons.monetization_on_outlined,
-                          size: 14, color: Colors.grey[500]),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Estimasi: Rp ${_formatCurrency(estimasiBiaya)}',
-                        style: GoogleFonts.poppins(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: widget.isDarkMode
-                              ? Colors.grey[300]
-                              : Colors.grey[700],
-                        ),
                       ),
                     ],
                   ),
-                ],
-                // Risk factors
-                if (riskFactors.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 4,
-                    children: riskFactors
-                        .map((factor) => Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.red.withValues(alpha: 0.05),
-                                borderRadius: BorderRadius.circular(8),
-                                border: Border.all(
-                                    color:
-                                        Colors.red.withValues(alpha: 0.15)),
-                              ),
-                              child: Text(
-                                factor,
+                  // Estimasi biaya
+                  if (estimasiBiaya > 0) ...[
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Icon(Icons.monetization_on_outlined,
+                            size: 14, color: Colors.grey[500]),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Estimasi: Rp ${_formatCurrency(estimasiBiaya)}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w500,
+                            color: widget.isDarkMode
+                                ? Colors.grey[300]
+                                : Colors.grey[700],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  // Risk factors
+                  if (riskFactors.isNotEmpty && !isCanceled) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: riskFactors
+                          .map((factor) => Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 4),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withValues(alpha: 0.05),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                      color: Colors.red.withValues(alpha: 0.15)),
+                                ),
+                                child: Text(
+                                  factor,
+                                  style: GoogleFonts.poppins(
+                                    fontSize: 9,
+                                    color: Colors.red.shade700,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ))
+                          .toList(),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  // Action buttons
+                  if (!isCanceled) ...[
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 38,
+                            child: ElevatedButton.icon(
+                              onPressed: () => widget.onHSSEReview(groupId),
+                              icon: const Icon(Icons.health_and_safety, size: 16),
+                              label: Text(
+                                isPendingHSSE ? 'Approve K3' : 'Review K3',
                                 style: GoogleFonts.poppins(
-                                  fontSize: 9,
-                                  color: Colors.red.shade700,
-                                  fontWeight: FontWeight.w500,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
-                            ))
-                        .toList(),
-                  ),
-                ],
-                const SizedBox(height: 12),
-                // Action buttons
-                Row(
-                  children: [
-                    Expanded(
-                      child: SizedBox(
-                        height: 38,
-                        child: ElevatedButton.icon(
-                          onPressed: () => widget.onHSSEReview(groupId),
-                          icon: const Icon(Icons.health_and_safety, size: 16),
-                          label: Text(
-                            isPendingHSSE ? 'Approve K3' : 'Review K3',
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isPendingHSSE
-                                ? const Color(0xFF4CAF50)
-                                : const Color(0xFF9C27B0),
-                            foregroundColor: Colors.white,
-                            elevation: isPendingHSSE ? 2 : 0,
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: isPendingHSSE
+                                    ? const Color(0xFF4CAF50)
+                                    : const Color(0xFF9C27B0),
+                                foregroundColor: Colors.white,
+                                elevation: isPendingHSSE ? 2 : 0,
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
                             ),
                           ),
                         ),
-                      ),
+                        const SizedBox(width: 8),
+                        if (isPendingHSSE) ...[
+                          SizedBox(
+                            height: 38,
+                            width: 38,
+                            child: IconButton(
+                              onPressed: () => widget.onHSSEReview(groupId),
+                              icon: const Icon(Icons.check, size: 18),
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.green[50],
+                                foregroundColor: Colors.green[700],
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
+                        SizedBox(
+                          height: 38,
+                          width: 38,
+                          child: IconButton(
+                            onPressed: () => widget.onTap(groupId),
+                            icon: const Icon(Icons.visibility_outlined, size: 18),
+                            style: IconButton.styleFrom(
+                              foregroundColor: Colors.grey[600],
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                side: BorderSide(color: Colors.grey[300]!),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    if (isPendingHSSE) ...[
-                      SizedBox(
-                        height: 38,
-                        width: 38,
-                        child: IconButton(
-                          onPressed: () => widget.onHSSEReview(groupId),
-                          icon: const Icon(Icons.check, size: 18),
-                          style: IconButton.styleFrom(
-                            backgroundColor: Colors.green[50],
-                            foregroundColor: Colors.green[700],
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(10),
+                  ] else ...[
+                    // ✅ Tampilkan info canceled
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withValues(alpha: 0.08),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.grey.withValues(alpha: 0.2)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.cancel_outlined, size: 16, color: Colors.grey[500]),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Pengajuan Dibatalkan',
+                            style: GoogleFonts.poppins(
+                              fontSize: 12,
+                              color: Colors.grey[500],
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    SizedBox(
-                      height: 38,
-                      width: 38,
-                      child: IconButton(
-                        onPressed: () => widget.onTap(groupId),
-                        icon: const Icon(Icons.visibility_outlined, size: 18),
-                        style: IconButton.styleFrom(
-                          foregroundColor: Colors.grey[600],
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(10),
-                            side: BorderSide(color: Colors.grey[300]!),
-                          ),
-                        ),
+                        ],
                       ),
                     ),
                   ],
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
@@ -383,9 +458,38 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
     );
   }
 
-  // ================================================================
-  // 🔥 HELPER WIDGETS
-  // ================================================================
+  // ===================================================================
+  // 🔥 BADGE WIDGETS
+  // ===================================================================
+
+  /// ✅ Badge untuk pengajuan yang dibatalkan
+  Widget _buildCanceledBadge() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.grey.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.cancel, color: Colors.grey[600], size: 12),
+          const SizedBox(width: 4),
+          Text(
+            'DIBATALKAN',
+            style: GoogleFonts.poppins(
+              fontSize: 9,
+              fontWeight: FontWeight.w700,
+              color: Colors.grey[600],
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildStatusBadge(bool isPendingHSSE, bool isFlagged, String status) {
     if (isPendingHSSE) {
       return Container(
@@ -463,7 +567,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
   }
 
   Widget _buildInfoChip(IconData icon, String label, Color color) {
-    return Expanded(
+    return Flexible(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         decoration: BoxDecoration(
@@ -496,9 +600,91 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
     );
   }
 
-  // ================================================================
+  // ===================================================================
+  // 🔥 HELPER METHODS
+  // ===================================================================
+
+  String _getNamaMitra(Map<String, dynamic> item) {
+    final nama = item['mitra_nama_lengkap']?.toString() ??
+        item['mitra_nama']?.toString() ??
+        item['nama_mitra']?.toString() ??
+        item['mitra_name']?.toString() ??
+        item['nama_lengkap']?.toString() ??
+        item['nama']?.toString() ??
+        item['name']?.toString() ??
+        item['user_name']?.toString() ??
+        item['username']?.toString() ??
+        item['email']?.toString() ??
+        '-';
+
+    if (nama == '-') {
+      final mitraData = item['mitra_data'] as Map?;
+      if (mitraData != null) {
+        return mitraData['nama_lengkap']?.toString() ??
+            mitraData['nama']?.toString() ??
+            mitraData['name']?.toString() ??
+            mitraData['email']?.toString() ??
+            '-';
+      }
+
+      final userData = item['user_data'] as Map?;
+      if (userData != null) {
+        return userData['nama_lengkap']?.toString() ??
+            userData['nama']?.toString() ??
+            userData['name']?.toString() ??
+            userData['email']?.toString() ??
+            '-';
+      }
+
+      final createdBy = item['created_by'] as Map?;
+      if (createdBy != null) {
+        return createdBy['nama']?.toString() ??
+            createdBy['name']?.toString() ??
+            createdBy['email']?.toString() ??
+            '-';
+      }
+
+      final diajukanOleh = item['diajukan_oleh'] as Map?;
+      if (diajukanOleh != null) {
+        return diajukanOleh['nama']?.toString() ??
+            diajukanOleh['name']?.toString() ??
+            diajukanOleh['email']?.toString() ??
+            '-';
+      }
+    }
+
+    return nama;
+  }
+
+  String _getFungsi(Map<String, dynamic> item) {
+    return item['mitra_fungsi']?.toString() ??
+        item['fungsi_mitra']?.toString() ??
+        item['pengawas_fungsi']?.toString() ??
+        item['fungsi_pengawas']?.toString() ??
+        item['fungsi']?.toString() ??
+        item['department']?.toString() ??
+        item['departemen']?.toString() ??
+        '-';
+  }
+
+  String _getLokasi(Map<String, dynamic> item) {
+    if (item['lokasi'] is Map) {
+      final lokasiMap = item['lokasi'] as Map;
+      return lokasiMap['alamat']?.toString() ??
+          lokasiMap['address']?.toString() ??
+          lokasiMap['nama']?.toString() ??
+          lokasiMap['name']?.toString() ??
+          'Lokasi tidak tersedia';
+    }
+    return item['lokasi']?.toString() ??
+        item['alamat']?.toString() ??
+        item['address']?.toString() ??
+        '-';
+  }
+
+  // ===================================================================
   // 🔥 LOADING STATE
-  // ================================================================
+  // ===================================================================
   Widget _buildLoadingState() {
     return ListView.builder(
       physics: const NeverScrollableScrollPhysics(),
@@ -521,9 +707,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
                     width: 12,
                     height: 12,
                     decoration: BoxDecoration(
-                      color: widget.isDarkMode
-                          ? Colors.grey[700]
-                          : Colors.grey[300],
+                      color: widget.isDarkMode ? Colors.grey[700] : Colors.grey[300],
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -532,9 +716,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
                     width: 150,
                     height: 14,
                     decoration: BoxDecoration(
-                      color: widget.isDarkMode
-                          ? Colors.grey[800]
-                          : Colors.grey[200],
+                      color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200],
                       borderRadius: BorderRadius.circular(4),
                     ),
                   ),
@@ -543,9 +725,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
                     width: 80,
                     height: 20,
                     decoration: BoxDecoration(
-                      color: widget.isDarkMode
-                          ? Colors.grey[800]
-                          : Colors.grey[200],
+                      color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200],
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
@@ -560,9 +740,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
                       height: 28,
                       margin: EdgeInsets.only(right: i < 2 ? 8 : 0),
                       decoration: BoxDecoration(
-                        color: widget.isDarkMode
-                            ? Colors.grey[800]
-                            : Colors.grey[200],
+                        color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200],
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
@@ -573,9 +751,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
               Container(
                 height: 36,
                 decoration: BoxDecoration(
-                  color: widget.isDarkMode
-                      ? Colors.grey[800]
-                      : Colors.grey[200],
+                  color: widget.isDarkMode ? Colors.grey[800] : Colors.grey[200],
                   borderRadius: BorderRadius.circular(10),
                 ),
               ),
@@ -586,9 +762,9 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
     );
   }
 
-  // ================================================================
-  // 🔥 EMPTY STATE - SUDAH DIPERBAIKI (ANTI OVERFLOW)
-  // ================================================================
+  // ===================================================================
+  // 🔥 EMPTY STATE
+  // ===================================================================
   Widget _buildEmptyState() {
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -618,9 +794,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
               style: GoogleFonts.poppins(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: widget.isDarkMode
-                    ? Colors.white
-                    : const Color(0xFF1E293B),
+                color: widget.isDarkMode ? Colors.white : const Color(0xFF1E293B),
               ),
               textAlign: TextAlign.center,
             ),
@@ -639,8 +813,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
             TextButton.icon(
               onPressed: () => _loadStream(),
               icon: const Icon(Icons.refresh, size: 16),
-              label:
-                  Text('Refresh', style: GoogleFonts.poppins(fontSize: 12)),
+              label: Text('Refresh', style: GoogleFonts.poppins(fontSize: 12)),
               style: TextButton.styleFrom(
                 foregroundColor: const Color(0xFF6366F1),
               ),
@@ -651,9 +824,9 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
     );
   }
 
-  // ================================================================
-  // 🔥 ERROR STATE - SUDAH DIPERBAIKI (ANTI OVERFLOW)
-  // ================================================================
+  // ===================================================================
+  // 🔥 ERROR STATE
+  // ===================================================================
   Widget _buildErrorState(String error) {
     return SingleChildScrollView(
       physics: const AlwaysScrollableScrollPhysics(),
@@ -677,9 +850,7 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
               style: GoogleFonts.poppins(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
-                color: widget.isDarkMode
-                    ? Colors.white
-                    : const Color(0xFF1E293B),
+                color: widget.isDarkMode ? Colors.white : const Color(0xFF1E293B),
               ),
               textAlign: TextAlign.center,
             ),
@@ -700,13 +871,11 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
                 setState(() => _loadStream());
               },
               icon: const Icon(Icons.refresh, size: 16),
-              label: Text('Coba Lagi',
-                  style: GoogleFonts.poppins(fontSize: 12)),
+              label: Text('Coba Lagi', style: GoogleFonts.poppins(fontSize: 12)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF6366F1),
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ],
@@ -715,9 +884,9 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
     );
   }
 
-  // ================================================================
+  // ===================================================================
   // 🔥 UTILITY
-  // ================================================================
+  // ===================================================================
   double _parseDouble(dynamic value) {
     if (value == null) return 0.0;
     if (value is double) return value;
@@ -792,8 +961,6 @@ class _RiskyOvertimeListState extends State<RiskyOvertimeList>
     switch (fungsi.toLowerCase()) {
       case 'operation':
         return const Color(0xFF1976D2);
-      case 'lab':
-        return const Color(0xFF4CAF50);
       case 'maintenance':
         return const Color(0xFFFF9800);
       case 'hsse':

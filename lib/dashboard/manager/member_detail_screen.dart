@@ -23,6 +23,8 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
   bool _isLoading = true;
   int totalHariKerja = 0;
   bool isLoadingHariKerja = true;
+  bool _isOnline = false;
+  String _lastActiveText = 'Offline';
 
   @override
   void initState() {
@@ -31,10 +33,10 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
   }
 
   void _initializeData() {
-    // Ambil data dari parameter widget (GoRouter)
     if (widget.memberData != null) {
       _member = widget.memberData!;
       _memberId = widget.memberId ?? widget.memberData!['id'] ?? widget.memberData!['userId'] ?? '';
+      _updateOnlineStatus();
       setState(() {
         _isLoading = false;
       });
@@ -43,11 +45,11 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
       _memberId = widget.memberId!;
       _fetchMemberData();
     } else {
-      // Fallback ke ModalRoute (cara lama)
       final args = ModalRoute.of(context)?.settings.arguments as Map<String, dynamic>?;
       if (args != null) {
         _member = args['member'] as Map<String, dynamic>? ?? {};
         _memberId = args['memberId'] as String? ?? _member['id'] ?? _member['userId'] ?? '';
+        _updateOnlineStatus();
         setState(() {
           _isLoading = false;
         });
@@ -58,6 +60,46 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
         });
       }
     }
+  }
+
+  void _updateOnlineStatus() {
+    final lastActive = _member['last_active'] ?? _member['lastActive'] ?? _member['timestamp'] ?? _member['last_seen'];
+    
+    if (lastActive != null) {
+      try {
+        DateTime? lastActiveTime;
+        if (lastActive is DateTime) {
+          lastActiveTime = lastActive;
+        } else if (lastActive is Timestamp) {
+          lastActiveTime = lastActive.toDate();
+        }
+        
+        if (lastActiveTime != null) {
+          final diff = DateTime.now().difference(lastActiveTime);
+          if (diff.inMinutes < 10) {
+            _isOnline = true;
+            _lastActiveText = 'Online';
+            return;
+          }
+          _isOnline = false;
+          _lastActiveText = _formatLastActive(lastActiveTime);
+          return;
+        }
+      } catch (_) {}
+    }
+    
+    _isOnline = false;
+    _lastActiveText = 'Offline';
+  }
+
+  String _formatLastActive(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 1) return 'Baru saja';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m lalu';
+    if (diff.inHours < 24) return '${diff.inHours}j lalu';
+    if (diff.inDays < 7) return '${diff.inDays}h lalu';
+    if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}m lalu';
+    return '${(diff.inDays / 30).floor()}bl lalu';
   }
 
   Future<void> _fetchMemberData() async {
@@ -71,6 +113,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
         setState(() {
           _member = doc.data() ?? {};
           _member['id'] = doc.id;
+          _updateOnlineStatus();
           _isLoading = false;
         });
         _fetchTotalHariKerja();
@@ -100,7 +143,6 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
     }
 
     try {
-      // Ambil semua dokumen lembur dengan jenis hari_kerja untuk user ini
       final QuerySnapshot snapshot = await FirebaseFirestore.instance
           .collection('lembur')
           .where('jenis_lembur', isEqualTo: 'hari_kerja')
@@ -114,7 +156,6 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
         });
       }
     } catch (e) {
-      // Jika user adalah mitra, coba cari dengan mitra_id
       try {
         final QuerySnapshot snapshot = await FirebaseFirestore.instance
             .collection('lembur')
@@ -154,9 +195,14 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
       );
     }
 
-    final bool isOnline = _member['isOnline'] == true || _member['is_online'] == true;
     final String namaLengkap = _member['nama'] ?? _member['nama_lengkap'] ?? 'Nama Member';
     final String initial = namaLengkap.isNotEmpty ? namaLengkap[0].toUpperCase() : '?';
+    final String role = _member['role'] ?? _member['user_role'] ?? '-';
+    final String fungsi = _member['fungsi'] ?? _member['fungsi_label'] ?? '-';
+    final String email = _member['email'] ?? '-';
+    final String phone = _member['phone'] ?? _member['no_hp'] ?? '-';
+    final String id = _memberId.isNotEmpty ? _memberId : (_member['id'] ?? '-');
+    final int totalLembur = _member['totalLembur'] ?? _member['total_lembur'] ?? 0;
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
@@ -169,6 +215,10 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
         foregroundColor: Colors.white,
         elevation: 0,
         centerTitle: true,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded),
+          onPressed: () => Navigator.pop(context),
+        ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
@@ -199,17 +249,17 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                         height: 100,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          gradient: const LinearGradient(
+                          gradient: LinearGradient(
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
-                            colors: [
-                              Color(0xFF1565C0),
-                              Color(0xFF42A5F5),
-                            ],
+                            colors: _isOnline
+                                ? [const Color(0xFF1565C0), const Color(0xFF42A5F5)]
+                                : [Colors.grey.shade400, Colors.grey.shade500],
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF1565C0).withValues(alpha: 0.3),
+                              color: (_isOnline ? const Color(0xFF1565C0) : Colors.grey)
+                                  .withValues(alpha: 0.3),
                               blurRadius: 15,
                               offset: const Offset(0, 5),
                             ),
@@ -235,14 +285,15 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                           height: 22,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: isOnline ? const Color(0xFF4CAF50) : const Color(0xFF9E9E9E),
+                            color: _isOnline ? const Color(0xFF4CAF50) : const Color(0xFF9E9E9E),
                             border: Border.all(color: Colors.white, width: 3),
                             boxShadow: [
-                              BoxShadow(
-                                color: (isOnline ? Colors.green : Colors.grey)
-                                    .withValues(alpha: 0.3),
-                                blurRadius: 5,
-                              ),
+                              if (_isOnline)
+                                BoxShadow(
+                                  color: const Color(0xFF4CAF50).withValues(alpha: 0.4),
+                                  blurRadius: 8,
+                                  spreadRadius: 2,
+                                ),
                             ],
                           ),
                         ),
@@ -268,7 +319,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      _member['role'] ?? '-',
+                      role,
                       style: GoogleFonts.poppins(
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
@@ -284,14 +335,14 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                       Icon(
                         Icons.circle,
                         size: 8,
-                        color: isOnline ? const Color(0xFF4CAF50) : const Color(0xFF9E9E9E),
+                        color: _isOnline ? const Color(0xFF4CAF50) : const Color(0xFF9E9E9E),
                       ),
                       const SizedBox(width: 6),
                       Text(
-                        isOnline ? 'Online' : 'Offline',
+                        _isOnline ? 'Online' : _lastActiveText,
                         style: GoogleFonts.poppins(
                           fontSize: 14,
-                          color: isOnline ? const Color(0xFF4CAF50) : const Color(0xFF9E9E9E),
+                          color: _isOnline ? const Color(0xFF4CAF50) : const Color(0xFF9E9E9E),
                           fontWeight: FontWeight.w500,
                         ),
                       ),
@@ -336,16 +387,27 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                     ],
                   ),
                   const SizedBox(height: 20),
-                  _buildInfoRow(Icons.email_outlined, 'Email', _member['email'] ?? '-'),
+                  _buildInfoRow(Icons.email_outlined, 'Email', email),
                   const Divider(height: 24),
-                  _buildInfoRow(Icons.work_outline, 'Fungsi', 
-                      _member['fungsi'] ?? _member['fungsi_label'] ?? '-'),
+                  _buildInfoRow(Icons.work_outline, 'Fungsi', fungsi),
                   const Divider(height: 24),
-                  _buildInfoRow(Icons.phone_outlined, 'Phone', 
-                      _member['phone'] ?? _member['no_hp'] ?? '-'),
+                  _buildInfoRow(Icons.phone_outlined, 'Phone', phone),
                   const Divider(height: 24),
-                  _buildInfoRow(Icons.badge_outlined, 'Member ID', 
-                      _memberId.isNotEmpty ? _memberId : (_member['id'] ?? '-')),
+                  _buildInfoRow(Icons.badge_outlined, 'Member ID', id),
+                  if (_member['last_active'] != null || _member['lastActive'] != null) ...[
+                    const Divider(height: 24),
+                    _buildInfoRow(
+                      Icons.access_time_rounded, 
+                      'Terakhir Aktif', 
+                      _formatLastActive(
+                        _member['last_active'] is DateTime 
+                            ? _member['last_active'] 
+                            : _member['lastActive'] is DateTime 
+                                ? _member['lastActive'] 
+                                : DateTime.now()
+                      )
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -390,7 +452,7 @@ class _MemberDetailScreenState extends State<MemberDetailScreen> {
                       Expanded(
                         child: _buildStatBox(
                           icon: Icons.timer_outlined,
-                          value: '${_member['totalLembur'] ?? 0}',
+                          value: '$totalLembur',
                           label: 'Jam Lembur',
                           color: const Color(0xFF1565C0),
                         ),

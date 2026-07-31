@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 /// Service untuk mengecek batasan dan duplikasi lembur mitra
+/// 
+/// 🔥 V2: Support multi-hari (rentang tanggal) + overnight
 class MitraLimitService {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   
@@ -13,7 +15,7 @@ class MitraLimitService {
   static const String collectionPengajuan = 'pengajuan_lembur';
 
   
-  // CHECK MONTHLY LIMIT
+  // ==================== CHECK MONTHLY LIMIT ====================
   
 
   /// Cek batas lembur bulanan mitra (maks 60 jam/bulan)
@@ -101,10 +103,11 @@ class MitraLimitService {
   }
 
   
-  // CHECK DAILY DUPLICATE
+  // ==================== CHECK DAILY DUPLICATE (SINGLE DAY) ====================
   
 
   /// Cek duplikasi lembur harian (mitra hanya bisa 1x lembur per hari)
+  /// 🔥 Tetap dipertahankan untuk backward compatibility
   Future<Map<String, dynamic>> checkDuplicateLemburHarian({
     required String mitraId,
     required DateTime tanggal,
@@ -171,10 +174,120 @@ class MitraLimitService {
   }
 
   
-  // COMPREHENSIVE CHECK
+  // ==================== 🔥 CHECK DUPLICATE RENTANG (MULTI-HARI) ====================
   
 
-  /// Pengecekan komprehensif (duplikasi + limit) untuk satu mitra
+  /// Cek duplikasi lembur untuk RENTANG TANGGAL (multi-hari)
+  /// 🔥 Method BARU untuk support multi-hari
+  Future<Map<String, dynamic>> checkDuplicateLemburRentang({
+    required String mitraId,
+    required DateTime tanggalMulai,
+    required DateTime tanggalSelesai,
+  }) async {
+    try {
+      final startOfDay = DateTime(
+        tanggalMulai.year, tanggalMulai.month, tanggalMulai.day,
+      );
+      final endOfDay = DateTime(
+        tanggalSelesai.year, tanggalSelesai.month, tanggalSelesai.day,
+      ).add(const Duration(days: 1));
+
+      debugPrint('🔍 Checking duplicate RENTANG for mitra $mitraId');
+      debugPrint('   ${DateFormat('dd MMM yyyy').format(tanggalMulai)} → ${DateFormat('dd MMM yyyy').format(tanggalSelesai)}');
+
+      // Cari lembur yang overlap dengan rentang
+      final existingLembur = await _firestore
+          .collection(collectionLemburMitra)
+          .where('mitra_id', isEqualTo: mitraId)
+          .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfDay))
+          .where('tanggal', isLessThan: Timestamp.fromDate(endOfDay))
+          .where('status', whereIn: ['pending', 'disetujui', 'selesai'])
+          .get();
+
+      final isDuplicate = existingLembur.docs.isNotEmpty;
+
+      // 🔥 Group by tanggal untuk info detail
+      final Map<String, List<Map<String, dynamic>>> duplicatesByDate = {};
+      List<Map<String, dynamic>> allDuplicates = [];
+
+      for (var doc in existingLembur.docs) {
+        final data = doc.data();
+        final tgl = (data['tanggal'] as Timestamp?)?.toDate();
+        final dateKey = tgl != null ? DateFormat('yyyy-MM-dd').format(tgl) : 'unknown';
+
+        final item = {
+          'id': doc.id,
+          'group_id': data['group_id'] ?? '',
+          'tanggal': tgl,
+          'jam_mulai': data['jam_mulai'] ?? '',
+          'jam_selesai': data['jam_selesai'] ?? '',
+          'total_jam': (data['total_jam_desimal'] ?? 0).toDouble(),
+          'status': data['status'] ?? '',
+        };
+
+        if (!duplicatesByDate.containsKey(dateKey)) {
+          duplicatesByDate[dateKey] = [];
+        }
+        duplicatesByDate[dateKey]!.add(item);
+        allDuplicates.add(item);
+      }
+
+      // 🔥 Generate list tanggal yang bentrok
+      final List<String> conflictDates = duplicatesByDate.keys.toList()..sort();
+
+      // 🔥 Generate daftar tanggal yang AMAN (tidak bentrok)
+      final allDatesInRange = _getDatesInRange(tanggalMulai, tanggalSelesai);
+      final List<String> safeDates = [];
+      for (final date in allDatesInRange) {
+        final dateKey = DateFormat('yyyy-MM-dd').format(date);
+        if (!conflictDates.contains(dateKey)) {
+          safeDates.add(dateKey);
+        }
+      }
+
+      debugPrint('📊 Rentang duplicate result: $isDuplicate');
+      debugPrint('   Total existing: ${existingLembur.docs.length}');
+      debugPrint('   Conflict dates (${conflictDates.length}): $conflictDates');
+      debugPrint('   Safe dates (${safeDates.length}): $safeDates');
+
+      return {
+        'is_duplicate': isDuplicate,
+        'existing_count': existingLembur.docs.length,
+        'existing_ids': existingLembur.docs.map((doc) => doc.id).toList(),
+        'existing_data': allDuplicates,
+        'duplicates_by_date': duplicatesByDate,
+        'conflict_dates': conflictDates,
+        'safe_dates': safeDates,
+        'conflict_count': conflictDates.length,
+        'safe_count': safeDates.length,
+        'message': isDuplicate
+            ? '⚠️ Mitra sudah memiliki pengajuan di ${conflictDates.length} tanggal: ${conflictDates.map((d) => DateFormat('dd/MM').format(DateTime.parse(d))).join(', ')}'
+            : '✅ Mitra belum memiliki pengajuan lembur di rentang tanggal ini',
+        'status': isDuplicate ? 'warning' : 'ok',
+      };
+    } catch (e) {
+      debugPrint('❌ Error checking duplicate rentang: $e');
+      return {
+        'is_duplicate': false,
+        'existing_count': 0,
+        'existing_ids': [],
+        'existing_data': [],
+        'duplicates_by_date': {},
+        'conflict_dates': [],
+        'safe_dates': [],
+        'conflict_count': 0,
+        'safe_count': 0,
+        'message': 'Gagal memeriksa duplikasi: $e',
+        'status': 'error',
+      };
+    }
+  }
+
+  
+  // ==================== COMPREHENSIVE CHECK (SINGLE DAY) ====================
+  
+
+  /// Pengecekan komprehensif (duplikasi + limit) untuk satu mitra (single day)
   Future<Map<String, dynamic>> comprehensiveCheck({
     required String mitraId,
     required DateTime tanggal,
@@ -226,7 +339,76 @@ class MitraLimitService {
   }
 
   
-  // BATCH CHECKS
+  // ==================== 🔥 COMPREHENSIVE CHECK RENTANG (MULTI-HARI) ====================
+  
+
+  /// Pengecekan komprehensif untuk RENTANG TANGGAL (multi-hari)
+  /// 🔥 Method BARU untuk support multi-hari
+  Future<Map<String, dynamic>> comprehensiveCheckRentang({
+    required String mitraId,
+    required DateTime tanggalMulai,
+    required DateTime tanggalSelesai,
+    required double tambahanJam,
+  }) async {
+    try {
+      // Jalankan kedua pengecekan secara paralel
+      final results = await Future.wait([
+        checkDuplicateLemburRentang(
+          mitraId: mitraId,
+          tanggalMulai: tanggalMulai,
+          tanggalSelesai: tanggalSelesai,
+        ),
+        checkMitraLimit(
+          mitraId: mitraId,
+          tanggal: tanggalMulai,
+          tambahanJam: tambahanJam,
+        ),
+      ]);
+
+      final duplicateCheck = results[0];
+      final limitCheck = results[1];
+
+      final isDuplicate = duplicateCheck['is_duplicate'] == true;
+      final isLimitExceeded = limitCheck['is_exceeded'] == true;
+      final conflictDates = duplicateCheck['conflict_dates'] as List<String>? ?? [];
+      final safeDates = duplicateCheck['safe_dates'] as List<String>? ?? [];
+
+      final canSubmit = !isDuplicate;
+      final canOverride = !isDuplicate && isLimitExceeded;
+      final isValid = !isDuplicate && !isLimitExceeded;
+
+      return {
+        'mitra_id': mitraId,
+        'tanggal_mulai': DateFormat('yyyy-MM-dd').format(tanggalMulai),
+        'tanggal_selesai': DateFormat('yyyy-MM-dd').format(tanggalSelesai),
+        'tambahan_jam': tambahanJam,
+        'duplicate_check': duplicateCheck,
+        'limit_check': limitCheck,
+        'is_duplicate': isDuplicate,
+        'is_limit_exceeded': isLimitExceeded,
+        'conflict_dates': conflictDates,
+        'safe_dates': safeDates,
+        'conflict_count': conflictDates.length,
+        'safe_count': safeDates.length,
+        'can_submit': canSubmit,
+        'can_override': canOverride,
+        'is_valid': isValid,
+        'summary': _generateSummaryRentang(isDuplicate, isLimitExceeded, conflictDates),
+        'status': isValid ? 'ok' : (canOverride ? 'warning' : 'error'),
+      };
+    } catch (e) {
+      debugPrint('❌ Error comprehensive check rentang: $e');
+      return {
+        'mitra_id': mitraId,
+        'is_valid': false,
+        'status': 'error',
+        'message': 'Gagal melakukan pengecekan: $e',
+      };
+    }
+  }
+
+  
+  // ==================== BATCH CHECKS (SINGLE DAY) ====================
   
 
   /// Cek batas lembur untuk multiple mitra sekaligus
@@ -285,7 +467,53 @@ class MitraLimitService {
   }
 
   
-  // STATISTICS & REPORTS
+  // ==================== 🔥 BATCH CHECKS RENTANG (MULTI-HARI) ====================
+  
+
+  /// Cek duplikasi untuk multiple mitra dengan RENTANG TANGGAL
+  /// 🔥 Method BARU
+  Future<Map<String, Map<String, dynamic>>> checkMultipleDuplicateRentang({
+    required List<String> mitraIds,
+    required DateTime tanggalMulai,
+    required DateTime tanggalSelesai,
+  }) async {
+    final results = <String, Map<String, dynamic>>{};
+    
+    for (final mitraId in mitraIds) {
+      results[mitraId] = await checkDuplicateLemburRentang(
+        mitraId: mitraId,
+        tanggalMulai: tanggalMulai,
+        tanggalSelesai: tanggalSelesai,
+      );
+    }
+    
+    return results;
+  }
+
+  /// Comprehensive check untuk multiple mitra dengan RENTANG TANGGAL
+  /// 🔥 Method BARU
+  Future<Map<String, Map<String, dynamic>>> comprehensiveCheckMultipleRentang({
+    required List<String> mitraIds,
+    required DateTime tanggalMulai,
+    required DateTime tanggalSelesai,
+    required double tambahanJam,
+  }) async {
+    final results = <String, Map<String, dynamic>>{};
+    
+    for (final mitraId in mitraIds) {
+      results[mitraId] = await comprehensiveCheckRentang(
+        mitraId: mitraId,
+        tanggalMulai: tanggalMulai,
+        tanggalSelesai: tanggalSelesai,
+        tambahanJam: tambahanJam,
+      );
+    }
+    
+    return results;
+  }
+
+  
+  // ==================== STATISTICS & REPORTS ====================
   
 
   /// Get statistik lembur mitra bulanan
@@ -449,8 +677,19 @@ class MitraLimitService {
   }
 
   
-  // HELPERS
+  // ==================== HELPERS ====================
   
+
+  /// 🔥 Generate list tanggal dalam rentang
+  List<DateTime> _getDatesInRange(DateTime start, DateTime end) {
+    final dates = <DateTime>[];
+    final startDay = DateTime(start.year, start.month, start.day);
+    final endDay = DateTime(end.year, end.month, end.day);
+    for (var d = startDay; !d.isAfter(endDay); d = d.add(const Duration(days: 1))) {
+      dates.add(d);
+    }
+    return dates;
+  }
 
   /// Format jam untuk display
   String formatJam(double jam) {
@@ -469,7 +708,7 @@ class MitraLimitService {
     return '${jam.toStringAsFixed(1)} jam';
   }
 
-  /// Generate summary dari comprehensive check
+  /// Generate summary dari comprehensive check (single day)
   String _generateSummary(bool isDuplicate, bool isLimitExceeded) {
     if (isDuplicate) {
       return '❌ Mitra sudah memiliki pengajuan lembur di tanggal ini';
@@ -477,6 +716,24 @@ class MitraLimitService {
       return '⚠️ Mitra akan melebihi batas maksimal ${maxJamBulanan.toInt()} jam/bulan';
     } else {
       return '✅ Mitra dapat diajukan lembur';
+    }
+  }
+
+  /// 🔥 Generate summary untuk rentang (multi-hari)
+  String _generateSummaryRentang(
+    bool isDuplicate, 
+    bool isLimitExceeded, 
+    List<String> conflictDates,
+  ) {
+    if (isDuplicate) {
+      if (conflictDates.length == 1) {
+        return '❌ Mitra sudah memiliki pengajuan di tanggal ${DateFormat('dd MMM').format(DateTime.parse(conflictDates.first))}';
+      }
+      return '❌ Mitra sudah memiliki pengajuan di ${conflictDates.length} tanggal';
+    } else if (isLimitExceeded) {
+      return '⚠️ Mitra akan melebihi batas maksimal ${maxJamBulanan.toInt()} jam/bulan';
+    } else {
+      return '✅ Mitra dapat diajukan lembur untuk seluruh rentang';
     }
   }
 

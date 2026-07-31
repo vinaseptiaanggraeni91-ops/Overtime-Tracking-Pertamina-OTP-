@@ -53,12 +53,15 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
   Map<String, bool> mitraDuplicateStatus = {};
   Map<String, String> mitraDuplicateIds = {};
 
-  // ==================== FORM DATA ====================
-  DateTime? tanggalLembur;
+  // ==================== FORM DATA (🔥 UPGRADED!) ====================
+  DateTime? tanggalMulai;       // 🔥 GANTI dari tanggalLembur
+  DateTime? tanggalSelesai;     // 🔥 BARU: rentang akhir
   TimeOfDay? jamMulai;
   TimeOfDay? jamSelesai;
   double totalJam = 0.0;
-  String urgensi = 'normal'; // 🔥 Default: normal
+  bool isMultiDay = false;      // 🔥 BARU: flag multi-hari
+  bool isOvernight = false;     // 🔥 BARU: flag lintas malam
+  String urgensi = 'normal';
   String? fungsiPengawas;
   String? namaPengawas;
   String? photoProfileUrl;
@@ -98,31 +101,49 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
   List<Map<String, dynamic>> get _duplicateMiras =>
       selectedMiras.where((m) => mitraDuplicateStatus[m['id']] == true).toList();
 
-  // 🔥 PERBAIKAN: Tambah validasi urgensi
   bool _allDataComplete() {
     return selectedMiras.isNotEmpty &&
         _validMiras.isNotEmpty &&
-        tanggalLembur != null &&
+        tanggalMulai != null &&          // 🔥
+        tanggalSelesai != null &&        // 🔥
         jamMulai != null &&
         jamSelesai != null &&
         _selectedLocation != null &&
         alasanController.text.isNotEmpty &&
         alasanController.text.length >= 20 &&
-        urgensi.isNotEmpty && // 🔥 Validasi urgensi
+        urgensi.isNotEmpty &&
         !_hasDuplicateMitra;
   }
 
   double get _completionPercentage {
     int completed = 0;
-    int total = 7; // 🔥 Tambah 1 untuk urgensi
+    const total = 8;  // 🔥 Tambah 1 (tanggalSelesai)
     if (selectedMiras.isNotEmpty && _validMiras.isNotEmpty) completed++;
-    if (tanggalLembur != null) completed++;
+    if (tanggalMulai != null) completed++;      // 🔥
+    if (tanggalSelesai != null) completed++;    // 🔥 BARU
     if (jamMulai != null && jamSelesai != null) completed++;
     if (_selectedLocation != null) completed++;
     if (alasanController.text.length >= 20) completed++;
-    if (urgensi.isNotEmpty) completed++; // 🔥 Urgensi
+    if (urgensi.isNotEmpty) completed++;
     return completed / total;
   }
+
+  // ==================== HELPER FUNCTIONS ====================
+
+  /// Generate list semua tanggal dalam rentang
+  List<DateTime> _getDatesInRange(DateTime start, DateTime end) {
+    final dates = <DateTime>[];
+    final startDay = DateTime(start.year, start.month, start.day);
+    final endDay = DateTime(end.year, end.month, end.day);
+    for (var d = startDay; !d.isAfter(endDay); d = d.add(const Duration(days: 1))) {
+      dates.add(d);
+    }
+    return dates;
+  }
+
+  /// Cek apakah tanggal weekend
+  bool _isWeekend(DateTime date) =>
+      date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
 
   // ==================== LIFECYCLE ====================
   @override
@@ -187,52 +208,116 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
     if (mounted) setState(() {});
   }
 
-  // ==================== DUPLICATE CHECK ====================
-  Future<void> _checkDuplicateLembur() async {
-    if (tanggalLembur == null || selectedMiras.isEmpty) return;
-    setState(() => isCheckingDuplicates = true);
+  // ==================== DUPLICATE CHECK (🔥 UPGRADED: MULTI-HARI) ====================
+  // ==================== DUPLICATE CHECK (🔥 UPGRADED: PAKAI RENTANG) ====================
+Future<void> _checkDuplicateLembur() async {
+  if (tanggalMulai == null || tanggalSelesai == null || selectedMiras.isEmpty) return;
+  setState(() => isCheckingDuplicates = true);
 
-    for (final mitra in selectedMiras) {
-      final result = await _mitraLimitService.checkDuplicateLemburHarian(
-        mitraId: mitra['id'],
-        tanggal: tanggalLembur!,
-      );
-      if (mounted) {
-        setState(() {
-          mitraDuplicateStatus[mitra['id']] = result['is_duplicate'] ?? false;
-          if (result['is_duplicate'] == true && result['existing_ids'] != null) {
-            mitraDuplicateIds[mitra['id']] =
-                (result['existing_ids'] as List).first.toString();
-          }
-        });
-      }
+  // 🔥 GUNAKAN METHOD RENTANG — LEBIH EFISIEN!
+  for (final mitra in selectedMiras) {
+    final result = await _mitraLimitService.checkDuplicateLemburRentang(
+      mitraId: mitra['id'],
+      tanggalMulai: tanggalMulai!,
+      tanggalSelesai: tanggalSelesai!,
+    );
+
+    if (mounted) {
+      setState(() {
+        mitraDuplicateStatus[mitra['id']] = result['is_duplicate'] ?? false;
+        if (result['is_duplicate'] == true && result['existing_ids'] != null) {
+          final ids = result['existing_ids'] as List;
+          mitraDuplicateIds[mitra['id']] = ids.isNotEmpty ? ids.first.toString() : '';
+        }
+      });
     }
-    if (mounted) setState(() => isCheckingDuplicates = false);
   }
+  if (mounted) setState(() => isCheckingDuplicates = false);
+}
 
-  // ==================== CALCULATION ====================
+  // ==================== CALCULATION (🔥 UPGRADED: MULTI-HARI + OVERNIGHT) ====================
   void _recalculateBiaya() {
     if (jamMulai == null || jamSelesai == null || 
-        tanggalLembur == null || _overtimeRates == null) return;
+        tanggalMulai == null || tanggalSelesai == null ||
+        _overtimeRates == null) return;
 
-    final isWeekend = tanggalLembur!.weekday == DateTime.saturday ||
-        tanggalLembur!.weekday == DateTime.sunday;
-    final startMinutes = jamMulai!.hour * 60 + jamMulai!.minute;
-    final endMinutes = jamSelesai!.hour * 60 + jamSelesai!.minute;
-    final diff = endMinutes - startMinutes;
+    // 🔥 Build DateTime penuh (dukung overnight)
+    final startDateTime = DateTime(
+      tanggalMulai!.year, tanggalMulai!.month, tanggalMulai!.day,
+      jamMulai!.hour, jamMulai!.minute,
+    );
+    final endDateTime = DateTime(
+      tanggalSelesai!.year, tanggalSelesai!.month, tanggalSelesai!.day,
+      jamSelesai!.hour, jamSelesai!.minute,
+    );
 
-    if (diff > 0) {
-      totalJam = diff / 60.0;
-      biayaLemburPerMitra = _overtimeService.calculateOvertimeCost(
-        totalHours: totalJam,
-        isHoliday: isWeekend,
-        rates: _overtimeRates!,
-      );
-      totalBiayaLembur = biayaLemburPerMitra * _validMiras.length;
-      
-      setState(() => showBudgetBreakdown = true);
-      _checkDuplicateLembur();
+    final diffInMinutes = endDateTime.difference(startDateTime).inMinutes;
+
+    if (diffInMinutes <= 0) {
+      if (mounted) {
+        setState(() {
+          totalJam = 0;
+          showBudgetBreakdown = false;
+        });
+      }
+      return;
     }
+
+    totalJam = diffInMinutes / 60.0;
+
+    // 🔥 Deteksi multi-day & overnight
+    isMultiDay = tanggalMulai!.year != tanggalSelesai!.year ||
+                 tanggalMulai!.month != tanggalSelesai!.month ||
+                 tanggalMulai!.day != tanggalSelesai!.day;
+    isOvernight = !isMultiDay && (jamSelesai!.hour < jamMulai!.hour ||
+                   (jamSelesai!.hour == jamMulai!.hour && jamSelesai!.minute <= jamMulai!.minute));
+
+    // 🔥 Kalkulasi biaya multi-hari (dipecah per hari)
+    biayaLemburPerMitra = _calculateMultiDayCost(
+      startDateTime: startDateTime,
+      endDateTime: endDateTime,
+      rates: _overtimeRates!,
+    );
+
+    totalBiayaLembur = biayaLemburPerMitra * _validMiras.length;
+
+    setState(() => showBudgetBreakdown = true);
+    _checkDuplicateLembur();
+  }
+
+  /// 🔥 Kalkulasi biaya dengan memecah durasi per hari kalender
+  double _calculateMultiDayCost({
+    required DateTime startDateTime,
+    required DateTime endDateTime,
+    required Map<String, dynamic> rates,
+  }) {
+    double totalCost = 0;
+    DateTime currentDay = DateTime(
+      startDateTime.year, startDateTime.month, startDateTime.day,
+    );
+
+    while (!currentDay.isAfter(DateTime(endDateTime.year, endDateTime.month, endDateTime.day))) {
+      final dayStart = DateTime(currentDay.year, currentDay.month, currentDay.day);
+      final dayEnd = dayStart.add(const Duration(days: 1));
+
+      final effectiveStart = startDateTime.isAfter(dayStart) ? startDateTime : dayStart;
+      final effectiveEnd = endDateTime.isBefore(dayEnd) ? endDateTime : dayEnd;
+
+      if (effectiveStart.isBefore(effectiveEnd)) {
+        final hoursToday = effectiveEnd.difference(effectiveStart).inMinutes / 60.0;
+        final isHoliday = _isWeekend(currentDay);
+
+        totalCost += _overtimeService.calculateOvertimeCost(
+          totalHours: hoursToday,
+          isHoliday: isHoliday,
+          rates: rates,
+        );
+      }
+
+      currentDay = currentDay.add(const Duration(days: 1));
+    }
+
+    return totalCost;
   }
 
   // ==================== FORMAT HELPERS ====================
@@ -260,7 +345,7 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
         builder: (_) => MapPickerPage(
           initialLat: initialLat,
           initialLng: initialLng,
-          isProjectLocation: _locationType == 'proyek', // 🔥 Kirim flag
+          isProjectLocation: _locationType == 'proyek',
         ),
       ),
     );
@@ -289,66 +374,62 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
         selectedMiras = result;
         selectedMitraIds = result.map((m) => m['id'] as String).toList();
       });
-      if (tanggalLembur != null) _checkDuplicateLembur();
+      if (tanggalMulai != null && tanggalSelesai != null) _checkDuplicateLembur();
       _recalculateBiaya();
     }
   }
 
-  // ==================== 🔥 VALIDASI TERPUSAT (TAHAP 26-27) ====================
-  
-  /// Validasi seluruh data pengajuan lembur
-  /// Returns null jika semua valid, atau pesan error jika ada yang tidak valid
+  // ==================== VALIDASI TERPUSAT (🔥 UPGRADED) ====================
   String? _validateAllData() {
-    // 🔥 TAHAP 5-6: Cek TAD/Mitra dipilih
     if (selectedMiras.isEmpty) {
       return 'Pilih minimal satu TAD';
     }
     if (_validMiras.isEmpty) {
-      return 'Hapus TAD yang sudah terdaftar lembur di tanggal ini';
+      return 'Hapus TAD yang sudah terdaftar lembur di rentang tanggal ini';
     }
-    
-    // 🔥 TAHAP 8-9: Validasi waktu lembur
-    if (tanggalLembur == null) {
-      return 'Tanggal lembur harus diisi';
+
+    if (tanggalMulai == null) {
+      return 'Tanggal mulai lembur harus diisi';
+    }
+    if (tanggalSelesai == null) {
+      return 'Tanggal selesai lembur harus diisi';
+    }
+    if (tanggalSelesai!.isBefore(tanggalMulai!)) {
+      return 'Tanggal selesai harus ≥ tanggal mulai';
     }
     if (jamMulai == null || jamSelesai == null) {
       return 'Waktu lembur tidak valid';
     }
     if (totalJam <= 0) {
-      return 'Jam selesai harus lebih besar dari jam mulai';
+      return 'Durasi lembur harus > 0';
     }
-    
-    // 🔥 TAHAP 16: Validasi lokasi proyek
+
     if (_locationType == 'proyek' && _selectedLocation == null) {
       return 'Lokasi proyek tidak ditemukan. Silakan pilih lokasi';
     }
     if (_selectedLocation == null) {
       return 'Pilih lokasi lembur';
     }
-    
-    // 🔥 TAHAP 20: Validasi alasan
+
     if (alasanController.text.isEmpty) {
       return 'Alasan lembur harus diisi';
     }
     if (alasanController.text.length < 20) {
       return 'Alasan lembur minimal 20 karakter';
     }
-    
-    // 🔥 TAHAP 22-23: Validasi urgensi
+
     if (urgensi.isEmpty) {
       return 'Tingkat urgensi harus dipilih';
     }
-    
-    return null; // Semua valid
+
+    return null;
   }
 
-  // ==================== 🔥 SUBMIT (DIPERBAIKI) ====================
+  // ==================== SUBMIT ====================
   Future<void> _submit() async {
-    // 🔥 TAHAP 26: Validasi seluruh data pengajuan lembur
     final validationError = _validateAllData();
-    
+
     if (validationError != null) {
-      // 🔥 TAHAP 27: Tampilkan pesan kesalahan
       if (mounted) {
         _showValidationError(validationError);
       }
@@ -357,44 +438,38 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
 
     final groupId = DateTime.now().millisecondsSinceEpoch.toString();
 
-    // 🔥 TAHAP 29-30: Check limit exceeded (akumulasi jam bulanan)
     bool hasLimitExceeded = false;
     final limitResults = <String, dynamic>{};
 
     for (final mitra in _validMiras) {
       final result = await _mitraLimitService.checkMitraLimit(
         mitraId: mitra['id'],
-        tanggal: tanggalLembur!,
+        tanggal: tanggalMulai!,
         tambahanJam: totalJam,
       );
       limitResults[mitra['id']] = result;
       if (result['is_exceeded']) hasLimitExceeded = true;
     }
 
-    // 🔥 TAHAP 31-32: Peringatan batas lembur & konfirmasi
     if (hasLimitExceeded) {
       final confirmed = await _showLimitWarningDialog(limitResults);
       if (!confirmed) {
-        // Pengawas memilih batal, kembali ke form
         return;
       }
     }
 
-    // Show loading
     _showLoadingDialog();
 
     try {
-      // 🔥 TAHAP 33: Simpan data ke database
       await _saveOvertimeData(hasLimitExceeded, groupId);
-      
-      // 🔥 TAHAP 34: Kirim notifikasi ke Manager
+
       if (mounted) {
         try {
           await NotificationService().sendManagerNotification(
             pengawasNama: namaPengawas ?? 'Pengawas',
             fungsi: fungsiPengawas ?? '',
             jumlahMitra: _validMiras.length,
-            tanggal: tanggalLembur!,
+            tanggal: tanggalMulai!,
             totalBiaya: totalBiayaLembur,
             urgensi: urgensi,
             isOutsideRadius: _isOutsideRadius,
@@ -407,26 +482,22 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
       }
 
       if (mounted) {
-        Navigator.pop(context); // Close loading
-        
-        // 🔥 TAHAP 35: Tampilkan notifikasi berhasil
+        Navigator.pop(context);
         _showSuccessDialog(groupId);
       }
     } catch (e) {
       debugPrint('❌ Submit error: $e');
       if (mounted) {
-        Navigator.pop(context); // Close loading
+        Navigator.pop(context);
         _showValidationError('Gagal menyimpan: $e');
       }
     }
   }
 
-  // ==================== SAVE DATA ====================
+  // ==================== SAVE DATA (🔥 UPGRADED: SPLIT PER TANGGAL) ====================
   Future<void> _saveOvertimeData(bool hasLimitExceeded, String groupId) async {
     final batch = _firestore.batch();
     final now = Timestamp.now();
-    final isWeekend = tanggalLembur!.weekday == DateTime.saturday ||
-        tanggalLembur!.weekday == DateTime.sunday;
     final isOutside = _isOutsideRadius;
 
     String alamatLengkap = _selectedAddress ?? '';
@@ -439,7 +510,7 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
       }
     }
 
-    // Save pengajuan
+    // 🔥 DATA PENGAJUAN (DENGAN RENTANG TANGGAL)
     final pengajuanRef = _firestore.collection('pengajuan_lembur').doc(groupId);
     batch.set(pengajuanRef, {
       'group_id': groupId,
@@ -450,12 +521,18 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
       'pengawas_id': _auth.currentUser?.uid,
       'nama_pengawas': namaPengawas,
       'pengawas_fungsi': fungsiPengawas,
-      'tanggal_lembur': Timestamp.fromDate(tanggalLembur!),
-      'tahun_bulan': DateFormat('yyyy-MM').format(tanggalLembur!),
+      // 🔥 DATA BARU: Rentang tanggal
+      'tanggal_mulai': Timestamp.fromDate(tanggalMulai!),
+      'tanggal_selesai': Timestamp.fromDate(tanggalSelesai!),
+      'is_multi_day': isMultiDay,
+      'is_overnight': isOvernight,
+      // Backward compatibility
+      'tanggal_lembur': Timestamp.fromDate(tanggalMulai!),
+      'tahun_bulan': DateFormat('yyyy-MM').format(tanggalMulai!),
       'jam_mulai': _formatTime(jamMulai!),
       'jam_selesai': _formatTime(jamSelesai!),
       'total_jam_desimal': totalJam,
-      'jenis_lembur': isWeekend ? 'hari_libur' : 'hari_kerja',
+      'jenis_lembur': _isWeekend(tanggalMulai!) ? 'hari_libur' : 'hari_kerja',
       'lokasi': {
         'latitude': _selectedLocation!.latitude,
         'longitude': _selectedLocation!.longitude,
@@ -484,7 +561,9 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
       'location_type': _locationType,
     });
 
-    // Save individual mitra records
+    // 🔥 SPLIT PER TANGGAL di lembur_mitra
+    final allDates = _getDatesInRange(tanggalMulai!, tanggalSelesai!);
+
     final baseMitraData = {
       'group_id': groupId,
       'pengajuan_id': groupId,
@@ -493,12 +572,6 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
       'pengawas_fungsi': fungsiPengawas,
       'diajukan_oleh_id': _auth.currentUser?.uid,
       'diajukan_oleh_nama': namaPengawas,
-      'tanggal': Timestamp.fromDate(tanggalLembur!),
-      'tahun_bulan': DateFormat('yyyy-MM').format(tanggalLembur!),
-      'jam_mulai': _formatTime(jamMulai!),
-      'jam_selesai': _formatTime(jamSelesai!),
-      'total_jam_desimal': totalJam,
-      'jenis_lembur': isWeekend ? 'hari_libur' : 'hari_kerja',
       'lokasi': {
         'latitude': _selectedLocation!.latitude,
         'longitude': _selectedLocation!.longitude,
@@ -521,25 +594,49 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
     };
 
     for (final mitra in _validMiras) {
-      final docRef = _firestore
-          .collection('lembur_mitra')
-          .doc('${groupId}_${mitra['id']}');
-      batch.set(docRef, {
-        ...baseMitraData,
-        'mitra_id': mitra['id'],
-        'user_id': mitra['id'],
-        'nama_mitra': mitra['nama_lengkap'],
-        'fungsi_mitra': mitra['fungsi'],
-      });
+      for (final date in allDates) {
+        final isHoliday = _isWeekend(date);
+
+        // Jam spesifik untuk tanggal ini
+        TimeOfDay dayStart = const TimeOfDay(hour: 0, minute: 0);
+        TimeOfDay dayEnd = const TimeOfDay(hour: 23, minute: 59);
+
+        if (date.year == tanggalMulai!.year &&
+            date.month == tanggalMulai!.month &&
+            date.day == tanggalMulai!.day) {
+          dayStart = jamMulai!;
+        }
+        if (date.year == tanggalSelesai!.year &&
+            date.month == tanggalSelesai!.month &&
+            date.day == tanggalSelesai!.day) {
+          dayEnd = jamSelesai!;
+        }
+
+        final docId = '${groupId}_${mitra['id']}_${DateFormat('yyyyMMdd').format(date)}';
+        final docRef = _firestore.collection('lembur_mitra').doc(docId);
+
+        batch.set(docRef, {
+          ...baseMitraData,
+          'mitra_id': mitra['id'],
+          'user_id': mitra['id'],
+          'nama_mitra': mitra['nama_lengkap'],
+          'fungsi_mitra': mitra['fungsi'],
+          'tanggal': Timestamp.fromDate(date),
+          'tahun_bulan': DateFormat('yyyy-MM').format(date),
+          'jam_mulai': _formatTime(dayStart),
+          'jam_selesai': _formatTime(dayEnd),
+          'total_jam_desimal': totalJam,
+          'jenis_lembur': isHoliday ? 'hari_libur' : 'hari_kerja',
+        });
+      }
     }
 
     await batch.commit();
-    debugPrint('✅ Data tersimpan untuk group: $groupId');
+    debugPrint('✅ Data tersimpan untuk group: $groupId (${allDates.length} hari, ${_validMiras.length} mitra)');
   }
 
   // ==================== DIALOGS ====================
-  
-  // 🔥 TAMBAHAN: Method untuk menampilkan error validasi (TAHAP 27)
+
   void _showValidationError(String message) {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -644,12 +741,10 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
           ],
         ),
         actions: [
-          // 🔥 TAHAP 32: Opsi BATAL (kembali memilih TAD)
           TextButton(
             onPressed: () => Navigator.pop(context, false),
             child: const Text('BATAL', style: TextStyle(fontWeight: FontWeight.w600)),
           ),
-          // 🔥 TAHAP 32: Opsi TETAP AJUKAN
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
@@ -692,6 +787,26 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
               child: Text('ID Pengajuan: ${groupId.substring(0, 8)}...',
                   style: const TextStyle(fontFamily: 'monospace')),
             ),
+            const SizedBox(height: 4),
+            if (isMultiDay || isOvernight)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.purple.shade50,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.info_outline, size: 14, color: Colors.purple.shade600),
+                    const SizedBox(width: 4),
+                    Text(
+                      isMultiDay ? 'Lembur Multi-Hari' : 'Lembur Lintas Malam',
+                      style: TextStyle(fontSize: 11, color: Colors.purple.shade600, fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                ),
+              ),
             const SizedBox(height: 8),
             Text('${_validMiras.length} TAD telah didaftarkan',
                 style: const TextStyle(fontSize: 12, color: Colors.grey)),
@@ -715,34 +830,38 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
   }
 
   void _showPreviewDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => PreviewDialog(
-        namaPengawas: namaPengawas,
-        fungsiPengawas: fungsiPengawas,
-        validMiras: _validMiras,
-        tanggalLembur: tanggalLembur,
-        jamMulai: jamMulai,
-        jamSelesai: jamSelesai,
-        totalJam: totalJam,
-        locationType: _locationType,
-        selectedAddress: _selectedAddress,
-        rtController: _rtController,
-        rwController: _rwController,
-        urgensi: urgensi,
-        biayaLemburPerMitra: biayaLemburPerMitra,
-        totalBiayaLembur: totalBiayaLembur,
-        alasan: alasanController.text,
-        formatTime: _formatTime,
-        formatTanggal: _formatTanggal,
-        formatRupiah: _overtimeService.formatRupiah,
-        onConfirmed: () {
-          Navigator.pop(context);
-          _submit();
-        },
-      ),
-    );
-  }
+  showDialog(
+    context: context,
+    builder: (context) => PreviewDialog(
+      namaPengawas: namaPengawas,
+      fungsiPengawas: fungsiPengawas,
+      validMiras: _validMiras,
+      tanggalLembur: tanggalMulai,
+      tanggalSelesai: tanggalSelesai,
+      jamMulai: jamMulai,
+      jamSelesai: jamSelesai,
+      totalJam: totalJam,
+      isMultiDay: isMultiDay,
+      isOvernight: isOvernight,
+      locationType: _locationType,
+      selectedAddress: _selectedAddress,
+      rtController: _rtController,
+      rwController: _rwController,
+      urgensi: urgensi,
+      biayaLemburPerMitra: biayaLemburPerMitra,
+      totalBiayaLembur: totalBiayaLembur,
+      alasan: alasanController.text,
+      formatTime: _formatTime,
+      formatTanggal: _formatTanggal,
+      // 🔥 FIX: Wrap untuk match type
+      formatRupiah: (double value) => _overtimeService.formatRupiah(value),
+      onConfirmed: () {
+        Navigator.pop(context);
+        _submit();
+      },
+    ),
+  );
+}
 
   // ==================== BUILD ====================
   @override
@@ -821,13 +940,17 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
           children: [
             Icon(Icons.add_alarm_rounded, color: Colors.white, size: 22),
             SizedBox(width: 8),
-            Text(
-              'Pengajuan Lembur',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
-                color: Colors.white,
+            Flexible(
+              child: Text(
+                'Pengajuan Lembur',
+                style: TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.5,
+                  color: Colors.white,
+                ),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
               ),
             ),
           ],
@@ -866,17 +989,21 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
             Center(
               child: Container(
                 margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                constraints: const BoxConstraints(maxWidth: 45),
                 decoration: BoxDecoration(
                   color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Text(
-                  '${(_completionPercentage * 100).toInt()}%',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Text(
+                    '${(_completionPercentage * 100).toInt()}%',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -903,13 +1030,16 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
                     photoProfileUrl: photoProfileUrl,
                   ),
                   const SizedBox(height: 16),
+                  // 🔥 Progress Stepper (updated)
                   ProgressStepper(
                     completionPercentage: _completionPercentage,
                     hasMitra: _validMiras.isNotEmpty,
-                    hasTanggal: tanggalLembur != null,
+                    hasTanggal: tanggalMulai != null && tanggalSelesai != null,  // 🔥
                     hasWaktu: jamMulai != null && jamSelesai != null,
                     hasLokasi: _selectedLocation != null,
                     hasAlasan: alasanController.text.length >= 20,
+                    isMultiDay: isMultiDay,    // 🔥 BARU
+                    isOvernight: isOvernight,  // 🔥 BARU
                   ),
                   const SizedBox(height: 16),
                   if (_overtimeRates != null)
@@ -923,7 +1053,7 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
                     hasDuplicateMitra: _hasDuplicateMitra,
                     isCheckingDuplicates: isCheckingDuplicates,
                     fungsiPengawas: fungsiPengawas,
-                    tanggalLembur: tanggalLembur,
+                    tanggalLembur: tanggalMulai,    // 🔥
                     onAddMitra: _showMitraSelectionDialog,
                     onRemoveMitra: (mitra) {
                       setState(() {
@@ -936,17 +1066,35 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
                     formatTanggal: _formatTanggal,
                   ),
                   const SizedBox(height: 16),
+                  // 🔥🔥🔥 WAKTU SECTION V2 (MULTI-HARI) 🔥🔥🔥
                   WaktuSection(
-                    tanggalLembur: tanggalLembur,
+                    tanggalMulai: tanggalMulai,
+                    tanggalSelesai: tanggalSelesai,
                     jamMulai: jamMulai,
                     jamSelesai: jamSelesai,
                     totalJam: totalJam,
-                    onTanggalChanged: (date) {
+                    isMultiDay: isMultiDay,
+                    isOvernight: isOvernight,
+                    onTanggalMulaiChanged: (date) {
                       setState(() {
-                        tanggalLembur = date;
+                        tanggalMulai = date;
+                        if (tanggalSelesai == null || (date != null && tanggalSelesai!.isBefore(date))) {
+                          tanggalSelesai = date;
+                        }
                         jamMulai = null;
                         jamSelesai = null;
                         totalJam = 0;
+                        isMultiDay = false;
+                        isOvernight = false;
+                      });
+                    },
+                    onTanggalSelesaiChanged: (date) {
+                      setState(() {
+                        tanggalSelesai = date;
+                        jamSelesai = null;
+                        totalJam = 0;
+                        isMultiDay = false;
+                        isOvernight = false;
                       });
                     },
                     onJamMulaiChanged: (time) {
@@ -954,18 +1102,22 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
                         jamMulai = time;
                         jamSelesai = null;
                         totalJam = 0;
+                        isOvernight = false;
                       });
                     },
                     onJamSelesaiChanged: (time) {
-                      setState(() => jamSelesai = time);
+                      jamSelesai = time;
                       _recalculateBiaya();
                     },
                     onClear: () {
                       setState(() {
-                        tanggalLembur = null;
+                        tanggalMulai = null;
+                        tanggalSelesai = null;
                         jamMulai = null;
                         jamSelesai = null;
                         totalJam = 0;
+                        isMultiDay = false;
+                        isOvernight = false;
                         showBudgetBreakdown = false;
                       });
                     },
@@ -1032,7 +1184,10 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
                       validMirasCount: _validMiras.length,
                       biayaLemburPerMitra: biayaLemburPerMitra,
                       totalBiayaLembur: totalBiayaLembur,
-                      formatRupiah: _overtimeService.formatRupiah,
+                      // 🔥 FIX: Wrap untuk match type
+                      formatRupiah: (double value) => _overtimeService.formatRupiah(value),
+                      isMultiDay: isMultiDay,
+                      isOvernight: isOvernight,
                     ),
                   ],
                   const SizedBox(height: 24),

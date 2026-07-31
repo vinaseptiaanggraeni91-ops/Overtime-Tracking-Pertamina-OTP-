@@ -5,7 +5,6 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   biometric_storage
   file_selector_linux
-  open_file_linux
   printing
   url_launcher_linux
 )

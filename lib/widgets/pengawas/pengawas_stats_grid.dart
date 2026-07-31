@@ -1,8 +1,9 @@
-// lib/widgets/pengawas_stats_grid.dart
-
+// lib/widgets/pengawas/pengawas_stats_grid.dart
 import 'package:flutter/material.dart';
 import '/core/services/pengawas_service.dart';
 
+/// Premium Pengawas Stats Grid
+/// 🎨 Desain khusus Pengawas - Fokus pada Tim & Lembur
 class PengawasStatsGrid extends StatelessWidget {
   final PengawasDashboardData data;
   final VoidCallback? onRefresh;
@@ -13,164 +14,173 @@ class PengawasStatsGrid extends StatelessWidget {
     this.onRefresh,
   });
 
+  // ==================== 🎨 COLOR CONSTANTS ====================
+  static const Color dangerRed = Color(0xFFEF4444);
+  static const Color warningOrange = Color(0xFFF97316);
+  static const Color infoBlue = Color(0xFF3B82F6);
+  static const Color successGreen = Color(0xFF10B981);
+  static const Color neutralGray = Color(0xFF64748B);
+  static const Color purpleAccent = Color(0xFF8B5CF6);
+  static const Color textPrimary = Color(0xFF0F172A);
+  static const Color textSecondary = Color(0xFF475569);
+  static const Color borderLight = Color(0xFFE2E8F0);
+  static const Color surfaceLight = Color(0xFFF8FAFC);
+
   @override
   Widget build(BuildContext context) {
-    final totalLemburWeek = data.totalLemburWeek;
-    final pendingApproval = data.pendingApproval;
-    final totalLemburToday = data.totalLemburToday;
-    final totalMembers = data.totalTeamMembers;
-    final onlineMembers = data.onlineMembers;
-
-    final items = [
-      _StatItem(
-        title: 'Lembur Minggu Ini',
-        value: '$totalLemburWeek',
-        icon: Icons.work_history_rounded,
-        subtitle: 'Total pengajuan lembur',
-        gradientColors: const [
-          Color(0xFF2563EB),
-          Color(0xFF1D4ED8),
-        ],
-        badge: '$totalLemburToday Hari Ini',
-      ),
-      _StatItem(
-        title: 'Pending Persetujuan',
-        value: '$pendingApproval',
-        icon: Icons.pending_actions_rounded,
-        subtitle: 'Menunggu persetujuan',
-        gradientColors: const [
-          Color(0xFFF97316),
-          Color(0xFFEA580C),
-        ],
-        badge: pendingApproval > 3 ? 'Perhatian' : 'Aman',
-      ),
-      _StatItem(
-        title: 'Disetujui Hari Ini',
-        value: '$totalLemburToday',
-        icon: Icons.check_circle_rounded,
-        subtitle: 'Lembur disetujui',
-        gradientColors: const [
-          Color(0xFF10B981),
-          Color(0xFF059669),
-        ],
-      ),
-      _StatItem(
-        title: 'Anggota Tim',
-        value: '$totalMembers',
-        icon: Icons.people_alt_rounded,
-        subtitle: '$onlineMembers anggota online',
-        gradientColors: const [
-          Color(0xFF7C3AED),
-          Color(0xFF6D28D9),
-        ],
-        badge: '$onlineMembers Online',
-      ),
-    ];
-
     final screenWidth = MediaQuery.of(context).size.width;
+    final isSmallScreen = screenWidth < 360;
+    final isMediumScreen = screenWidth >= 360 && screenWidth < 420;
+    
+    // ✅ Responsive sizing
+    final headerIconSize = isSmallScreen ? 14.0 : (isMediumScreen ? 16.0 : 18.0);
+    final headerTitleSize = isSmallScreen ? 13.0 : (isMediumScreen ? 14.0 : 15.0);
+    final headerSubtitleSize = isSmallScreen ? 9.0 : (isMediumScreen ? 10.0 : 11.0);
+    final gridSpacing = isSmallScreen ? 8.0 : (isMediumScreen ? 10.0 : 12.0);
+    final cardAspectRatio = isSmallScreen ? 1.0 : (isMediumScreen ? 1.05 : 1.15);
+    final headerPadding = isSmallScreen ? 8.0 : (isMediumScreen ? 10.0 : 12.0);
+
+    // ✅ Data dari service
+    final totalLemburMonth = data.totalLemburMonth;
+    final pendingApproval = data.pendingApproval;
+    final todayApproved = data.todayApproved; // 🔥 Disetujui hari ini
+    final rejected = data.rejected; // 🔥 Ditolak
+    
+    // Build stat items
+    final items = _buildStatItems(
+      totalLemburBulan: totalLemburMonth,
+      pending: pendingApproval,
+      disetujuiHariIni: todayApproved,
+      ditolak: rejected,
+    );
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        /// HEADER
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: const Color(0xFFEEF4FF),
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: const Icon(
-                Icons.analytics_rounded,
-                color: Color(0xFF2563EB),
-                size: 22,
-              ),
-            ),
-
-            const SizedBox(width: 12),
-
-            const Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Statistik Tim',
-                    style: TextStyle(
-                      fontSize: 17,
-                      fontWeight: FontWeight.w700,
-                      color: Color(0xFF1A2B4C),
-                    ),
-                  ),
-                  SizedBox(height: 2),
-                  Text(
-                    'Ringkasan aktivitas lembur',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF6B7280),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            if (onRefresh != null)
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(14),
-                  onTap: onRefresh,
-                  child: Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF5F7FA),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(
-                        color: Colors.grey.shade200,
-                      ),
-                    ),
-                    child: const Icon(
-                      Icons.refresh_rounded,
-                      size: 20,
-                      color: Color(0xFF1A2B4C),
-                    ),
-                  ),
-                ),
-              ),
-          ],
+        /// 🎯 HEADER SECTION
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: Row(
+            children: [
+              _buildHeaderIcon(isSmallScreen, headerPadding, headerIconSize),
+              SizedBox(width: isSmallScreen ? 8 : 10),
+              _buildHeaderText(isSmallScreen, headerTitleSize, headerSubtitleSize),
+              if (onRefresh != null)
+                _buildRefreshButton(isSmallScreen, headerPadding, headerIconSize),
+            ],
+          ),
         ),
 
-        const SizedBox(height: 16),
+        SizedBox(height: isSmallScreen ? 8 : 12),
 
-        /// GRID
+        /// 📊 MAIN STATS GRID - 2×2 layout
         GridView.builder(
           shrinkWrap: true,
           physics: const NeverScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 2),
           itemCount: items.length,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: 2,
-            crossAxisSpacing: 12,
-            mainAxisSpacing: 12,
-            childAspectRatio: screenWidth < 370 ? 0.95 : 1.08,
+            crossAxisSpacing: gridSpacing,
+            mainAxisSpacing: gridSpacing,
+            childAspectRatio: cardAspectRatio,
           ),
-          itemBuilder: (context, index) {
-            return _StatCard(item: items[index]);
-          },
+          itemBuilder: (context, index) => _buildCard(items[index], isSmallScreen),
         ),
+        
+        SizedBox(height: isSmallScreen ? 4 : 6),
       ],
     );
   }
-}
 
-class _StatCard extends StatelessWidget {
-  final _StatItem item;
+  // ==================== 🎨 HEADER COMPONENTS ====================
+  
+  Widget _buildHeaderIcon(bool isSmallScreen, double headerPadding, double iconSize) {
+    return Container(
+      padding: EdgeInsets.all(headerPadding * 0.8),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Color(0xFF4F46E5), Color(0xFF7C3AED)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(isSmallScreen ? 10 : 12),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF4F46E5).withOpacity(0.2),
+            blurRadius: isSmallScreen ? 6 : 8,
+            offset: const Offset(0, 3),
+          ),
+        ],
+      ),
+      child: Icon(Icons.analytics_rounded, color: Colors.white, size: iconSize),
+    );
+  }
 
-  const _StatCard({
-    required this.item,
-  });
+  Widget _buildHeaderText(bool isSmallScreen, double titleSize, double subtitleSize) {
+    return Expanded(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            'Ringkasan Lembur',
+            style: TextStyle(
+              fontSize: titleSize,
+              fontWeight: FontWeight.w700,
+              color: textPrimary,
+              letterSpacing: 0.2,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          SizedBox(height: isSmallScreen ? 1 : 2),
+          Text(
+            'Status pengajuan lembur bulan ini',
+            style: TextStyle(
+              fontSize: subtitleSize,
+              color: textSecondary,
+              fontWeight: FontWeight.w400,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildRefreshButton(bool isSmallScreen, double headerPadding, double iconSize) {
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(isSmallScreen ? 8 : 10),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(isSmallScreen ? 8 : 10),
+        onTap: onRefresh,
+        child: Container(
+          padding: EdgeInsets.all(headerPadding * 0.7),
+          decoration: BoxDecoration(
+            color: surfaceLight,
+            borderRadius: BorderRadius.circular(isSmallScreen ? 8 : 10),
+            border: Border.all(color: borderLight, width: 0.8),
+          ),
+          child: Icon(Icons.refresh_rounded, size: iconSize, color: textSecondary),
+        ),
+      ),
+    );
+  }
+
+  // ==================== 🃏 CARD BUILDER ====================
+  
+  Widget _buildCard(_StatItem item, bool isSmallScreen) {
+    final iconSize = isSmallScreen ? 16.0 : 20.0;
+    final valueSize = isSmallScreen ? 22.0 : 28.0;
+    final titleSize = isSmallScreen ? 10.0 : 12.0;
+    final subtitleSize = isSmallScreen ? 8.0 : 10.0;
+    final padding = isSmallScreen ? 10.0 : 14.0;
+    final spacing = isSmallScreen ? 3.0 : 4.0;
+
     return Container(
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -178,142 +188,147 @@ class _StatCard extends StatelessWidget {
           end: Alignment.bottomRight,
           colors: item.gradientColors,
         ),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: Colors.white.withValues(alpha: 0.15),
-        ),
+        borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
-            color: item.gradientColors.first.withValues(alpha: 0.20),
-            blurRadius: 20,
-            spreadRadius: 0,
-            offset: const Offset(0, 10),
+            color: item.gradientColors.first.withOpacity(0.25),
+            blurRadius: 12,
+            spreadRadius: -2,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
       child: Stack(
         children: [
-          /// Decorative Circle
+          // Decorative circles
           Positioned(
-            top: -25,
-            right: -25,
+            top: -15,
+            right: -15,
             child: Container(
-              width: 90,
-              height: 90,
+              width: 60,
+              height: 60,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.08),
+                color: Colors.white.withOpacity(0.05),
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: -20,
+            left: -20,
+            child: Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withOpacity(0.03),
               ),
             ),
           ),
 
-          Positioned(
-            bottom: -35,
-            left: -25,
-            child: Container(
-              width: 70,
-              height: 70,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.05),
-              ),
-            ),
-          ),
-
+          // Content
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: EdgeInsets.all(padding),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: [
-                /// TOP SECTION
+                // ICON + BADGE
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Container(
-                      padding: const EdgeInsets.all(10),
+                      padding: EdgeInsets.all(isSmallScreen ? 5 : 7),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(14),
+                        color: Colors.white.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Icon(
-                        item.icon,
-                        size: 20,
-                        color: Colors.white,
-                      ),
+                      child: Icon(item.icon, size: iconSize, color: Colors.white),
                     ),
-
-                    const Spacer(),
-
                     if (item.badge != null)
                       Container(
-                        constraints: const BoxConstraints(
-                          maxWidth: 90,
-                        ),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(30),
+                          color: Colors.white.withOpacity(0.25),
+                          borderRadius: BorderRadius.circular(10),
                         ),
                         child: Text(
                           item.badge!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          textAlign: TextAlign.center,
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 9,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                       ),
                   ],
                 ),
 
-                const Spacer(),
+                SizedBox(height: spacing),
 
-                /// VALUE
+                // VALUE
                 Text(
                   item.value,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
-                    fontSize: 30,
+                    fontSize: valueSize,
                     fontWeight: FontWeight.w800,
-                    height: 1,
+                    height: 1.0,
+                    letterSpacing: -0.5,
                   ),
+                  maxLines: 1,
                 ),
 
-                const SizedBox(height: 8),
+                SizedBox(height: spacing),
 
-                /// TITLE
+                // TITLE
                 Text(
                   item.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     color: Colors.white,
-                    fontSize: 13,
+                    fontSize: titleSize,
                     fontWeight: FontWeight.w700,
                     height: 1.2,
+                    letterSpacing: 0.2,
                   ),
-                ),
-
-                const SizedBox(height: 4),
-
-                /// SUBTITLE
-                Text(
-                  item.subtitle,
                   maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w500,
-                  ),
                 ),
+
+                // SUBTITLE
+                if (item.subtitle.isNotEmpty) ...[
+                  SizedBox(height: 1),
+                  Text(
+                    item.subtitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.85),
+                      fontSize: subtitleSize,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ],
+
+                // TREND
+                if (item.trend != null) ...[
+                  SizedBox(height: 2),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.15),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: Text(
+                      item.trend!,
+                      style: TextStyle(
+                        color: item.trendColor ?? Colors.white,
+                        fontSize: isSmallScreen ? 7 : 9,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      maxLines: 1,
+                    ),
+                  ),
+                ],
               ],
             ),
           ),
@@ -321,7 +336,90 @@ class _StatCard extends StatelessWidget {
       ),
     );
   }
+
+  // ==================== 📊 STAT ITEMS BUILDER ====================
+  
+  List<_StatItem> _buildStatItems({
+    required int totalLemburBulan,
+    required int pending,
+    required int disetujuiHariIni,
+    required int ditolak,
+  }) {
+    return [
+      // 🔥 Card 1: Total Lembur Bulan Ini
+      _StatItem(
+        title: 'Total Lembur',
+        value: '$totalLemburBulan',
+        icon: Icons.calendar_month_rounded,
+        subtitle: 'Bulan ini',
+        gradientColors: const [Color(0xFF4F46E5), Color(0xFF7C3AED)],
+        badge: totalLemburBulan > 0 ? '📋' : null,
+        trend: totalLemburBulan > 0 
+            ? '📊 $totalLemburBulan pengajuan' 
+            : 'Belum ada pengajuan',
+        trendColor: totalLemburBulan > 0 ? Colors.white : Colors.white70,
+      ),
+      
+      // 🔥 Card 2: Pending
+      _StatItem(
+        title: 'Pending',
+        value: '$pending',
+        icon: Icons.hourglass_empty_rounded,
+        subtitle: pending > 0 
+            ? 'Menunggu persetujuan'
+            : 'Tidak ada pending',
+        gradientColors: pending > 5 
+            ? [dangerRed, const Color(0xFFDC2626)]
+            : pending > 0 
+                ? [warningOrange, const Color(0xFFEA580C)]
+                : [neutralGray, const Color(0xFF475569)],
+        badge: pending > 5 ? '⚠️' : (pending > 0 ? '⏳' : '✅'),
+        trend: pending > 0 
+            ? '📌 $pending perlu ditinjau'
+            : '✅ Semua clear',
+        trendColor: pending > 0 ? Colors.amberAccent : Colors.greenAccent,
+      ),
+      
+      // 🔥 Card 3: Disetujui Hari Ini
+      _StatItem(
+        title: 'Disetujui',
+        value: '$disetujuiHariIni',
+        icon: Icons.check_circle_rounded,
+        subtitle: 'Hari ini',
+        gradientColors: disetujuiHariIni > 0
+            ? [successGreen, const Color(0xFF059669)]
+            : [infoBlue, const Color(0xFF0284C7)],
+        badge: disetujuiHariIni > 0 ? '✅' : '📅',
+        trend: disetujuiHariIni > 0 
+            ? '🎉 $disetujuiHariIni disetujui' 
+            : 'Belum ada hari ini',
+        trendColor: disetujuiHariIni > 0 ? Colors.greenAccent : Colors.white70,
+      ),
+      
+      // 🔥 Card 4: Ditolak
+      _StatItem(
+        title: 'Ditolak',
+        value: '$ditolak',
+        icon: Icons.cancel_rounded,
+        subtitle: ditolak > 0 
+            ? 'Perlu direvisi'
+            : 'Tidak ada penolakan',
+        gradientColors: ditolak > 3
+            ? [dangerRed, const Color(0xFFDC2626)]
+            : ditolak > 0
+                ? [const Color(0xFFF43F5E), const Color(0xFFE11D48)]
+                : [neutralGray, const Color(0xFF475569)],
+        badge: ditolak > 3 ? '🚫' : (ditolak > 0 ? '❌' : '✅'),
+        trend: ditolak > 0 
+            ? '⚠️ $ditolak ditolak'
+            : '✅ Tidak ada',
+        trendColor: ditolak > 0 ? Colors.redAccent : Colors.greenAccent,
+      ),
+    ];
+  }
 }
+
+// ==================== 📦 STAT ITEM DATA CLASS ====================
 
 class _StatItem {
   final String title;
@@ -330,6 +428,8 @@ class _StatItem {
   final String subtitle;
   final List<Color> gradientColors;
   final String? badge;
+  final String? trend;
+  final Color? trendColor;
 
   const _StatItem({
     required this.title,
@@ -338,5 +438,7 @@ class _StatItem {
     required this.subtitle,
     required this.gradientColors,
     this.badge,
+    this.trend,
+    this.trendColor,
   });
 }

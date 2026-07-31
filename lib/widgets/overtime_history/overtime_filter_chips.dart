@@ -1,3 +1,6 @@
+// lib/widgets/overtime_history/overtime_filter_chips.dart
+// 🔥 FINAL VERSION - TAMBAH TAB DIBATALKAN
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -35,6 +38,13 @@ class OvertimeFilterChips extends StatelessWidget {
       'label': 'Ditolak',
       'icon': Icons.cancel_rounded,
       'color': Color(0xFFEF4444),
+    },
+    // 🔥🔥🔥 TAB DIBATALKAN (BARU)
+    {
+      'value': 'dibatalkan',
+      'label': 'Dibatalkan',
+      'icon': Icons.remove_circle_outline_rounded,
+      'color': Color(0xFFF87171),
     },
     {
       'value': 'selesai',

@@ -1,9 +1,12 @@
 // lib/core/services/live_location_service.dart
+// 🔥 FINAL VERSION - DILENGKAPI NETWORK MONITORING
+
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
+import '/core/services/network_service.dart'; // 🔥 NETWORK SERVICE
 
 /// Model data lokasi terbaru
 class LiveLocationData {
@@ -21,6 +24,7 @@ class LiveLocationData {
   final double? heading;
   final double? batteryLevel;
   final bool isActive;
+  final String? address;
 
   LiveLocationData({
     required this.userId,
@@ -37,6 +41,7 @@ class LiveLocationData {
     this.heading,
     this.batteryLevel,
     this.isActive = true,
+    this.address,
   });
 
   factory LiveLocationData.fromMap(Map<String, dynamic> map) {
@@ -53,12 +58,13 @@ class LiveLocationData {
           : map['last_update'] is Timestamp
               ? (map['last_update'] as Timestamp).toDate()
               : DateTime.now(),
-      accuracy: (map['accuracy'] as num?)?.toDouble(),
-      altitude: (map['altitude'] as num?)?.toDouble(),
-      speed: (map['speed'] as num?)?.toDouble(),
-      heading: (map['heading'] as num?)?.toDouble(),
+      accuracy: (map['accuracy'] ?? map['last_accuracy'] as num?)?.toDouble(),
+      altitude: (map['altitude'] ?? map['last_altitude'] as num?)?.toDouble(),
+      speed: (map['speed'] ?? map['last_speed'] as num?)?.toDouble(),
+      heading: (map['heading'] ?? map['last_heading'] as num?)?.toDouble(),
       batteryLevel: (map['battery_level'] as num?)?.toDouble(),
       isActive: map['is_active'] as bool? ?? true,
+      address: map['address'] as String?,
     );
   }
 
@@ -77,10 +83,10 @@ class LiveLocationData {
     'heading': heading,
     'battery_level': batteryLevel,
     'is_active': isActive,
+    'address': address,
   };
 }
 
-/// Service + Provider: mengirim & menerima data lokasi secara real‑time
 class LiveLocationService extends ChangeNotifier {
   static final LiveLocationService _instance = LiveLocationService._internal();
   factory LiveLocationService() => _instance;
@@ -89,9 +95,13 @@ class LiveLocationService extends ChangeNotifier {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final GeolocatorPlatform _geolocator = GeolocatorPlatform.instance;
+  
+  // 🔥 NETWORK SERVICE
+  final NetworkService _networkService = NetworkService();
 
+  // ═══════════════════════════════════════════════════════
   // STATE
-  StreamSubscription<Position>? _positionSubscription;
+  // ═══════════════════════════════════════════════════════
   String? _currentUserId;
   String? _currentUserName;
   String? _currentUserRole;
@@ -100,107 +110,241 @@ class LiveLocationService extends ChangeNotifier {
   String? _currentLemburId;
   bool _isTracking = false;
 
-  DateTime? _lastWriteTime;
-  static const _minWriteInterval = Duration(seconds: 15);
-
-  // Viewer state
+  // ═══════════════════════════════════════════════════════
+  // VIEWER STATE
+  // ═══════════════════════════════════════════════════════
   Map<String, LiveLocationData> _latestLocations = {};
-  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _listener;
+  StreamSubscription<dynamic>? _listener;
   bool _isListening = false;
 
-  // ⭐ FLAG UNTUK CEGAH NOTIFY SETELAH DISPOSE
+  // ═══════════════════════════════════════════════════════
+  // TIMERS
+  // ═══════════════════════════════════════════════════════
+  Timer? _trackingTimer;
+  Timer? _autoStopTimer;
+  int _intervalSeconds = 60;
+
   bool _isDisposed = false;
 
-  // Getters
+  // 🔥 Network state
+  bool _isNetworkPaused = false;
+  int _failedSendCount = 0;
+  static const int _maxFailedBeforePause = 5;
+
+  // ═══════════════════════════════════════════════════════
+  // GETTERS
+  // ═══════════════════════════════════════════════════════
   bool get isTracking => _isTracking;
   bool get isListening => _isListening;
   Map<String, LiveLocationData> get latestLocations => _latestLocations;
   String? get currentOvertimeId => _currentOvertimeId;
+  String? get currentUserId => _currentUserId;
+  String? get currentLemburId => _currentLemburId;
+  
+  // 🔥 Network getters
+  bool get isOnline => _networkService.isOnline;
+  bool get isNetworkPaused => _isNetworkPaused;
+  int get failedSendCount => _failedSendCount;
 
-  // ⭐ SAFE NOTIFY - CEK APAKAH MASIH ACTIVE
-  void _safeNotify() {
-    if (!_isDisposed) {
-      notifyListeners();
+  // ═══════════════════════════════════════════════════════
+  // 🔥 NETWORK CHECK HELPER
+  // ═══════════════════════════════════════════════════════
+
+  bool _checkConnection(String operationName) {
+    if (!_networkService.isOnline) {
+      debugPrint('⚠️ [$operationName] Dibatalkan - Tidak ada koneksi internet');
+      return false;
     }
+    return true;
   }
 
-  // START TRACKING - Dipanggil setelah absensi berhasil
-  Future<void> startTracking({
+  // ═══════════════════════════════════════════════════════
+  // SAFE NOTIFY
+  // ═══════════════════════════════════════════════════════
+  void _safeNotify() {
+    if (!_isDisposed) notifyListeners();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // CORE: START LIVE TRACKING
+  // Document ID = userId (bukan lemburId)
+  // ═══════════════════════════════════════════════════════
+  Future<bool> startLiveTracking({
     required String userId,
     required String userName,
-    required String overtimeId,
     required String lemburId,
+    int intervalSeconds = 60,
     String userRole = 'mitra',
     String? userFungsi,
   }) async {
-    // Hentikan tracking sebelumnya
-    await stopTracking();
-
-    _currentUserId = userId;
-    _currentUserName = userName;
-    _currentUserRole = userRole;
-    _currentUserFungsi = userFungsi;
-    _currentOvertimeId = overtimeId;
-    _currentLemburId = lemburId;
-    _isTracking = true;
-    _safeNotify();
-
-    debugPrint('🟢 Live tracking dimulai untuk $userName ($userId)');
-
-    // Dapatkan posisi awal
     try {
-      final pos = await _geolocator.getCurrentPosition(
+      // 🔥 Cek koneksi sebelum mulai
+      if (!_checkConnection('startLiveTracking')) {
+        debugPrint('❌ LiveLocationService: Tidak bisa mulai tracking - OFFLINE');
+        return false;
+      }
+
+      // Hentikan tracking sebelumnya
+      await stopLiveTracking();
+
+      // Set state
+      _currentUserId = userId;
+      _currentUserName = userName;
+      _currentUserRole = userRole;
+      _currentUserFungsi = userFungsi;
+      _currentOvertimeId = lemburId;
+      _currentLemburId = lemburId;
+      _intervalSeconds = intervalSeconds.clamp(10, 300);
+      _isTracking = true;
+      _isNetworkPaused = false;
+      _failedSendCount = 0;
+      _safeNotify();
+
+      debugPrint('═══════════════════════════════════════');
+      debugPrint('🟢 LiveLocationService: START TRACKING');
+      debugPrint('   User: $userName ($userId)');
+      debugPrint('   Lembur ID: $lemburId');
+      debugPrint('   Interval: $intervalSeconds detik');
+      debugPrint('   Document ID: $userId');
+      debugPrint('   Network: ONLINE');
+      debugPrint('═══════════════════════════════════════');
+
+      // Kirim posisi awal segera
+      await _sendCurrentLocation();
+
+      // Timer periodik untuk kirim lokasi
+      _trackingTimer?.cancel();
+      _trackingTimer = Timer.periodic(
+        Duration(seconds: _intervalSeconds),
+        (_) => _sendCurrentLocation(),
+      );
+
+      return true;
+    } catch (e) {
+      debugPrint('❌ LiveLocationService: Gagal start tracking: $e');
+      return false;
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // CORE: STOP LIVE TRACKING
+  // ═══════════════════════════════════════════════════════
+  Future<void> stopLiveTracking() async {
+    if (_isDisposed) return;
+
+    debugPrint('🔴 LiveLocationService: STOP TRACKING untuk $_currentUserId');
+
+    // Hentikan timer
+    _trackingTimer?.cancel();
+    _trackingTimer = null;
+    _autoStopTimer?.cancel();
+    _autoStopTimer = null;
+
+    // Update Firestore: set is_active = false
+    if (_currentUserId != null) {
+      try {
+        await _firestore
+            .collection('live_locations')
+            .doc(_currentUserId!)
+            .update({
+          'is_active': false,
+          'stopped_at': FieldValue.serverTimestamp(),
+          'updated_at': FieldValue.serverTimestamp(),
+        });
+        debugPrint('✅ Status is_active=false disimpan');
+      } catch (e) {
+        debugPrint('⚠️ Gagal update status (update), coba set merge: $e');
+        try {
+          await _firestore
+              .collection('live_locations')
+              .doc(_currentUserId!)
+              .set({
+            'is_active': false,
+            'stopped_at': FieldValue.serverTimestamp(),
+            'updated_at': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+          debugPrint('✅ Status is_active=false disimpan (fallback set)');
+        } catch (e2) {
+          debugPrint('❌ Gagal total update status: $e2');
+        }
+      }
+    }
+
+    // Reset state
+    _currentUserId = null;
+    _currentUserName = null;
+    _currentUserRole = null;
+    _currentUserFungsi = null;
+    _currentOvertimeId = null;
+    _currentLemburId = null;
+    _isTracking = false;
+    _isNetworkPaused = false;
+    _failedSendCount = 0;
+    _safeNotify();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // SEND CURRENT LOCATION
+  // ═══════════════════════════════════════════════════════
+  Future<void> _sendCurrentLocation() async {
+    if (_isDisposed || !_isTracking || _currentUserId == null) return;
+
+    // 🔥 Cek network pause
+    if (_isNetworkPaused) {
+      debugPrint('📴 Network paused, skip pengiriman lokasi (failed: $_failedSendCount)');
+      return;
+    }
+
+    // 🔥 Cek koneksi
+    if (!_networkService.isOnline) {
+      debugPrint('📴 Offline, skip pengiriman lokasi');
+      _failedSendCount++;
+      
+      if (_failedSendCount >= _maxFailedBeforePause) {
+        _isNetworkPaused = true;
+        debugPrint('⏸️ Network paused setelah $_maxFailedBeforePause kali gagal');
+        _safeNotify();
+      }
+      
+      return;
+    }
+
+    try {
+      // Cek GPS
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        debugPrint('⚠️ GPS tidak aktif, skip pengiriman lokasi');
+        return;
+      }
+
+      // Cek permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) return;
+      }
+      if (permission == LocationPermission.deniedForever) return;
+
+      // Dapatkan posisi
+      final position = await _geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
           timeLimit: Duration(seconds: 10),
         ),
       );
-      await _writeLocation(pos, forceWrite: true);
-    } catch (e) {
-      debugPrint('⚠️ Gagal ambil posisi awal: $e');
-    }
 
-    // Stream posisi
-    _positionSubscription = _geolocator
-        .getPositionStream(
-          locationSettings: const LocationSettings(
-            accuracy: LocationAccuracy.high,
-            distanceFilter: 10,
-          ),
-        )
-        .listen(
-          _onPositionUpdate,
-          onError: (error) {
-            debugPrint('❌ Error stream posisi: $error');
-          },
-        );
-  }
+      // 🔥 Cek ulang koneksi sebelum simpan ke Firestore
+      if (!_networkService.isOnline) {
+        debugPrint('📴 Offline saat mau simpan, cache lokal dulu');
+        // Bisa tambah cache lokal di sini
+        _failedSendCount++;
+        return;
+      }
 
-  void _onPositionUpdate(Position position) {
-    final now = DateTime.now();
-    if (_lastWriteTime != null &&
-        now.difference(_lastWriteTime!) < _minWriteInterval) {
-      return;
-    }
-    _writeLocation(position);
-  }
+      // Simpan ke Firestore dengan document ID = userId
+      final docRef = _firestore.collection('live_locations').doc(_currentUserId!);
 
-  Future<void> _writeLocation(Position position, {bool forceWrite = false}) async {
-    if (_currentUserId == null || _currentOvertimeId == null) return;
-    if (!forceWrite && _lastWriteTime != null &&
-        DateTime.now().difference(_lastWriteTime!) < _minWriteInterval) {
-      return;
-    }
-
-    try {
-      final batch = _firestore.batch();
-
-      // Summary document (untuk query cepat)
-      final summaryRef = _firestore
-          .collection('live_locations')
-          .doc(_currentOvertimeId);
-
-      batch.set(summaryRef, {
+      await docRef.set({
         'user_id': _currentUserId,
         'user_name': _currentUserName,
         'user_role': _currentUserRole,
@@ -215,84 +359,83 @@ class LiveLocationService extends ChangeNotifier {
         'last_speed': position.speed,
         'last_heading': position.heading,
         'is_active': true,
-        'battery_level': _getBatteryLevel(),
-      }, SetOptions(merge: true));
-
-      // History updates (untuk trail/jejak)
-      final historyRef = summaryRef.collection('updates').doc();
-
-      batch.set(historyRef, {
-        'user_id': _currentUserId,
-        'user_name': _currentUserName,
-        'user_role': _currentUserRole,
-        'user_fungsi': _currentUserFungsi,
-        'lembur_id': _currentLemburId,
+        'address': '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
+        'timestamp': FieldValue.serverTimestamp(),
         'latitude': position.latitude,
         'longitude': position.longitude,
-        'accuracy': position.accuracy,
-        'altitude': position.altitude,
-        'speed': position.speed,
-        'heading': position.heading,
-        'timestamp': FieldValue.serverTimestamp(),
-        'battery_level': _getBatteryLevel(),
-      });
+        'updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
-      await batch.commit();
-
-      _lastWriteTime = DateTime.now();
+      // 🔥 Reset counter saat berhasil
+      if (_failedSendCount > 0) {
+        debugPrint('✅ Lokasi berhasil dikirim setelah $_failedSendCount kali gagal');
+      }
+      _failedSendCount = 0;
+      _isNetworkPaused = false;
+      
       debugPrint('📍 Lokasi: ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}');
     } catch (e) {
       debugPrint('❌ Gagal mengirim lokasi: $e');
-    }
-  }
-
-  /// Placeholder untuk battery level (bisa integrasi dengan battery_plus package)
-  double? _getBatteryLevel() {
-    // TODO: Integrasi dengan battery_plus untuk data real
-    return null;
-  }
-
-  // STOP TRACKING - Dipanggil saat lembur selesai
-  Future<void> stopTracking() async {
-    // ⭐ CEGAH EKSEKUSI JIKA SUDAH DISPOSED
-    if (_isDisposed) return;
-
-    _positionSubscription?.cancel();
-    _positionSubscription = null;
-    _lastWriteTime = null;
-
-    if (_currentOvertimeId != null) {
-      try {
-        await _firestore
-            .collection('live_locations')
-            .doc(_currentOvertimeId)
-            .update({
-          'is_active': false,
-          'stopped_at': FieldValue.serverTimestamp(),
-        });
-        debugPrint('🔴 Tracking dihentikan untuk $_currentOvertimeId');
-      } catch (e) {
-        debugPrint('⚠️ Gagal update status nonaktif: $e');
+      
+      // 🔥 Cek network error
+      if (e.toString().contains('SocketException') || 
+          e.toString().contains('network') ||
+          e.toString().contains('timeout')) {
+        _failedSendCount++;
+        debugPrint('📴 Network error (${_failedSendCount}/$_maxFailedBeforePause)');
+        
+        if (_failedSendCount >= _maxFailedBeforePause) {
+          _isNetworkPaused = true;
+          debugPrint('⏸️ Network paused setelah $_maxFailedBeforePause kali gagal');
+          _safeNotify();
+        }
       }
     }
-
-    _currentUserId = null;
-    _currentUserName = null;
-    _currentUserRole = null;
-    _currentUserFungsi = null;
-    _currentOvertimeId = null;
-    _currentLemburId = null;
-    _isTracking = false;
-    _safeNotify();
   }
 
-  // VALIDASI LOKASI - Cek apakah mitra dalam radius lokasi lembur
+  // ═══════════════════════════════════════════════════════
+  // COMPATIBILITY METHODS (OLD API)
+  // ═══════════════════════════════════════════════════════
+  Future<void> startTracking({
+    required String userId,
+    required String userName,
+    required String overtimeId,
+    required String lemburId,
+    String userRole = 'mitra',
+    String? userFungsi,
+  }) async {
+    await startLiveTracking(
+      userId: userId,
+      userName: userName,
+      lemburId: lemburId,
+      userRole: userRole,
+      userFungsi: userFungsi,
+    );
+  }
+
+  Future<void> stopTracking() async {
+    await stopLiveTracking();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // VALIDASI LOKASI
+  // ═══════════════════════════════════════════════════════
   Future<Map<String, dynamic>> validateLocation({
     required double targetLat,
     required double targetLng,
-    double radiusMeter = 500,
+    double radiusMeter = 100, // 🔥 Default 100m lebih ketat
   }) async {
     try {
+      // 🔥 Cek koneksi
+      if (!_networkService.isOnline) {
+        return {
+          'valid': false,
+          'message': '❌ Tidak ada koneksi internet. Tidak dapat memvalidasi lokasi.',
+          'distance': null,
+          'max_radius': radiusMeter,
+        };
+      }
+
       // Cek permission
       LocationPermission permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
@@ -324,7 +467,7 @@ class LiveLocationService extends ChangeNotifier {
         };
       }
 
-      // Dapatkan posisi saat ini
+      // Dapatkan posisi
       final position = await _geolocator.getCurrentPosition(
         locationSettings: const LocationSettings(
           accuracy: LocationAccuracy.high,
@@ -342,63 +485,101 @@ class LiveLocationService extends ChangeNotifier {
 
       final isValid = distanceInMeters <= radiusMeter;
 
-      debugPrint('📍 Validasi Lokasi:');
-      debugPrint('   Posisi: ${position.latitude}, ${position.longitude}');
-      debugPrint('   Target: $targetLat, $targetLng');
-      debugPrint('   Jarak: ${distanceInMeters.toStringAsFixed(1)} meter');
-      debugPrint('   Valid: $isValid (radius: $radiusMeter meter)');
-
       return {
         'valid': isValid,
         'message': isValid
-            ? '✅ Lokasi valid (${distanceInMeters.toStringAsFixed(0)} meter)'
-            : '❌ Anda berada di luar area lembur (${distanceInMeters.toStringAsFixed(0)} meter dari lokasi)',
+            ? '✅ Lokasi valid (${distanceInMeters.toStringAsFixed(0)}m dari lokasi, max: ${radiusMeter.toStringAsFixed(0)}m)'
+            : '❌ Anda di luar area lembur (${distanceInMeters.toStringAsFixed(0)}m, max: ${radiusMeter.toStringAsFixed(0)}m)',
         'distance': distanceInMeters,
+        'max_radius': radiusMeter,
         'latitude': position.latitude,
         'longitude': position.longitude,
       };
     } catch (e) {
-      debugPrint('❌ Error validasi lokasi: $e');
       return {
         'valid': false,
-        'message': '❌ Gagal memvalidasi lokasi: ${e.toString()}',
+        'message': '❌ Gagal validasi lokasi: ${e.toString()}',
         'distance': null,
+        'max_radius': radiusMeter,
       };
     }
   }
 
-  // LISTENER UNTUK VIEWER (PENGAWAS/ADMIN)
+  // ═══════════════════════════════════════════════════════
+  // LISTENERS
+  // ═══════════════════════════════════════════════════════
+
+  /// Listener untuk admin/pengawas - semua lokasi aktif
   void listenToAllActiveLocations() {
-    if (_isDisposed) return; // ⭐ CEK DISPOSED
-    
+    if (_isDisposed) return;
     _stopListener();
+
+    // 🔥 Cek koneksi sebelum listen
+    if (!_networkService.isOnline) {
+      debugPrint('⚠️ Offline - listener akan mulai saat online');
+      // Listener tetap di-set, Firestore SDK akan handle reconnect
+    }
 
     _listener = _firestore
         .collection('live_locations')
         .where('is_active', isEqualTo: true)
         .snapshots()
         .listen((snapshot) {
-      if (_isDisposed) return; // ⭐ CEK DISPOSED DI DALAM CALLBACK
-      
+      if (_isDisposed) return;
+
       _latestLocations.clear();
       for (var doc in snapshot.docs) {
         final data = doc.data();
-        if (data.containsKey('last_lat')) {
-          final loc = LiveLocationData.fromMap(data);
-          _latestLocations[doc.id] = loc;
+        if (data.containsKey('last_lat') || data.containsKey('latitude')) {
+          _latestLocations[doc.id] = LiveLocationData.fromMap(data);
         }
       }
       _isListening = true;
       _safeNotify();
     }, onError: (error) {
       if (_isDisposed) return;
-      debugPrint('❌ Error stream lokasi: $error');
+      
+      // 🔥 Handle network error di listener
+      if (error.toString().contains('network') || error.toString().contains('SocketException')) {
+        debugPrint('⚠️ Listener network error (akan reconnect otomatis): $error');
+      } else {
+        debugPrint('❌ Error stream lokasi admin: $error');
+      }
     });
   }
 
+  /// Listener untuk mitra - hanya dokumen sendiri
+  void listenToOwnLocation(String userId) {
+    if (_isDisposed) return;
+    _stopListener();
+
+    _listener = _firestore
+        .collection('live_locations')
+        .doc(userId)
+        .snapshots()
+        .listen((doc) {
+      if (_isDisposed) return;
+
+      if (doc.exists) {
+        final data = doc.data()!;
+        _latestLocations[doc.id] = LiveLocationData.fromMap(data);
+        _isListening = true;
+        _safeNotify();
+      }
+    }, onError: (error) {
+      if (_isDisposed) return;
+      
+      if (error.toString().contains('network') || error.toString().contains('SocketException')) {
+        debugPrint('⚠️ Listener network error (akan reconnect otomatis): $error');
+      } else {
+        debugPrint('❌ Error stream lokasi sendiri: $error');
+      }
+    });
+  }
+
+  /// Listener untuk overtime tertentu (subcollection updates)
   void listenToOvertime(String overtimeId) {
-    if (_isDisposed) return; // ⭐ CEK DISPOSED
-    
+    if (_isDisposed) return;
     _stopListener();
 
     _listener = _firestore
@@ -409,8 +590,8 @@ class LiveLocationService extends ChangeNotifier {
         .limit(50)
         .snapshots()
         .listen((snapshot) {
-      if (_isDisposed) return; // ⭐ CEK DISPOSED DI DALAM CALLBACK
-      
+      if (_isDisposed) return;
+
       for (var doc in snapshot.docs) {
         final data = doc.data();
         final userId = data['user_id'] as String?;
@@ -435,22 +616,26 @@ class LiveLocationService extends ChangeNotifier {
   }
 
   void stopListening() {
-    if (_isDisposed) return; // ⭐ CEK DISPOSED
-    
+    if (_isDisposed) return;
     _stopListener();
     _latestLocations.clear();
     _safeNotify();
   }
 
-  // GET LOCATION HISTORY
+  // ═══════════════════════════════════════════════════════
+  // HISTORY
+  // ═══════════════════════════════════════════════════════
   Future<List<LiveLocationData>> getLocationHistory(
     String overtimeId, {
     DateTime? startTime,
     DateTime? endTime,
     int limit = 100,
   }) async {
-    if (_isDisposed) return []; // ⭐ CEK DISPOSED
-    
+    if (_isDisposed) return [];
+
+    // 🔥 Cek koneksi
+    if (!_checkConnection('getLocationHistory')) return [];
+
     try {
       var query = _firestore
           .collection('live_locations')
@@ -460,35 +645,41 @@ class LiveLocationService extends ChangeNotifier {
           .limit(limit);
 
       if (startTime != null) {
-        query = query.where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(startTime));
+        query = query.where('timestamp',
+            isGreaterThanOrEqualTo: Timestamp.fromDate(startTime));
       }
       if (endTime != null) {
-        query = query.where('timestamp', isLessThanOrEqualTo: Timestamp.fromDate(endTime));
+        query = query.where('timestamp',
+            isLessThanOrEqualTo: Timestamp.fromDate(endTime));
       }
 
       final snapshot = await query.get();
-      return snapshot.docs.map((doc) => LiveLocationData.fromMap(doc.data())).toList();
+      return snapshot.docs
+          .map((doc) => LiveLocationData.fromMap(doc.data()))
+          .toList();
     } catch (e) {
       debugPrint('❌ Gagal ambil history lokasi: $e');
       return [];
     }
   }
 
-  // AUTO STOP
-  Timer? _autoStopTimer;
-
+  // ═══════════════════════════════════════════════════════
+  // AUTO-STOP
+  // ═══════════════════════════════════════════════════════
   void scheduleAutoStop(DateTime jamSelesai) {
-    if (_isDisposed) return; // ⭐ CEK DISPOSED
-    
+    if (_isDisposed) return;
+
     _autoStopTimer?.cancel();
     final delay = jamSelesai.difference(DateTime.now());
+    
     if (delay.isNegative) {
+      debugPrint('⏰ Jam selesai sudah lewat, langsung hentikan');
       stopTracking();
       return;
     }
 
     _autoStopTimer = Timer(delay, () {
-      if (_isDisposed) return; // ⭐ CEK DISPOSED DI DALAM TIMER
+      if (_isDisposed) return;
       debugPrint('⏰ Auto-stop tracking: jam selesai tercapai');
       stopTracking();
     });
@@ -496,23 +687,40 @@ class LiveLocationService extends ChangeNotifier {
     debugPrint('⏰ Auto-stop dijadwalkan dalam ${delay.inMinutes} menit');
   }
 
-  // ⭐ DISPOSE - PRIORITAS UTAMA
+  // ═══════════════════════════════════════════════════════
+  // 🔥 RESUME NETWORK (UNTUK LIVE LOCATION MANAGER)
+  // ═══════════════════════════════════════════════════════
+
+  /// Dipanggil saat koneksi pulih untuk melanjutkan pengiriman
+  void resumeAfterNetworkRestored() {
+    if (_isDisposed || !_isTracking) return;
+    
+    if (_isNetworkPaused) {
+      debugPrint('📶 Network restored - Melanjutkan pengiriman lokasi');
+      _isNetworkPaused = false;
+      _failedSendCount = 0;
+      _safeNotify();
+      
+      // 🔥 Langsung kirim lokasi
+      _sendCurrentLocation();
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // DISPOSE
+  // ═══════════════════════════════════════════════════════
   @override
   void dispose() {
-    // 1. SET FLAG DISPOSED PALING PERTAMA
     _isDisposed = true;
-    
-    // 2. BATALKAN SEMUA SUBSCRIPTIONS
+
     _autoStopTimer?.cancel();
-    _autoStopTimer = null;
-    
-    _positionSubscription?.cancel();
-    _positionSubscription = null;
-    
+    _trackingTimer?.cancel();
     _listener?.cancel();
+
+    _autoStopTimer = null;
+    _trackingTimer = null;
     _listener = null;
-    
-    // 3. BERSIHKAN DATA
+
     _latestLocations.clear();
     _isTracking = false;
     _isListening = false;
@@ -522,9 +730,9 @@ class LiveLocationService extends ChangeNotifier {
     _currentUserFungsi = null;
     _currentOvertimeId = null;
     _currentLemburId = null;
-    _lastWriteTime = null;
-    
-    // 4. PANGGIL SUPER DISPOSE (TANPA NOTIFY)
+    _isNetworkPaused = false;
+    _failedSendCount = 0;
+
     super.dispose();
   }
 }

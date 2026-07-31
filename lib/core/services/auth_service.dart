@@ -1,4 +1,6 @@
 // lib/core/services/auth_service.dart
+// 🔥 COMPLETE VERSION - ALL ERRORS FIXED - FINAL
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
@@ -20,9 +22,178 @@ import '../../dashboard/superadmin/superadmin_dashboard.dart';
 import '../../screens/login_screen.dart';
 import '../../screens/welcome_screen.dart';
 
+// NETWORK SERVICE
+import 'network_service.dart';
+
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  
+  // NETWORK SERVICE
+  final NetworkService _networkService = NetworkService();
+  
+  // STREAM SUBSCRIPTIONS
+  StreamSubscription? _connectionSubscription;
+  StreamSubscription? _authSubscription;
+
+  // 🔥 GUARD FLAG - Mencegah infinite loop signOut
+  bool _isSigningOut = false;
+
+  // =========================================================
+  // 🔥 INITIALIZATION
+  // =========================================================
+  
+  AuthService() {
+    _initializeNetworkMonitoring();
+    _initializeAuthStateListener();
+  }
+
+  void _initializeNetworkMonitoring() {
+    _connectionSubscription = _networkService.connectionStream.listen((isOnline) {
+      debugPrint('🌐 Network status changed: ${isOnline ? "ONLINE" : "OFFLINE"}');
+      if (isOnline) {
+        _syncOfflineData();
+      }
+    });
+  }
+
+  void _initializeAuthStateListener() {
+    _authSubscription = _auth.authStateChanges().listen((user) {
+      if (user != null) {
+        debugPrint('👤 User logged in: ${user.email}');
+        _updateUserOnlineStatus(true);
+      } else {
+        // 🔥 Hanya print jika bukan dari proses signOut internal
+        if (!_isSigningOut) {
+          debugPrint('👤 User logged out');
+        }
+      }
+    });
+  }
+
+  // =========================================================
+  // 🔥 DISPOSE
+  // =========================================================
+  
+  void dispose() {
+    _connectionSubscription?.cancel();
+    _authSubscription?.cancel();
+  }
+
+  // =========================================================
+  // 🔥 NETWORK CHECK HELPERS
+  // =========================================================
+
+  bool _checkConnection(String operationName) {
+    if (!_networkService.isOnline) {
+      debugPrint('⚠️ [$operationName] Dibatalkan - Tidak ada koneksi internet');
+      return false;
+    }
+    return true;
+  }
+
+  Future<bool> _checkConnectionAsync(String operationName) async {
+    final isConnected = await _networkService.checkConnection();
+    if (!isConnected) {
+      debugPrint('⚠️ [$operationName] Dibatalkan - Tidak ada koneksi internet');
+    }
+    return isConnected;
+  }
+
+  // =========================================================
+  // 🔥 RETRY LOGIC UNTUK NETWORK OPERATIONS
+  // =========================================================
+
+  Future<T> _retryOperation<T>(
+    Future<T> Function() operation, {
+    int maxRetries = 3,
+    Duration initialDelay = const Duration(seconds: 1),
+  }) async {
+    int attempts = 0;
+    while (true) {
+      try {
+        return await operation().timeout(const Duration(seconds: 15));
+      } catch (e) {
+        attempts++;
+        if (attempts >= maxRetries) rethrow;
+        debugPrint('🔄 Retry attempt $attempts/$maxRetries');
+        await Future.delayed(initialDelay * attempts);
+      }
+    }
+  }
+
+  // =========================================================
+  // 🔥 SYNC OFFLINE DATA
+  // =========================================================
+
+  Future<void> _syncOfflineData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final pendingActions = prefs.getStringList('pending_actions') ?? [];
+      
+      if (pendingActions.isEmpty) return;
+      
+      debugPrint('🔄 Syncing ${pendingActions.length} offline actions...');
+      
+      for (var action in pendingActions) {
+        try {
+          final data = jsonDecode(action);
+          await _processOfflineAction(data);
+        } catch (e) {
+          debugPrint('⚠️ Failed to sync offline action: $e');
+        }
+      }
+      
+      await prefs.remove('pending_actions');
+      debugPrint('✅ Offline sync completed');
+    } catch (e) {
+      debugPrint('❌ Offline sync error: $e');
+    }
+  }
+
+  Future<void> _processOfflineAction(Map<String, dynamic> action) async {
+    switch (action['type']) {
+      case 'update_online_status':
+        await _firestore.collection('users').doc(action['userId']).update({
+          'isOnline': action['status'],
+          'last_active': FieldValue.serverTimestamp(),
+        });
+        break;
+    }
+  }
+
+  Future<void> _saveOfflineAction(Map<String, dynamic> action) async {
+    final prefs = await SharedPreferences.getInstance();
+    final pendingActions = prefs.getStringList('pending_actions') ?? [];
+    pendingActions.add(jsonEncode(action));
+    await prefs.setStringList('pending_actions', pendingActions);
+  }
+
+  // =========================================================
+  // 🔥 UPDATE USER ONLINE STATUS
+  // =========================================================
+
+  Future<void> _updateUserOnlineStatus(bool isOnline) async {
+    try {
+      final user = _auth.currentUser;
+      if (user == null) return;
+      
+      if (_networkService.isOnline) {
+        await _firestore.collection('users').doc(user.uid).update({
+          'isOnline': isOnline,
+          'last_active': FieldValue.serverTimestamp(),
+        });
+      } else {
+        await _saveOfflineAction({
+          'type': 'update_online_status',
+          'userId': user.uid,
+          'status': isOnline,
+        });
+      }
+    } catch (e) {
+      debugPrint('Update online status error: $e');
+    }
+  }
 
   // =========================================================
   // 🔥 VALIDASI INPUT (CLIENT-SIDE)
@@ -54,9 +225,12 @@ class AuthService {
 
   String? validatePassword(String? password) {
     if (password == null || password.isEmpty) return 'Password tidak boleh kosong';
-    if (password.length < 6) return 'Password minimal 6 karakter';
+    if (password.length < 8) return 'Password minimal 8 karakter';
     if (password.length > 128) return 'Password maksimal 128 karakter';
     if (password.contains(' ')) return 'Password tidak boleh mengandung spasi';
+    if (!password.contains(RegExp(r'[A-Z]'))) return 'Password harus mengandung huruf besar';
+    if (!password.contains(RegExp(r'[a-z]'))) return 'Password harus mengandung huruf kecil';
+    if (!password.contains(RegExp(r'[0-9]'))) return 'Password harus mengandung angka';
     return null;
   }
 
@@ -105,27 +279,72 @@ class AuthService {
 
   Future<String?> getUserRole() async {
     try {
+      if (!_checkConnection('getUserRole')) {
+        final prefs = await SharedPreferences.getInstance();
+        return prefs.getString('cached_role');
+      }
+      
       final user = _auth.currentUser;
       if (user == null) return null;
       final doc = await _firestore.collection('users').doc(user.uid).get();
       if (!doc.exists) return null;
-      return (doc.data()?['role'] ?? '').toString().toLowerCase();
+      
+      final role = (doc.data()?['role'] ?? '').toString().toLowerCase();
+      
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_role', role);
+      
+      return role;
     } catch (e) {
       debugPrint('GET USER ROLE ERROR: $e');
-      return null;
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('cached_role');
     }
   }
 
   Future<Map<String, dynamic>?> getCurrentUserData() async {
     try {
+      if (!_checkConnection('getCurrentUserData')) {
+        return _getCachedUserData();
+      }
+      
       final user = _auth.currentUser;
       if (user == null) return null;
       final doc = await _firestore.collection('users').doc(user.uid).get();
       if (!doc.exists) return null;
-      return {'id': doc.id, ...doc.data()!};
+      
+      final data = {'id': doc.id, ...doc.data()!};
+      
+      await _cacheUserData(data);
+      
+      return data;
     } catch (e) {
       debugPrint('GET CURRENT USER DATA ERROR: $e');
-      return null;
+      return _getCachedUserData();
+    }
+  }
+
+  Future<Map<String, dynamic>?> _getCachedUserData() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final cachedData = prefs.getString('cached_user_data');
+      if (cachedData != null) {
+        return jsonDecode(cachedData);
+      }
+    } catch (e) {
+      debugPrint('Get cached data error: $e');
+    }
+    return null;
+  }
+
+  Future<void> _cacheUserData(Map<String, dynamic> data) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('cached_user_data', jsonEncode(data));
+      await prefs.setString('cached_role', data['role'] ?? '');
+      await prefs.setString('cached_nama', data['nama_lengkap'] ?? '');
+    } catch (e) {
+      debugPrint('Cache user data error: $e');
     }
   }
 
@@ -145,13 +364,18 @@ class AuthService {
       case 'manager':        return '/manager-dashboard';
       case 'pengawas':       return '/pengawas-dashboard';
       case 'mitra':          return '/mitra-dashboard';
-      case 'manager_hsse':   return '/manager-hsse-dashboard'; // 🔥 UBAH
+      case 'manager_hsse':   return '/manager-hsse-dashboard';
       default:               return '/login';
     }
   }
 
   Future<String?> getUserStatus() async {
     try {
+      if (!_checkConnection('getUserStatus')) {
+        final data = await _getCachedUserData();
+        return data?['status_akun']?.toString().toLowerCase();
+      }
+      
       final user = _auth.currentUser;
       if (user == null) return null;
       final doc = await _firestore.collection('users').doc(user.uid).get();
@@ -165,14 +389,23 @@ class AuthService {
 
   Future<String?> validateAccess() async {
     if (!isLoggedIn) return '/login';
+    
+    if (!_checkConnection('validateAccess')) {
+      return null;
+    }
+    
     final data = await getCurrentUserData();
     if (data == null) { await signOut(); return '/login'; }
+    
     final s = (data['status_akun'] ?? '').toString().toLowerCase();
     if (s == 'deleted' || s == 'blocked' || s == 'inactive') {
-      await signOut(); return '/login';
+      await signOut(); 
+      return '/login';
     }
+    
     if (s != 'active') { await signOut(); return '/login'; }
     if (data['account_locked'] == true) { await signOut(); return '/login'; }
+    
     return null;
   }
 
@@ -180,30 +413,72 @@ class AuthService {
   Stream<User?> get userChanges => _auth.userChanges();
 
   // =========================================================
-  // AUTH CHECK
+  // 🔥 AUTH CHECK
   // =========================================================
 
   Future<Widget> checkAuthAndGetDestination() async {
     try {
+      if (!await _checkConnectionAsync('checkAuthAndGetDestination')) {
+        final user = _auth.currentUser;
+        if (user != null) {
+          final prefs = await SharedPreferences.getInstance();
+          final cachedRole = prefs.getString('cached_role');
+          if (cachedRole != null) {
+            debugPrint('📴 Offline - Using cached role: $cachedRole');
+            return getDashboardForRole(cachedRole);
+          }
+        }
+        debugPrint('📴 Offline - No cached data, showing WelcomeScreen');
+        return const WelcomeScreen();
+      }
+      
       final user = _auth.currentUser;
       if (user == null) return const WelcomeScreen();
+      
       final doc = await _firestore.collection('users').doc(user.uid).get();
-      if (!doc.exists) { await signOut(); return const LoginScreen(); }
+      if (!doc.exists) { 
+        await signOut(); 
+        return const LoginScreen(); 
+      }
+      
       final data = doc.data() ?? {};
       final role = (data['role'] ?? '').toString().toLowerCase();
       final status = (data['status_akun'] ?? '').toString().toLowerCase();
-      if (status == 'deleted') { await signOut(); return const LoginScreen(); }
-      if (status != 'active') { await signOut(); return const LoginScreen(); }
+      
+      if (status == 'deleted') { 
+        await signOut(); 
+        return const LoginScreen(); 
+      }
+      
+      if (status != 'active') { 
+        await signOut(); 
+        return const LoginScreen(); 
+      }
+      
+      await _cacheUserData({'id': doc.id, ...data});
+      
       return getDashboardForRole(role);
     } catch (e) {
       debugPrint('checkAuthAndGetDestination error: $e');
+      
+      if (e.toString().contains('network') || 
+          e.toString().contains('SocketException') ||
+          (e is FirebaseException && e.code == 'unavailable')) {
+        final prefs = await SharedPreferences.getInstance();
+        final cachedRole = prefs.getString('cached_role');
+        if (cachedRole != null) {
+          debugPrint('📴 Network error - Using cached role: $cachedRole');
+          return getDashboardForRole(cachedRole);
+        }
+      }
+      
       await signOut();
       return const LoginScreen();
     }
   }
 
   // =========================================================
-  // 🔥 LOGIN
+  // 🔥 LOGIN - FULLY FIXED
   // =========================================================
 
   LoginResult? _lastResult;
@@ -215,6 +490,13 @@ class AuthService {
     required String sessionId,
     required bool rememberMe,
   }) async {
+    if (!await _checkConnectionAsync('login')) {
+      return _result(false, 
+        error: 'Tidak ada koneksi internet. Periksa koneksi Anda dan coba lagi.',
+        code: 'no-connection'
+      );
+    }
+
     if (identity.trim().isEmpty) {
       return _result(false, error: 'Email atau nomor HP tidak boleh kosong', code: 'empty-identity');
     }
@@ -255,13 +537,10 @@ class AuthService {
         }
       }
 
-      final credential = await _auth
-          .signInWithEmailAndPassword(
-            email: email.trim().toLowerCase(),
-            password: password.trim(),
-          )
-          .timeout(const Duration(seconds: 15),
-              onTimeout: () => throw TimeoutException('Koneksi timeout'));
+      final credential = await _retryOperation(() => _auth.signInWithEmailAndPassword(
+        email: email.trim().toLowerCase(),
+        password: password.trim(),
+      ));
 
       final user = credential.user;
       if (user == null) {
@@ -298,6 +577,9 @@ class AuthService {
         return _result(false, error: 'Status akun tidak valid.\nHubungi admin.', code: 'account-status-invalid');
       }
 
+      final role = (userData['role'] ?? '').toString();
+      final nama = (userData['nama_lengkap'] ?? '').toString();
+
       await _firestore.collection('users').doc(user.uid).update({
         'last_login': FieldValue.serverTimestamp(),
         'login_attempts': 0,
@@ -307,21 +589,35 @@ class AuthService {
         ]),
       });
 
+      await _cacheUserData({
+        'id': user.uid,
+        ...userData,
+      });
+
       if (rememberMe) {
         await _saveRememberMe(identity);
       } else {
         await _clearRememberMe();
       }
 
-      return _result(true, role: userData['role'] ?? '', nama: userData['nama_lengkap'] ?? '', userData: userData);
+      return _result(true, role: role, nama: nama, userData: userData);
           
     } on FirebaseAuthException catch (e) {
       await _trackFailedLogin(identity);
       return _result(false, error: _getFirebaseErrorMessage(e.code), code: e.code);
-    } on TimeoutException {
-      return _result(false, error: 'Koneksi timeout. Periksa internet Anda dan coba lagi.', code: 'timeout');
     } catch (e) {
       debugPrint('LOGIN ERROR: $e');
+      
+      if (e is TimeoutException) {
+        return _result(false, error: 'Koneksi timeout. Periksa internet Anda dan coba lagi.', code: 'timeout');
+      }
+      
+      if (e.toString().contains('SocketException') || 
+          e.toString().contains('network') ||
+          (e is FirebaseException && e.code == 'unavailable')) {
+        return _result(false, error: 'Koneksi internet terputus. Silakan coba lagi.', code: 'network-error');
+      }
+      
       return _result(false, error: 'Terjadi kesalahan sistem. Silakan coba lagi.', code: 'unknown');
     }
   }
@@ -332,6 +628,19 @@ class AuthService {
 
   Future<LoginResult?> tryAutoLogin() async {
     try {
+      if (!await _checkConnectionAsync('tryAutoLogin')) {
+        final user = _auth.currentUser;
+        if (user != null) {
+          final prefs = await SharedPreferences.getInstance();
+          final cachedRole = prefs.getString('cached_role') ?? '';
+          final cachedNama = prefs.getString('cached_nama') ?? '';
+          if (cachedRole.isNotEmpty) {
+            return _result(true, role: cachedRole, nama: cachedNama);
+          }
+        }
+        return null;
+      }
+      
       final user = _auth.currentUser;
       if (user == null) return null;
       
@@ -356,9 +665,25 @@ class AuthService {
         ]),
       });
       
-      return _result(true, role: data['role'] ?? '', nama: data['nama_lengkap'] ?? '', userData: data);
+      final role = (data['role'] ?? '').toString();
+      final nama = (data['nama_lengkap'] ?? '').toString();
+      
+      await _cacheUserData({'id': doc.id, ...data});
+      
+      return _result(true, role: role, nama: nama, userData: data);
     } catch (e) {
       debugPrint('AUTO LOGIN ERROR: $e');
+      
+      if (e.toString().contains('network') || 
+          e.toString().contains('SocketException') ||
+          (e is FirebaseException && e.code == 'unavailable')) {
+        final prefs = await SharedPreferences.getInstance();
+        final cachedRole = prefs.getString('cached_role');
+        if (cachedRole != null && _auth.currentUser != null) {
+          return _result(true, role: cachedRole);
+        }
+      }
+      
       await signOut();
       return null;
     }
@@ -374,24 +699,18 @@ class AuthService {
     required String phone,
     required String password,
     required String sessionId,
-    String? idPekerja,           // 🔥 ID Pekerja dari Master Data
-    String fungsi = 'operation', // 🔥 Fungsi dari Master Data/User input
+    String? idPekerja,
+    String fungsi = 'operation',
   }) async {
+    if (!await _checkConnectionAsync('register')) {
+      return RegisterResult(success: false, message: 'Tidak ada koneksi internet. Periksa koneksi Anda.');
+    }
+
     final error = validateRegisterForm(nama: nama, email: email, phone: phone, password: password);
     if (error != null) return RegisterResult(success: false, message: error);
 
     try {
       final cleanPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
-
-      final credential = await _auth.createUserWithEmailAndPassword(
-        email: email.trim().toLowerCase(),
-        password: password.trim(),
-      );
-      
-      final user = credential.user;
-      if (user == null) {
-        return RegisterResult(success: false, message: 'Gagal membuat akun. Coba lagi.');
-      }
 
       try {
         final emailCheck = await _firestore
@@ -401,7 +720,6 @@ class AuthService {
             .get();
         
         if (emailCheck.docs.isNotEmpty) {
-          await user.delete();
           return RegisterResult(success: false, message: 'Email sudah terdaftar.\nSilakan login atau gunakan email lain.');
         }
 
@@ -412,18 +730,25 @@ class AuthService {
             .get();
         
         if (phoneCheck.docs.isNotEmpty) {
-          await user.delete();
           return RegisterResult(success: false, message: 'Nomor HP sudah terdaftar.\nSilakan login atau gunakan nomor lain.');
         }
       } catch (e) {
         debugPrint('Firestore check error: $e');
-        await user.delete();
         return RegisterResult(success: false, message: 'Gagal memverifikasi data. Silakan coba lagi.');
+      }
+
+      final credential = await _retryOperation(() => _auth.createUserWithEmailAndPassword(
+        email: email.trim().toLowerCase(),
+        password: password.trim(),
+      ));
+      
+      final user = credential.user;
+      if (user == null) {
+        return RegisterResult(success: false, message: 'Gagal membuat akun. Coba lagi.');
       }
 
       final now = Timestamp.now();
       try {
-        // 🔥 SIMPAN DATA USER + ID PEKERJA + FUNGSI
         await _firestore.collection('users').doc(user.uid).set({
           'id': user.uid,
           'nama_lengkap': nama.trim(),
@@ -432,11 +757,11 @@ class AuthService {
           'phone': cleanPhone,
           'phone_hash': _hashData(cleanPhone),
           'role': 'mitra',
-          'fungsi': fungsi,                              // 🔥 Fungsi dari parameter
-          'fungsi_label': _getFungsiLabel(fungsi),       // 🔥 Label fungsi
-          'id_pekerja': idPekerja ?? '',                 // 🔥 ID Pekerja
+          'fungsi': fungsi,
+          'fungsi_label': _getFungsiLabel(fungsi),
+          'id_pekerja': idPekerja ?? '',
           'status_akun': 'active',
-          'is_verified': true,                           // 🔥 Auto verified
+          'is_verified': true,
           'account_locked': false,
           'login_attempts': 0,
           'isOnline': false,
@@ -458,7 +783,7 @@ class AuthService {
               'action': 'self_register',
               'timestamp': now,
               'session_id': sessionId,
-              'id_pekerja': idPekerja ?? '',            // 🔥 Track ID Pekerja
+              'id_pekerja': idPekerja ?? '',
             }
           ],
         });
@@ -487,7 +812,7 @@ class AuthService {
   }
 
   // =========================================================
-  // 🔥 CREATE USER (ADMIN) - DENGAN ID PEKERJA & MANAGER_HSSE
+  // 🔥 CREATE USER (ADMIN)
   // =========================================================
 
   Future<CreateUserResult> createUser({
@@ -497,8 +822,12 @@ class AuthService {
     required String password,
     required String role,
     required String fungsi,
-    String? idPekerja, // 🔥 NEW: ID Pekerja dari master_workers
+    String? idPekerja,
   }) async {
+    if (!await _checkConnectionAsync('createUser')) {
+      return CreateUserResult(success: false, message: 'Tidak ada koneksi internet. Periksa koneksi Anda.');
+    }
+
     final error = validateRegisterForm(nama: nama, email: email, phone: phone, password: password);
     if (error != null) return CreateUserResult(success: false, message: error);
 
@@ -508,17 +837,15 @@ class AuthService {
         return CreateUserResult(success: false, message: 'Admin belum login');
       }
 
-      // 🔥 UBAH VALIDASI ROLE
       const validRoles = ['superadmin', 'manager', 'pengawas', 'mitra', 'manager_hsse'];
       if (!validRoles.contains(role.toLowerCase())) {
         return CreateUserResult(success: false, message: 'Role tidak valid. Pilih: ${validRoles.join(", ")}');
       }
 
-      // 🔥 UBAH LOGIKA FUNGSI UNTUK MANAGER_HSSE
       final effectiveFungsi = role.toLowerCase() == 'manager_hsse' ? 'hsse' : fungsi;
       
       if (role.toLowerCase() != 'manager_hsse') {
-        if (!['operation', 'lab', 'maintenance', 'hsse', 'gpr', 'bs'].contains(fungsi)) {
+        if (!['operation', 'maintenance', 'hsse', 'gpr', 'bs'].contains(fungsi)) {
           return CreateUserResult(success: false, message: 'Fungsi tidak valid');
         }
       }
@@ -555,12 +882,14 @@ class AuthService {
           options: Firebase.app().options,
         );
         final FirebaseAuth secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
-        final UserCredential credential = await secondaryAuth
-        .createUserWithEmailAndPassword(
-          email: email.trim().toLowerCase(),
-          password: password.trim(),
-        )
-        .timeout(const Duration(seconds: 20));
+        
+        final UserCredential credential = await _retryOperation(
+          () => secondaryAuth.createUserWithEmailAndPassword(
+            email: email.trim().toLowerCase(),
+            password: password.trim(),
+          )
+        );
+        
         newUserUid = credential.user!.uid;
         await secondaryAuth.signOut();
         await secondaryApp.delete();
@@ -582,7 +911,7 @@ class AuthService {
         'role': role.toLowerCase(),
         'fungsi': effectiveFungsi,
         'fungsi_label': _getFungsiLabel(effectiveFungsi),
-        'id_pekerja': idPekerja ?? '', // 🔥 NEW: ID Pekerja
+        'id_pekerja': idPekerja ?? '',
         'status_akun': 'active',
         'is_verified': true,
         'account_locked': false,
@@ -591,7 +920,6 @@ class AuthService {
         'security': {
           'session_id': sessionId,
           'registered_at': now,
-          // 🔥 UBAH SECURITY LEVEL UNTUK MANAGER_HSSE
           'security_level': role.toLowerCase() == 'manager_hsse' ? 'high' : 'standard',
           'created_by': currentAdmin.uid,
           'created_by_email': currentAdmin.email,
@@ -609,12 +937,11 @@ class AuthService {
             'session_id': sessionId,
             'admin_id': currentAdmin.uid,
             'admin_email': currentAdmin.email,
-            'id_pekerja': idPekerja ?? '', // 🔥 Track ID Pekerja
+            'id_pekerja': idPekerja ?? '',
           }
         ],
       };
 
-      // 🔥 UBAH FIELD UNTUK MANAGER_HSSE
       if (role.toLowerCase() == 'manager_hsse') {
         userData.addAll({
           'manager_hsse_level': 'manager',
@@ -659,6 +986,11 @@ class AuthService {
       return CreateUserResult(success: false, message: _getCreateUserErrorMessage(e.code));
     } catch (e) {
       debugPrint('CREATE USER ERROR: $e');
+      
+      if (e.toString().contains('network') || e.toString().contains('SocketException')) {
+        return CreateUserResult(success: false, message: 'Koneksi internet terputus. Silakan coba lagi.');
+      }
+      
       return CreateUserResult(success: false, message: 'Terjadi kesalahan sistem');
     }
   }
@@ -666,12 +998,16 @@ class AuthService {
   // =========================================================
   // GET ALL USERS
   // =========================================================
+  
   Future<List<Map<String, dynamic>>> getAllUsers() async {
     try {
-      final snapshot = await _firestore
+      if (!_checkConnection('getAllUsers')) return [];
+      
+      final snapshot = await _retryOperation(() => _firestore
           .collection('users')
           .orderBy('created_at', descending: true)
-          .get();
+          .get());
+      
       return snapshot.docs
           .map((doc) => {'id': doc.id, ...doc.data()})
           .where((user) => (user['status_akun'] ?? 'active') != 'deleted')
@@ -685,12 +1021,17 @@ class AuthService {
   // =========================================================
   // GET USER BY ID
   // =========================================================
+  
   Future<Map<String, dynamic>?> getUserById(String userId) async {
     try {
+      if (!_checkConnection('getUserById')) return null;
+      
       final doc = await _firestore.collection('users').doc(userId).get();
       if (!doc.exists) return null;
+      
       final data = doc.data()!;
       if ((data['status_akun'] ?? 'active') == 'deleted') return null;
+      
       return {'id': doc.id, ...data};
     } catch (e) {
       debugPrint('GET USER BY ID ERROR: $e');
@@ -699,8 +1040,9 @@ class AuthService {
   }
 
   // =========================================================
-  // UPDATE USER (DENGAN ID PEKERJA & MANAGER_HSSE)
+  // UPDATE USER
   // =========================================================
+  
   Future<UpdateUserResult> updateUser({
     required String userId,
     required String nama,
@@ -709,14 +1051,17 @@ class AuthService {
     String? password,
     required String role,
     required String fungsi,
-    String? idPekerja, // 🔥 NEW: ID Pekerja
+    String? idPekerja,
     required String sessionId,
   }) async {
     try {
+      if (!await _checkConnectionAsync('updateUser')) {
+        return UpdateUserResult(success: false, message: 'Tidak ada koneksi internet');
+      }
+      
       final currentAdmin = _auth.currentUser;
       if (currentAdmin == null) return UpdateUserResult(success: false, message: 'Admin belum login');
 
-      // 🔥 UBAH VALIDASI ROLE
       const validRoles = ['superadmin', 'manager', 'pengawas', 'mitra', 'manager_hsse'];
       if (!validRoles.contains(role.toLowerCase())) {
         return UpdateUserResult(success: false, message: 'Role tidak valid');
@@ -725,6 +1070,7 @@ class AuthService {
       final userRef = _firestore.collection('users').doc(userId);
       final existingDoc = await userRef.get();
       if (!existingDoc.exists) return UpdateUserResult(success: false, message: 'User tidak ditemukan');
+      
       final currentData = existingDoc.data()!;
       
       if ((currentData['status_akun'] ?? 'active') == 'deleted') {
@@ -774,7 +1120,6 @@ class AuthService {
         });
       }
 
-      // 🔥 UBAH LOGIKA UPDATE ROLE
       if (role.isNotEmpty && role.toLowerCase() != currentData['role']) {
         final oldRole = currentData['role'];
         final newRole = role.toLowerCase();
@@ -784,7 +1129,6 @@ class AuthService {
           updateData['fungsi'] = 'hsse';
           updateData['fungsi_label'] = 'HSSE';
           updateData['security.security_level'] = 'high';
-          // 🔥 UBAH FIELD
           updateData['manager_hsse_level'] = 'manager';
           updateData['manager_hsse_department'] = 'HSSE';
           updateData['manager_hsse_authority'] = {
@@ -796,7 +1140,6 @@ class AuthService {
           updateData['manager_hsse_joined_date'] = Timestamp.now();
         }
         
-        // 🔥 UBAH PEMBERSIHAN FIELD SAAT ROLE DIGANTI
         if (oldRole == 'manager_hsse' && newRole != 'manager_hsse') {
           updateData['manager_hsse_level'] = FieldValue.delete();
           updateData['manager_hsse_department'] = FieldValue.delete();
@@ -813,7 +1156,6 @@ class AuthService {
         updateData['fungsi_label'] = _getFungsiLabel(fungsi);
       }
 
-      // 🔥 NEW: Update ID Pekerja
       if (idPekerja != null) {
         updateData['id_pekerja'] = idPekerja;
       }
@@ -858,11 +1200,16 @@ class AuthService {
   // =========================================================
   // DELETE USER
   // =========================================================
+  
   Future<DeleteUserResult> deleteUser({
     required String userId,
     required String sessionId,
   }) async {
     try {
+      if (!await _checkConnectionAsync('deleteUser')) {
+        return DeleteUserResult(success: false, message: 'Tidak ada koneksi internet');
+      }
+      
       final currentAdmin = _auth.currentUser;
       if (currentAdmin == null) return DeleteUserResult(success: false, message: 'Admin belum login');
 
@@ -922,12 +1269,17 @@ class AuthService {
   // =========================================================
   // TOGGLE USER STATUS
   // =========================================================
+  
   Future<ToggleStatusResult> toggleUserStatus({
     required String userId,
     required String newStatus,
     required String sessionId,
   }) async {
     try {
+      if (!await _checkConnectionAsync('toggleUserStatus')) {
+        return ToggleStatusResult(success: false, message: 'Tidak ada koneksi internet');
+      }
+      
       final currentAdmin = _auth.currentUser;
       if (currentAdmin == null) return ToggleStatusResult(success: false, message: 'Admin belum login');
       
@@ -983,12 +1335,17 @@ class AuthService {
   // =========================================================
   // BULK STATUS CHANGE
   // =========================================================
+  
   Future<BulkStatusResult> bulkStatusChange({
     required List<String> userIds,
     required String newStatus,
     required String sessionId,
   }) async {
     try {
+      if (!await _checkConnectionAsync('bulkStatusChange')) {
+        return BulkStatusResult(success: false, message: 'Tidak ada koneksi internet');
+      }
+      
       final currentAdmin = _auth.currentUser;
       if (currentAdmin == null) return BulkStatusResult(success: false, message: 'Admin belum login');
       if (userIds.isEmpty) return BulkStatusResult(success: false, message: 'Tidak ada user yang dipilih');
@@ -1035,11 +1392,16 @@ class AuthService {
   // =========================================================
   // SEND PASSWORD RESET EMAIL (ADMIN)
   // =========================================================
+  
   Future<ResetPasswordResult> adminResetPassword({
     required String email,
     required String sessionId,
   }) async {
     try {
+      if (!await _checkConnectionAsync('adminResetPassword')) {
+        return ResetPasswordResult(success: false, errorMessage: 'Tidak ada koneksi internet');
+      }
+      
       final currentAdmin = _auth.currentUser;
       if (currentAdmin == null) return ResetPasswordResult(success: false, errorMessage: 'Admin belum login');
       
@@ -1051,7 +1413,6 @@ class AuthService {
       if (query.docs.isEmpty) return ResetPasswordResult(success: false, errorMessage: 'Email tidak ditemukan');
       
       final uid = query.docs.first.id;
-      final userData = query.docs.first.data();
       await _auth.sendPasswordResetEmail(email: email.trim());
       
       await _firestore.collection('users').doc(uid).update({
@@ -1072,7 +1433,7 @@ class AuthService {
         'target_user_email': email,
         'session_id': sessionId,
         'timestamp': FieldValue.serverTimestamp(),
-        'description': 'Admin mereset password user: ${userData['nama_lengkap']}',
+        'description': 'Admin mereset password user: ${query.docs.first.data()['nama_lengkap']}',
       });
       
       return ResetPasswordResult(success: true, errorMessage: '');
@@ -1087,11 +1448,16 @@ class AuthService {
   // =========================================================
   // RESET PASSWORD (USER SELF SERVICE)
   // =========================================================
+  
   Future<ResetPasswordResult> sendResetPasswordEmail({
     required String email,
     required String sessionId,
   }) async {
     try {
+      if (!await _checkConnectionAsync('sendResetPasswordEmail')) {
+        return ResetPasswordResult(success: false, errorMessage: 'Tidak ada koneksi internet');
+      }
+      
       await _auth.sendPasswordResetEmail(email: email.trim());
       await _addResetAuditTrail(action: 'reset_password_request', email: email, sessionId: sessionId);
       return ResetPasswordResult(success: true);
@@ -1113,6 +1479,7 @@ class AuthService {
   // =========================================================
   // REMEMBER ME
   // =========================================================
+  
   Future<RememberMeData> loadRememberMe() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -1146,8 +1513,9 @@ class AuthService {
   }
 
   // =========================================================
-  // 🔥 MANAGER HSSE METHODS
+  // MANAGER HSSE METHODS
   // =========================================================
+  
   Future<bool> isManagerHsse() async {
     final role = await getUserRole();
     return role == 'manager_hsse';
@@ -1155,9 +1523,11 @@ class AuthService {
 
   Future<List<Map<String, dynamic>>> getActiveManagerHsse() async {
     try {
+      if (!_checkConnection('getActiveManagerHsse')) return [];
+      
       final snapshot = await _firestore
           .collection('users')
-          .where('role', isEqualTo: 'manager_hsse') // 🔥 UBAH
+          .where('role', isEqualTo: 'manager_hsse')
           .where('status_akun', isEqualTo: 'active')
           .get();
       return snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
@@ -1172,11 +1542,12 @@ class AuthService {
     required Map<String, bool> authority,
   }) async {
     try {
+      if (!_checkConnection('updateManagerHsseAuthority')) return false;
+      
       final userDoc = await _firestore.collection('users').doc(userId).get();
       if (!userDoc.exists) return false;
       final role = userDoc.data()?['role'] ?? '';
       if (role != 'manager_hsse') return false;
-      // 🔥 UBAH NAMA FIELD
       await _firestore.collection('users').doc(userId).update({
         'manager_hsse_authority': authority,
         'updated_at': FieldValue.serverTimestamp(),
@@ -1193,7 +1564,8 @@ class AuthService {
     required String certification,
   }) async {
     try {
-      // 🔥 UBAH NAMA FIELD
+      if (!_checkConnection('addManagerHsseCertification')) return false;
+      
       await _firestore.collection('users').doc(userId).update({
         'manager_hsse_certification': FieldValue.arrayUnion([certification]),
         'updated_at': FieldValue.serverTimestamp(),
@@ -1208,41 +1580,116 @@ class AuthService {
   // =========================================================
   // DASHBOARD
   // =========================================================
+  
   Widget getDashboardForRole(String role) {
     switch (role.toLowerCase()) {
       case 'superadmin':     return const SuperAdminDashboard();
       case 'manager':        return const ManagerDashboard();
       case 'pengawas':       return const PengawasDashboard();
       case 'mitra':          return const MitraDashboard();
-      case 'manager_hsse':   return const ManagerDashboard(); // 🔥 UBAH
+      case 'manager_hsse':   return const ManagerDashboard();
       default:               return const WelcomeScreen();
     }
   }
 
   // =========================================================
-  // SIGN OUT
+  // 🔥 SIGN OUT - FULLY FIXED (ANTI INFINITE LOOP)
   // =========================================================
+  
   Future<void> signOut() async {
+    // 🔥 GUARD: Cegah double call yang menyebabkan infinite loop
+    if (_isSigningOut) {
+      debugPrint('⚠️ signOut already in progress, ignoring duplicate call');
+      return;
+    }
+    
+    _isSigningOut = true;
+    debugPrint('🔄 Starting signOut process...');
+    
     try {
+      // 1. Update status offline di Firestore
       final user = _auth.currentUser;
       if (user != null) {
-        await _firestore.collection('users').doc(user.uid).update({
-          'isOnline': false,
-          'last_active': FieldValue.serverTimestamp(),
-        });
+        try {
+          await _firestore.collection('users').doc(user.uid).update({
+            'isOnline': false,
+            'last_active': FieldValue.serverTimestamp(),
+          });
+        } catch (e) {
+          debugPrint('⚠️ Update online status error: $e');
+        }
       }
     } catch (e) {
-      debugPrint('Update online status error: $e');
+      debugPrint('⚠️ Update online status outer error: $e');
     }
-    await _auth.signOut();
+    
+    // 2. Hapus cache lokal
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('cached_role');
+      await prefs.remove('cached_nama');
+      await prefs.remove('cached_user_data');
+      debugPrint('🧹 Local cache cleared');
+    } catch (e) {
+      debugPrint('⚠️ Clear cache error: $e');
+    }
+    
+    // 3. Cancel stream subscriptions dulu sebelum signOut
+    //    supaya listener tidak trigger lagi
+    _connectionSubscription?.cancel();
+    _connectionSubscription = null;
+    _authSubscription?.cancel();
+    _authSubscription = null;
+    debugPrint('🔌 Stream subscriptions cancelled');
+    
+    // 4. Sign out dari Firebase Auth
+    try {
+      await _auth.signOut();
+      debugPrint('✅ User signed out successfully');
+    } catch (e) {
+      debugPrint('❌ Firebase signOut error: $e');
+    }
+    
+    // 5. Reset flag
+    _isSigningOut = false;
   }
 
   // =========================================================
-  // 🔥 HELPER
+  // CLEANUP
   // =========================================================
+  
+  Future<void> cleanupOrphanPhoneMappings() async {
+    if (!_checkConnection('cleanupOrphanPhoneMappings')) return;
+    
+    try {
+      final mappings = await _firestore.collection('phone_mappings').get();
+      for (var doc in mappings.docs) {
+        final userId = doc.data()['user_id'];
+        if (userId == null) {
+          await doc.reference.delete();
+          continue;
+        }
+        
+        final userDoc = await _firestore.collection('users').doc(userId).get();
+        if (!userDoc.exists || (userDoc.data()?['status_akun'] ?? '') == 'deleted') {
+          await doc.reference.delete();
+          debugPrint('🧹 Cleaned orphan phone mapping: ${doc.id}');
+        }
+      }
+    } catch (e) {
+      debugPrint('Cleanup error: $e');
+    }
+  }
+
+  // =========================================================
+  // HELPER
+  // =========================================================
+  
   String generateSessionId() {
-    final random = Random();
-    return 'session_${DateTime.now().millisecondsSinceEpoch}_${random.nextInt(999999)}';
+    final random = Random.secure();
+    final timestamp = DateTime.now().microsecondsSinceEpoch;
+    final randomInt = random.nextInt(999999);
+    return 'session_${timestamp}_${randomInt.toString().padLeft(6, '0')}';
   }
 
   String _hashData(String value) {
@@ -1250,7 +1697,7 @@ class AuthService {
   }
 
   String _cleanPhone(String phone) {
-    return phone.replaceAll(RegExp(r'[^\d]'), '');
+    return phone.toString().replaceAll(RegExp(r'[^\d]'), '');
   }
 
   String _getFungsiLabel(String fungsi) {
@@ -1260,7 +1707,7 @@ class AuthService {
       case 'maintenance': return 'Maintenance';
       case 'hsse':        return 'HSSE';
       case 'gpr':         return 'GPR';
-      case 'bs':          return 'BS';
+      case 'bs':          return 'Business Support';
       default:            return fungsi.toUpperCase();
     }
   }
@@ -1271,14 +1718,23 @@ class AuthService {
       case 'manager':        return 'MANAGER';
       case 'pengawas':       return 'PENGAWAS';
       case 'mitra':          return 'MITRA';
-      case 'manager_hsse':   return 'MANAGER HSSE'; // 🔥 UBAH
+      case 'manager_hsse':   return 'MANAGER HSSE';
       default:               return role.toUpperCase();
     }
   }
 
   Exception _handleFirestoreError(dynamic e) {
-    if (e.toString().contains('permission-denied')) return Exception('Anda tidak memiliki izin untuk mengakses data');
-    if (e.toString().contains('network')) return Exception('Gagal terhubung ke server');
+    if (e is FirebaseException) {
+      switch (e.code) {
+        case 'permission-denied': return Exception('Anda tidak memiliki izin untuk mengakses data');
+        case 'unavailable': return Exception('Layanan sedang tidak tersedia. Coba lagi nanti.');
+        case 'deadline-exceeded': return Exception('Koneksi timeout. Periksa koneksi Anda.');
+        default: return Exception('Error: ${e.message}');
+      }
+    }
+    if (e.toString().contains('network') || e.toString().contains('SocketException')) {
+      return Exception('Gagal terhubung ke server. Periksa koneksi internet.');
+    }
     return Exception(e.toString());
   }
 
@@ -1315,8 +1771,9 @@ class AuthService {
   }
 
   // =========================================================
-  // 🔥 ERROR MESSAGES
+  // ERROR MESSAGES
   // =========================================================
+  
   String _getFirebaseErrorMessage(String code) {
     switch (code) {
       case 'invalid-email':        return 'Format email tidak valid.\nContoh: nama@email.com';
@@ -1327,6 +1784,7 @@ class AuthService {
       case 'too-many-requests':    return 'Terlalu banyak percobaan.\nCoba lagi dalam 1 menit.';
       case 'network-request-failed': return 'Gagal terhubung ke server.\nPeriksa koneksi internet.';
       case 'operation-not-allowed':  return 'Login belum diaktifkan.\nHubungi admin.';
+      case 'unavailable':          return 'Layanan sedang tidak tersedia.\nCoba lagi nanti.';
       default:                     return 'Login gagal (kode: $code).\nSilakan coba lagi.';
     }
   }
@@ -1335,8 +1793,9 @@ class AuthService {
     switch (code) {
       case 'email-already-in-use': return 'Email sudah terdaftar.\nSilakan login atau gunakan email lain.';
       case 'invalid-email':        return 'Format email tidak valid.\nContoh: nama@email.com';
-      case 'weak-password':        return 'Password terlalu lemah.\nGunakan minimal 6 karakter.';
+      case 'weak-password':        return 'Password terlalu lemah.\nGunakan minimal 8 karakter dengan kombinasi huruf dan angka.';
       case 'operation-not-allowed': return 'Pendaftaran belum diaktifkan.\nHubungi admin.';
+      case 'network-request-failed': return 'Gagal terhubung ke server.\nPeriksa koneksi internet.';
       default:                     return 'Pendaftaran gagal. Silakan coba lagi.';
     }
   }
@@ -1354,7 +1813,7 @@ class AuthService {
     switch (code) {
       case 'email-already-in-use': return 'Email sudah digunakan.\nGunakan email lain.';
       case 'invalid-email':        return 'Format email tidak valid.';
-      case 'weak-password':        return 'Password terlalu lemah.\nMinimal 6 karakter.';
+      case 'weak-password':        return 'Password terlalu lemah.\nMinimal 8 karakter dengan kombinasi huruf dan angka.';
       case 'operation-not-allowed': return 'Pendaftaran belum diaktifkan.';
       default:                     return 'Gagal membuat user.';
     }
@@ -1384,9 +1843,9 @@ class AuthService {
   }
 }
 
-// =========================================================
+// ═══════════════════════════════════════════════════════════════
 // DATA CLASSES
-// =========================================================
+// ═══════════════════════════════════════════════════════════════
 
 class LoginResult {
   final bool success;

@@ -54,14 +54,14 @@ class _SystemLogsScreenState extends State<SystemLogsScreen>
   
   // Log categories
   final Map<String, String> _logCategories = {
-    'all': 'Semua Log',
-    'system': 'System Logs',
-    'user': 'User Logs',
-    'overtime': 'Lembur Logs',
-    'absensi': 'Absensi Logs',
-    'broadcast': 'Broadcast Logs',
-    'login': 'Login/Logout Logs',
-    'audit': 'Audit Trail',
+    'all': 'Semua',
+    'system': 'Sistem',
+    'user': 'User',
+    'overtime': 'Lembur',
+    'absensi': 'Absensi',
+    'broadcast': 'Broadcast',
+    'login': 'Login',
+    'audit': 'Audit',
   };
   
   // Filter states
@@ -377,11 +377,10 @@ class _SystemLogsScreenState extends State<SystemLogsScreen>
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(excelFile.encode()!);
       
-      // FIX: Gunakan SharePlus.instance.share() sebagai pengganti Share.shareXFiles
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(file.path)],
-          text: 'Data System Logs',
+          text: 'Data Log Sistem',
         ),
       );
       
@@ -418,7 +417,7 @@ class _SystemLogsScreenState extends State<SystemLogsScreen>
               pw.Container(
                 alignment: pw.Alignment.center,
                 child: pw.Text(
-                  'Laporan System Logs',
+                  'Laporan Log Sistem',
                   style: pw.TextStyle(font: boldTtf, fontSize: 24),
                 ),
               ),
@@ -490,11 +489,10 @@ class _SystemLogsScreenState extends State<SystemLogsScreen>
       final file = File('${dir.path}/$fileName');
       await file.writeAsBytes(await pdf.save());
       
-      // FIX: Gunakan SharePlus.instance.share() sebagai pengganti Share.shareXFiles
       await SharePlus.instance.share(
         ShareParams(
           files: [XFile(file.path)],
-          text: 'Laporan System Logs',
+          text: 'Laporan Log Sistem',
         ),
       );
       
@@ -557,163 +555,479 @@ class _SystemLogsScreenState extends State<SystemLogsScreen>
   Widget build(BuildContext context) {
     if (!isSuperadmin && !isLoading) {
       return Scaffold(
-        appBar: AppBar(title: const Text('System Logs')),
+        appBar: AppBar(title: const Text('Log Sistem')),
         body: const Center(child: Text('Akses ditolak. Hanya Superadmin.')),
       );
     }
     
     return Scaffold(
       backgroundColor: isDarkMode ? const Color(0xFF1A1A2E) : const Color(0xFFF5F9FF),
-      appBar: LogAppBar(
-        primaryBlue: primaryBlue,
-        onRefresh: _refreshData,
-        onExportExcel: _exportToExcel,
-        onExportPDF: _exportToPDF,
-        onClearOldLogs: _clearOldLogs,
-      ),
+      appBar: _buildAppBar(),
       body: isLoading
           ? const LogLoadingIndicator(accentBlue: Color(0xFF1976D2))
           : RefreshIndicator(
               onRefresh: _refreshData,
               color: accentBlue,
               backgroundColor: Colors.white,
-              child: CustomScrollView(
-                controller: _scrollController,
-                physics: const AlwaysScrollableScrollPhysics(),
-                slivers: [
-                  SliverToBoxAdapter(
-                    child: FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: Column(
-                        children: [
-                          LogHeader(
-                            primaryBlue: primaryBlue,
-                            totalLogs: _filteredLogs.length,
+              // 🔥 PERBAIKAN: Gunakan SafeArea + LayoutBuilder untuk menghindari overflow
+              child: SafeArea(
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    return CustomScrollView(
+                      controller: _scrollController,
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      slivers: [
+                        // 🔥 PERBAIKAN: Gunakan SliverToBoxAdapter dengan batasan ukuran
+                        SliverToBoxAdapter(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxHeight: constraints.maxHeight * 0.5, // Maks 50% tinggi layar
+                            ),
+                            child: FadeTransition(
+                              opacity: _fadeAnimation,
+                              child: SingleChildScrollView(
+                                physics: const BouncingScrollPhysics(),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    LogHeader(
+                                      primaryBlue: primaryBlue,
+                                      totalLogs: _filteredLogs.length,
+                                    ),
+                                    // 🔥 PERBAIKAN: Category tabs dengan padding lebih kecil
+                                    _buildCategoryTabs(),
+                                    // 🔥 PERBAIKAN: Filter bar compact
+                                    _buildFilterBarCompact(),
+                                    // 🔥 PERBAIKAN: Search bar compact
+                                    _buildSearchBarCompact(),
+                                  ],
+                                ),
+                              ),
+                            ),
                           ),
-                          LogCategoryTabs(
-                            categories: _logCategories,
-                            selectedCategory: _selectedCategory,
-                            logStats: _logStats,
-                            primaryBlue: primaryBlue,
-                            onCategorySelected: (category) {
-                              setState(() {
-                                _selectedCategory = category;
-                                _applyFilters();
-                              });
-                            },
-                          ),
-                          LogFilterBar(
-                            selectedLevel: _selectedLevel,
-                            selectedUser: _selectedUser,
-                            selectedDateRange: _selectedDateRange,
-                            topUsers: _topUsers,
-                            accentBlue: accentBlue,
-                            onLevelChanged: (level) {
-                              setState(() {
-                                _selectedLevel = level;
-                                _applyFilters();
-                              });
-                            },
-                            onUserChanged: (user) {
-                              setState(() {
-                                _selectedUser = user;
-                                _applyFilters();
-                              });
-                            },
-                            onDateRangeCleared: () {
-                              setState(() => _selectedDateRange = null);
-                              _refreshData();
-                            },
-                          ),
-                          LogSearchBar(
-                            controller: _searchController,
-                            searchQuery: _searchQuery,
-                            onSearchChanged: (query) {
-                              _searchDebounce?.cancel();
-                              _searchDebounce = Timer(const Duration(milliseconds: 500), () {
-                                setState(() {
-                                  _searchQuery = query;
-                                  _applyFilters();
-                                });
-                              });
-                            },
-                            onSearchCleared: () {
-                              _searchController.clear();
-                              setState(() {
-                                _searchQuery = '';
-                                _applyFilters();
-                              });
-                            },
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  if (_filteredLogs.isEmpty)
-                    SliverToBoxAdapter(
-                      child: LogEmptyState(
-                        accentBlue: accentBlue,
-                        onRefresh: _refreshData,
-                      ),
-                    )
-                  else if (isGridView)
-                    SliverPadding(
-                      padding: const EdgeInsets.all(16),
-                      sliver: SliverGrid(
-                        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          crossAxisSpacing: 12,
-                          mainAxisSpacing: 12,
-                          childAspectRatio: 0.9,
                         ),
-                        delegate: SliverChildBuilderDelegate(
-                          (context, index) {
-                            final log = _filteredLogs[index];
-                            // FIX: Bungkus dalam closure VoidCallback
-                            return LogGridCard(
-                              log: log,
-                              getLevelFromType: _getLevelFromType,
-                              onTap: () => _showLogDetail(log),
-                            );
-                          },
-                          childCount: _filteredLogs.length,
+                        // 🔥 PERBAIKAN: Empty state atau list log
+                        if (_filteredLogs.isEmpty)
+                          SliverToBoxAdapter(
+                            child: SizedBox(
+                              height: constraints.maxHeight * 0.4,
+                              child: LogEmptyState(
+                                accentBlue: accentBlue,
+                                onRefresh: _refreshData,
+                              ),
+                            ),
+                          )
+                        else if (isGridView)
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 80), // 🔥 Bottom padding untuk FAB
+                            sliver: SliverGrid(
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 2,
+                                crossAxisSpacing: 8,
+                                mainAxisSpacing: 8,
+                                childAspectRatio: 0.85,
+                              ),
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  final log = _filteredLogs[index];
+                                  return LogGridCard(
+                                    log: log,
+                                    getLevelFromType: _getLevelFromType,
+                                    onTap: () => _showLogDetail(log),
+                                  );
+                                },
+                                childCount: _filteredLogs.length,
+                              ),
+                            ),
+                          )
+                        else
+                          SliverPadding(
+                            padding: const EdgeInsets.fromLTRB(12, 8, 12, 80), // 🔥 Bottom padding untuk FAB
+                            sliver: SliverList(
+                              delegate: SliverChildBuilderDelegate(
+                                (context, index) {
+                                  final log = _filteredLogs[index];
+                                  return LogCard(
+                                    log: log,
+                                    getLevelFromType: _getLevelFromType,
+                                    getCategoryFromType: _getCategoryFromType,
+                                    primaryBlue: primaryBlue,
+                                    onTap: () => _showLogDetail(log),
+                                  );
+                                },
+                                childCount: _filteredLogs.length,
+                              ),
+                            ),
+                          ),
+                        // 🔥 Loading more indicator
+                        if (_isLoadingMore)
+                          const SliverToBoxAdapter(
+                            child: Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                ),
+                              ),
+                            ),
+                          ),
+                        // 🔥 PERBAIKAN: Extra bottom padding untuk FAB
+                        const SliverToBoxAdapter(
+                          child: SizedBox(height: 20),
                         ),
-                      ),
-                    )
-                  else
-                    SliverList(
-                      delegate: SliverChildBuilderDelegate(
-                        (context, index) {
-                          final log = _filteredLogs[index];
-                          // FIX: Bungkus dalam closure VoidCallback
-                          return LogCard(
-                            log: log,
-                            getLevelFromType: _getLevelFromType,
-                            getCategoryFromType: _getCategoryFromType,
-                            primaryBlue: primaryBlue,
-                            onTap: () => _showLogDetail(log),
-                          );
-                        },
-                        childCount: _filteredLogs.length,
-                      ),
-                    ),
-                  if (_isLoadingMore)
-                    const SliverToBoxAdapter(
-                      child: Padding(
-                        padding: EdgeInsets.all(16),
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
-                    ),
+                      ],
+                    );
+                  },
+                ),
+              ),
+            ),
+      floatingActionButton: FloatingActionButton.small( // 🔥 PERBAIKAN: Gunakan small FAB
+        onPressed: _showDateRangePicker,
+        backgroundColor: accentBlue,
+        child: const Icon(Icons.date_range, color: Colors.white, size: 20),
+      ),
+      bottomNavigationBar: SuperAdminBottomNav(
+        currentIndex: 2,
+      ),
+    );
+  }
+  
+  // 🔥 PERBAIKAN: AppBar yang lebih compact
+  PreferredSizeWidget _buildAppBar() {
+    return AppBar(
+      backgroundColor: primaryBlue,
+      elevation: 0,
+      title: Text(
+        'Log Sistem',
+        style: GoogleFonts.poppins(
+          fontSize: 17,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      actions: [
+        // 🔥 PERBAIKAN: PopupMenu sebagai pengganti multiple icon buttons
+        PopupMenuButton<String>(
+          icon: const Icon(Icons.more_vert, color: Colors.white, size: 22),
+          offset: const Offset(0, 45),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          onSelected: (value) {
+            switch (value) {
+              case 'refresh':
+                _refreshData();
+                break;
+              case 'excel':
+                _exportToExcel();
+                break;
+              case 'pdf':
+                _exportToPDF();
+                break;
+              case 'clear':
+                _clearOldLogs();
+                break;
+            }
+          },
+          itemBuilder: (context) => [
+            PopupMenuItem(
+              value: 'refresh',
+              child: Row(
+                children: [
+                  Icon(Icons.refresh, size: 20, color: Colors.grey[700]),
+                  const SizedBox(width: 10),
+                  Text('Refresh', style: GoogleFonts.poppins(fontSize: 13)),
                 ],
               ),
             ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showDateRangePicker,
-        backgroundColor: accentBlue,
-        child: const Icon(Icons.date_range, color: Colors.white),
+            PopupMenuItem(
+              value: 'excel',
+              child: Row(
+                children: [
+                  Icon(Icons.table_chart, size: 20, color: Colors.green[700]),
+                  const SizedBox(width: 10),
+                  Text('Export Excel', style: GoogleFonts.poppins(fontSize: 13)),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'pdf',
+              child: Row(
+                children: [
+                  Icon(Icons.picture_as_pdf, size: 20, color: Colors.red[700]),
+                  const SizedBox(width: 10),
+                  Text('Export PDF', style: GoogleFonts.poppins(fontSize: 13)),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'clear',
+              child: Row(
+                children: [
+                  Icon(Icons.delete_sweep, size: 20, color: Colors.orange[700]),
+                  const SizedBox(width: 10),
+                  Text('Hapus Log Lama', style: GoogleFonts.poppins(fontSize: 13)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+  
+  // 🔥 PERBAIKAN: Category tabs yang lebih compact untuk mobile
+  Widget _buildCategoryTabs() {
+    return Container(
+      height: 48,
+      margin: const EdgeInsets.fromLTRB(8, 6, 8, 0),
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        physics: const BouncingScrollPhysics(),
+        padding: const EdgeInsets.symmetric(horizontal: 4),
+        itemCount: _logCategories.length,
+        separatorBuilder: (_, __) => const SizedBox(width: 4),
+        itemBuilder: (context, index) {
+          final entry = _logCategories.entries.elementAt(index);
+          final isSelected = _selectedCategory == entry.key;
+          final count = _logStats[entry.key] ?? 0;
+          
+          return GestureDetector(
+            onTap: () {
+              setState(() {
+                _selectedCategory = entry.key;
+                _applyFilters();
+              });
+            },
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: isSelected ? primaryBlue : Colors.white,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: isSelected ? primaryBlue : Colors.grey.shade300,
+                ),
+                boxShadow: isSelected
+                    ? [BoxShadow(color: primaryBlue.withValues(alpha: 0.3), blurRadius: 6, offset: const Offset(0, 2))]
+                    : null,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    entry.value,
+                    style: GoogleFonts.poppins(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? Colors.white : Colors.grey.shade700,
+                    ),
+                  ),
+                  if (count > 0) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: isSelected ? Colors.white.withValues(alpha: 0.3) : primaryBlue.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        count > 99 ? '99+' : count.toString(),
+                        style: GoogleFonts.poppins(
+                          fontSize: 9,
+                          fontWeight: FontWeight.w700,
+                          color: isSelected ? Colors.white : primaryBlue,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          );
+        },
       ),
-      bottomNavigationBar: SuperAdminBottomNav(
-        currentIndex: 2, // Index 2 untuk Logs
+    );
+  }
+  
+  // 🔥 PERBAIKAN: Filter bar compact
+  Widget _buildFilterBarCompact() {
+    return Container(
+      height: 36,
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+      child: Row(
+        children: [
+          // Level filter
+          Expanded(
+            child: _buildCompactDropdown(
+              value: _selectedLevel,
+              hint: 'Level',
+              items: {
+                'all': 'Semua Level',
+                'info': 'Info',
+                'success': 'Success',
+                'warning': 'Warning',
+                'error': 'Error',
+              },
+              onChanged: (value) {
+                setState(() {
+                  _selectedLevel = value!;
+                  _applyFilters();
+                });
+              },
+            ),
+          ),
+          const SizedBox(width: 6),
+          // User filter
+          Expanded(
+            child: _buildCompactDropdown(
+              value: _selectedUser,
+              hint: 'User',
+              items: {
+                'all': 'Semua User',
+                ...Map.fromEntries(
+                  _topUsers.entries.take(10).map((e) => MapEntry(e.key, e.key))
+                ),
+              },
+              onChanged: (value) {
+                setState(() {
+                  _selectedUser = value!;
+                  _applyFilters();
+                });
+              },
+            ),
+          ),
+          if (_selectedDateRange != null) ...[
+            const SizedBox(width: 6),
+            GestureDetector(
+              onTap: () {
+                setState(() => _selectedDateRange = null);
+                _refreshData();
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                height: 32,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.red.shade200),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.close, size: 14, color: Colors.red.shade400),
+                    const SizedBox(width: 2),
+                    Text(
+                      'Reset',
+                      style: GoogleFonts.poppins(
+                        fontSize: 10,
+                        color: Colors.red.shade400,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+  
+  // 🔥 PERBAIKAN: Dropdown compact
+  Widget _buildCompactDropdown({
+    required String value,
+    required String hint,
+    required Map<String, String> items,
+    required Function(String?) onChanged,
+  }) {
+    return Container(
+      height: 32,
+      padding: const EdgeInsets.symmetric(horizontal: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: DropdownButtonHideUnderline(
+        child: DropdownButton<String>(
+          value: items.containsKey(value) ? value : 'all',
+          isExpanded: true,
+          isDense: true,
+          icon: Icon(Icons.arrow_drop_down, size: 18, color: Colors.grey.shade600),
+          style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey.shade800),
+          dropdownColor: Colors.white,
+          borderRadius: BorderRadius.circular(8),
+          items: items.entries.map((entry) {
+            return DropdownMenuItem(
+              value: entry.key,
+              child: Text(
+                entry.value,
+                style: GoogleFonts.poppins(fontSize: 11),
+                overflow: TextOverflow.ellipsis,
+              ),
+            );
+          }).toList(),
+          onChanged: onChanged,
+        ),
+      ),
+    );
+  }
+  
+  // 🔥 PERBAIKAN: Search bar compact
+  Widget _buildSearchBarCompact() {
+    return Container(
+      height: 40,
+      margin: const EdgeInsets.fromLTRB(12, 6, 12, 4),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(10),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: TextField(
+        controller: _searchController,
+        onChanged: (query) {
+          _searchDebounce?.cancel();
+          _searchDebounce = Timer(const Duration(milliseconds: 500), () {
+            setState(() {
+              _searchQuery = query;
+              _applyFilters();
+            });
+          });
+        },
+        style: GoogleFonts.poppins(fontSize: 13),
+        decoration: InputDecoration(
+          hintText: 'Cari log...',
+          hintStyle: GoogleFonts.poppins(fontSize: 12, color: Colors.grey.shade400),
+          prefixIcon: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Icon(Icons.search, color: Colors.grey.shade500, size: 18),
+          ),
+          suffixIcon: _searchQuery.isNotEmpty
+              ? GestureDetector(
+                  onTap: () {
+                    _searchController.clear();
+                    setState(() {
+                      _searchQuery = '';
+                      _applyFilters();
+                    });
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.all(10),
+                    child: Icon(Icons.close, color: Colors.grey.shade500, size: 18),
+                  ),
+                )
+              : null,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          border: InputBorder.none,
+        ),
       ),
     );
   }
@@ -751,13 +1065,14 @@ class _SystemLogsScreenState extends State<SystemLogsScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
-        const Icon(Icons.check_circle, color: Colors.white),
+        const Icon(Icons.check_circle, color: Colors.white, size: 18),
         const SizedBox(width: 8),
-        Expanded(child: Text(message)),
+        Expanded(child: Text(message, style: GoogleFonts.poppins(fontSize: 12))),
       ]),
       backgroundColor: Colors.green,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      duration: const Duration(seconds: 2),
     ));
   }
   
@@ -765,13 +1080,14 @@ class _SystemLogsScreenState extends State<SystemLogsScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
-        const Icon(Icons.error, color: Colors.white),
+        const Icon(Icons.error, color: Colors.white, size: 18),
         const SizedBox(width: 8),
-        Expanded(child: Text(message)),
+        Expanded(child: Text(message, style: GoogleFonts.poppins(fontSize: 12))),
       ]),
       backgroundColor: Colors.red,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      duration: const Duration(seconds: 2),
     ));
   }
   
@@ -779,13 +1095,14 @@ class _SystemLogsScreenState extends State<SystemLogsScreen>
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Row(children: [
-        const Icon(Icons.info, color: Colors.white),
+        const Icon(Icons.info, color: Colors.white, size: 18),
         const SizedBox(width: 8),
-        Expanded(child: Text(message)),
+        Expanded(child: Text(message, style: GoogleFonts.poppins(fontSize: 12))),
       ]),
       backgroundColor: accentBlue,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      duration: const Duration(seconds: 2),
     ));
   }
 }

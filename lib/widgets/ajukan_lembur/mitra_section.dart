@@ -34,8 +34,6 @@ class MitraSection extends StatelessWidget {
     switch (fungsi.toLowerCase()) {
       case 'operation':
         return const Color(0xFF1976D2);
-      case 'lab':
-        return const Color(0xFF4CAF50);
       case 'maintenance':
         return const Color(0xFFFF9800);
       case 'hsse':
@@ -53,8 +51,6 @@ class MitraSection extends StatelessWidget {
     switch (fungsi.toLowerCase()) {
       case 'operation':
         return Icons.settings_rounded;
-      case 'lab':
-        return Icons.science_rounded;
       case 'maintenance':
         return Icons.build_rounded;
       case 'hsse':

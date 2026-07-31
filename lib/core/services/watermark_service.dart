@@ -1,22 +1,3 @@
-// lib/core/services/watermark_service.dart
-// ============================================================================
-// WATERMARK SERVICE - COMPLETE VERSION
-// ============================================================================
-// Fitur:
-// ✅ Watermark dengan data lengkap (koordinat, waktu, nama, alamat)
-// ✅ Header gold + detail putih untuk tampilan profesional
-// ✅ Timestamp di pojok kanan atas
-// ✅ Identifier "PGE" di pojok kiri atas
-// ✅ Auto-resize gambar besar (max 1920px)
-// ✅ Format alamat otomatis (potong jika terlalu panjang)
-// ✅ Kualitas JPEG optimal (92%)
-// ✅ Batch processing untuk multiple images
-// ✅ Validasi file sebelum proses
-// ✅ Error handling lengkap dengan logging
-// ✅ Singleton pattern
-// ✅ Support custom label
-// ============================================================================
-
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -403,11 +384,6 @@ class WatermarkService {
     }
   }
 
-  // ===========================================================================
-  // ALTERNATIVE & UTILITY METHODS
-  // ===========================================================================
-
-  /// Metode alternatif dengan Flutter rendering (untuk upgrade masa depan)
   Future<Uint8List> addWatermarkWithFlutter({
     required String imagePath,
     required double latitude,

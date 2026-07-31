@@ -8,7 +8,7 @@ import 'package:intl/intl.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import 'package:go_router/go_router.dart';
-import '../../widgets/bottom_nav/app_bottom_nav.dart'; // ✅ Import AppBottomNav
+import '../../widgets/bottom_nav/app_bottom_nav.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -27,7 +27,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? userEmail;
   String? userName;
   String? userPhotoUrl;
-  String? _userRole; // ✅ Tambah userRole
+  String? _userRole;
   File? _selectedImage;
 
   bool isEditing = false;
@@ -39,12 +39,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
   final _phoneController = TextEditingController();
   String _selectedFungsi = "operation";
 
-  Map<String, dynamic> stats = {
-    'totalKehadiran': 0,
-    'totalLembur': 0,
-    'totalJamLembur': 0,
-    'memberSince': '',
-  };
+  // 🔥 HAPUS: stats Map
+  // Hanya simpan memberSince
+  String _memberSince = '';
 
   static const Color primaryBlue = Color(0xFF1E3C72);
   static const Color accentOrange = Color(0xFFFF6B35);
@@ -69,7 +66,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       userEmail = user.email;
       userPhotoUrl = user.photoURL;
       await _loadUserData();
-      await _loadUserStats();
+      // 🔥 HAPUS: _loadUserStats() dipanggil
     } else {
       if (mounted) context.go('/login');
     }
@@ -81,14 +78,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final doc = await _firestore.collection('users').doc(userId).get();
       if (doc.exists && mounted) {
         final data = doc.data()!;
+        
+        // 🔥 Parse memberSince
+        String memberSince = '';
+        if (data['created_at'] != null) {
+          try {
+            final createdAt = data['created_at'];
+            DateTime date;
+            if (createdAt is Timestamp) {
+              date = createdAt.toDate();
+            } else if (createdAt is String) {
+              date = DateTime.parse(createdAt);
+            } else {
+              date = DateTime.now();
+            }
+            memberSince = DateFormat('MMMM yyyy', 'id_ID').format(date);
+          } catch (e) {
+            memberSince = 'Baru';
+          }
+        }
+        
         setState(() {
           userData = data;
           userName = data['nama_lengkap'] ?? userEmail?.split('@')[0] ?? 'User';
-          _userRole = data['role']?.toString() ?? 'mitra'; // ✅ Load role
+          _userRole = data['role']?.toString() ?? 'mitra';
           _namaController.text = userName ?? '';
           _phoneController.text = data['phone']?.toString() ?? '';
           _selectedFungsi = data['fungsi'] ?? 'operation';
           userPhotoUrl = data['photo_url'] ?? userPhotoUrl;
+          _memberSince = memberSince; // 🔥 Simpan memberSince
         });
       }
     } catch (e) {
@@ -98,87 +116,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  Future<void> _loadUserStats() async {
-    if (userId == null) return;
-    try {
-      final now = DateTime.now();
-      final startOfMonth = DateTime(now.year, now.month, 1);
-      final endOfMonth = DateTime(now.year, now.month + 1, 0);
+  // 🔥 HAPUS: method _loadUserStats() seluruhnya
 
-      int totalKehadiran = 0;
-      try {
-        final absensiSnap = await _firestore
-            .collection('absensi')
-            .where('user_id', isEqualTo: userId)
-            .where('waktu', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfMonth))
-            .where('waktu', isLessThanOrEqualTo: Timestamp.fromDate(endOfMonth))
-            .get();
-        totalKehadiran = absensiSnap.docs.length;
-      } catch (e) {
-        debugPrint('Absensi load error: $e');
-      }
-
-      int totalLembur = 0;
-      int totalJamLembur = 0;
-      try {
-        final lemburSnap = await _firestore
-            .collection('lembur_mitra')
-            .where('user_id', isEqualTo: userId)
-            .where('status', isEqualTo: 'approved')
-            .get();
-        totalLembur = lemburSnap.docs.length;
-        for (var doc in lemburSnap.docs) {
-          final data = doc.data();
-          totalJamLembur += (data['total_jam_desimal'] as num?)?.toInt() ?? 0;
-        }
-      } catch (e) {
-        debugPrint('Lembur load error: $e');
-      }
-
-      String memberSince = '';
-      if (userData != null && userData!['created_at'] != null) {
-        try {
-          final createdAt = userData!['created_at'];
-          DateTime date;
-          if (createdAt is Timestamp) {
-            date = createdAt.toDate();
-          } else if (createdAt is String) {
-            date = DateTime.parse(createdAt);
-          } else {
-            date = DateTime.now();
-          }
-          memberSince = DateFormat('MMMM yyyy', 'id_ID').format(date);
-        } catch (e) {
-          memberSince = 'Baru';
-        }
-      }
-
-      if (mounted) {
-        setState(() {
-          stats = {
-            'totalKehadiran': totalKehadiran,
-            'totalLembur': totalLembur,
-            'totalJamLembur': totalJamLembur,
-            'memberSince': memberSince,
-          };
-        });
-      }
-    } catch (e) {
-      debugPrint('Error loading stats: $e');
-    }
-  }
-
-  // ✅ Method untuk dapat index bottom nav berdasarkan role
   int _getCurrentNavIndex() {
     switch (_userRole) {
       case 'superadmin':
-        return 2; // Profile di index 2
+        return 2;
       case 'manager':
-        return 2; // Profile di index 2
+        return 2;
       case 'pengawas':
-        return 3; // Profile di index 3
+        return 3;
       case 'mitra':
-        return 3; // Profile di index 3
+        return 3;
       default:
         return 0;
     }
@@ -265,83 +214,141 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final bottomPadding = MediaQuery.of(context).padding.bottom;
-
-    return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
-      appBar: AppBar(
-        title: const Text('Profil Saya', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
-        backgroundColor: primaryBlue,
-        foregroundColor: Colors.white,
-        elevation: 0,
-        centerTitle: true,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_ios_new, size: 20),
-          onPressed: () => context.pop(),
-        ),
-        actions: [
-          if (!isLoading)
-            isEditing
-                ? TextButton(
-                    onPressed: () {
-                      setState(() {
-                        isEditing = false;
-                        _namaController.text = userName ?? '';
-                        _phoneController.text = userData?['phone']?.toString() ?? '';
-                        _selectedFungsi = userData?['fungsi'] ?? 'operation';
-                        _selectedImage = null;
-                      });
-                    },
-                    child: const Text('Batal', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
-                  )
-                : IconButton(
-                    icon: const Icon(Icons.edit_rounded),
-                    onPressed: () => setState(() => isEditing = true),
-                  ),
-        ],
-      ),
-      // ✅ TAMBAHKAN BOTTOM NAV
-      bottomNavigationBar: _userRole != null
-          ? AppBottomNav(
-              userRole: _userRole!,
-              currentIndex: _getCurrentNavIndex(),
-            )
-          : null,
-      body: isLoading
-          ? const Center(child: CircularProgressIndicator(color: primaryBlue))
-          : RefreshIndicator(
-              onRefresh: () async {
-                await _loadUserData();
-                await _loadUserStats();
-              },
-              color: primaryBlue,
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-                padding: EdgeInsets.fromLTRB(16, 16, 16, bottomPadding + 80), // ✅ Extra padding untuk bottom nav
-                child: Column(
-                  children: [
-                    _buildHeaderCard(),
-                    const SizedBox(height: 16),
-                    _buildStatsRow(),
-                    const SizedBox(height: 16),
-                    _buildFormCard(),
-                    const SizedBox(height: 16),
-                    _buildActionButtons(),
-                    const SizedBox(height: 16),
-                  ],
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final screenWidth = constraints.maxWidth;
+        final isSmallScreen = screenWidth < 360;
+        final horizontalPadding = screenWidth * 0.04;
+        final avatarSize = isSmallScreen ? 70.0 : 90.0;
+        
+        return Scaffold(
+          backgroundColor: const Color(0xFFF1F5F9),
+          appBar: AppBar(
+            title: Text(
+              'Profil Saya',
+              style: TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: isSmallScreen ? 16 : 18,
               ),
             ),
+            backgroundColor: primaryBlue,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            centerTitle: true,
+            leading: IconButton(
+              icon: Icon(Icons.arrow_back_ios_new, size: isSmallScreen ? 18 : 20),
+              onPressed: () => context.pop(),
+            ),
+            actions: [
+              if (!isLoading)
+                isEditing
+                    ? TextButton(
+                        onPressed: () {
+                          setState(() {
+                            isEditing = false;
+                            _namaController.text = userName ?? '';
+                            _phoneController.text = userData?['phone']?.toString() ?? '';
+                            _selectedFungsi = userData?['fungsi'] ?? 'operation';
+                            _selectedImage = null;
+                          });
+                        },
+                        child: Text(
+                          'Batal',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w600,
+                            fontSize: isSmallScreen ? 12 : 14,
+                          ),
+                        ),
+                      )
+                    : IconButton(
+                        icon: Icon(Icons.edit_rounded, size: isSmallScreen ? 20 : 24),
+                        onPressed: () => setState(() => isEditing = true),
+                      ),
+            ],
+          ),
+          bottomNavigationBar: _userRole != null
+              ? AppBottomNav(
+                  userRole: _userRole!,
+                  currentIndex: _getCurrentNavIndex(),
+                )
+              : null,
+          body: isLoading
+              ? const Center(child: CircularProgressIndicator(color: primaryBlue))
+              : RefreshIndicator(
+                  onRefresh: () async {
+                    await _loadUserData();
+                    // 🔥 HAPUS: await _loadUserStats();
+                  },
+                  color: primaryBlue,
+                  child: SafeArea(
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
+                      padding: EdgeInsets.fromLTRB(
+                        horizontalPadding,
+                        12,
+                        horizontalPadding,
+                        16,
+                      ),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: constraints.maxHeight - kToolbarHeight - MediaQuery.of(context).padding.top,
+                        ),
+                        child: IntrinsicHeight(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              _buildHeaderCard(avatarSize: avatarSize, isSmallScreen: isSmallScreen),
+                              // 🔥 HAPUS: SizedBox + _buildStatsRow()
+                              SizedBox(height: screenWidth * 0.03),
+                              _buildFormCard(isSmallScreen: isSmallScreen),
+                              SizedBox(height: screenWidth * 0.03),
+                              _buildActionButtons(isSmallScreen: isSmallScreen),
+                              const Spacer(),
+                              // 🔥 GUNAKAN _memberSince langsung
+                              if (_memberSince.isNotEmpty)
+                                Padding(
+                                  padding: EdgeInsets.only(top: screenWidth * 0.04),
+                                  child: Text(
+                                    'Anggota sejak $_memberSince',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      fontSize: isSmallScreen ? 10 : 11,
+                                      color: Colors.grey[500],
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+        );
+      },
     );
   }
 
-  // ==================== HEADER ====================
-  Widget _buildHeaderCard() {
+  // ==================== HEADER CARD ====================
+  Widget _buildHeaderCard({required double avatarSize, required bool isSmallScreen}) {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: EdgeInsets.all(isSmallScreen ? 16 : 20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(colors: [Color(0xFF1E3C72), Color(0xFF2A5298)]),
+        gradient: const LinearGradient(
+          colors: [Color(0xFF1E3C72), Color(0xFF2A5298)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
         borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: primaryBlue.withOpacity(0.3),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
       child: Column(
         children: [
@@ -350,18 +357,40 @@ class _ProfileScreenState extends State<ProfileScreen> {
             child: Stack(
               children: [
                 Container(
-                  width: 90,
-                  height: 90,
+                  width: avatarSize,
+                  height: avatarSize,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     border: Border.all(color: Colors.white, width: 3),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.2),
+                        blurRadius: 8,
+                      ),
+                    ],
                   ),
                   child: ClipOval(
                     child: _selectedImage != null
                         ? Image.file(_selectedImage!, fit: BoxFit.cover)
                         : userPhotoUrl != null && userPhotoUrl!.isNotEmpty
-                            ? Image.network(userPhotoUrl!, fit: BoxFit.cover, errorBuilder: (_, __, ___) => _buildAvatar())
-                            : _buildAvatar(),
+                            ? Image.network(
+                                userPhotoUrl!,
+                                fit: BoxFit.cover,
+                                errorBuilder: (_, __, ___) => _buildAvatar(avatarSize, isSmallScreen),
+                                loadingBuilder: (context, child, loadingProgress) {
+                                  if (loadingProgress == null) return child;
+                                  return Center(
+                                    child: CircularProgressIndicator(
+                                      value: loadingProgress.expectedTotalBytes != null
+                                          ? loadingProgress.cumulativeBytesLoaded / loadingProgress.expectedTotalBytes!
+                                          : null,
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  );
+                                },
+                              )
+                            : _buildAvatar(avatarSize, isSmallScreen),
                   ),
                 ),
                 if (isEditing)
@@ -369,26 +398,55 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     bottom: 0,
                     right: 0,
                     child: Container(
-                      padding: const EdgeInsets.all(6),
-                      decoration: const BoxDecoration(color: accentOrange, shape: BoxShape.circle),
-                      child: const Icon(Icons.camera_alt, color: Colors.white, size: 16),
+                      padding: EdgeInsets.all(isSmallScreen ? 4 : 6),
+                      decoration: BoxDecoration(
+                        color: accentOrange,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: accentOrange.withOpacity(0.4),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.camera_alt,
+                        color: Colors.white,
+                        size: isSmallScreen ? 14 : 16,
+                      ),
                     ),
                   ),
               ],
             ),
           ),
-          const SizedBox(height: 12),
+          SizedBox(height: isSmallScreen ? 10 : 12),
           Text(
             userName ?? 'User',
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+            style: TextStyle(
+              fontSize: isSmallScreen ? 16 : 18,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
+            ),
+            textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 4),
+          SizedBox(height: isSmallScreen ? 3 : 4),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(20)),
+            padding: EdgeInsets.symmetric(
+              horizontal: isSmallScreen ? 10 : 12,
+              vertical: isSmallScreen ? 3 : 4,
+            ),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(20),
+            ),
             child: Text(
               userEmail ?? '-',
-              style: const TextStyle(fontSize: 11, color: Colors.white70),
+              style: TextStyle(
+                fontSize: isSmallScreen ? 10 : 11,
+                color: Colors.white.withOpacity(0.9),
+              ),
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ],
@@ -396,89 +454,99 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildAvatar() {
+  Widget _buildAvatar(double size, bool isSmallScreen) {
     return Container(
       color: Colors.grey[300],
       child: Center(
         child: Text(
           (userName?.isNotEmpty == true ? userName![0].toUpperCase() : 'U'),
-          style: const TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: Color(0xFF1E3C72)),
+          style: TextStyle(
+            fontSize: size * 0.4,
+            fontWeight: FontWeight.bold,
+            color: primaryBlue,
+          ),
         ),
       ),
     );
   }
 
-  // ==================== STATS ====================
-  Widget _buildStatsRow() {
-    return Row(
-      children: [
-        Expanded(child: _buildStatCard('Kehadiran', '${stats['totalKehadiran']}', Icons.calendar_today, Colors.blue)),
-        const SizedBox(width: 8),
-        Expanded(child: _buildStatCard('Lembur', '${stats['totalLembur']}', Icons.work_history, accentOrange)),
-        const SizedBox(width: 8),
-        Expanded(child: _buildStatCard('Jam', '${stats['totalJamLembur']}j', Icons.timer, Colors.green)),
-      ],
-    );
-  }
+  // 🔥 HAPUS: method _buildStatsRow() seluruhnya
+  // 🔥 HAPUS: method _buildStatCard() seluruhnya
 
-  Widget _buildStatCard(String label, String value, IconData icon, Color color) {
+  // ==================== FORM CARD ====================
+  Widget _buildFormCard({required bool isSmallScreen}) {
     return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [BoxShadow(color: Colors.black.withAlpha(10), blurRadius: 8, offset: const Offset(0, 2))],
-      ),
-      child: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(color: color.withAlpha(25), shape: BoxShape.circle),
-            child: Icon(icon, size: 18, color: color),
-          ),
-          const SizedBox(height: 8),
-          Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: primaryBlue)),
-          Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-        ],
-      ),
-    );
-  }
-
-  // ==================== FORM ====================
-  Widget _buildFormCard() {
-    return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(isSmallScreen ? 14 : 16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(20),
-        boxShadow: [BoxShadow(color: Colors.black.withAlpha(10), blurRadius: 8, offset: const Offset(0, 2))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Form(
         key: _formKey,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('Informasi Pribadi', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: primaryBlue)),
-            const SizedBox(height: 16),
+            Row(
+              children: [
+                Container(
+                  width: 3,
+                  height: 20,
+                  decoration: BoxDecoration(
+                    color: accentOrange,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Informasi Pribadi',
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 14 : 15,
+                    fontWeight: FontWeight.bold,
+                    color: primaryBlue,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: isSmallScreen ? 12 : 16),
             _buildTextField(
               controller: _namaController,
               label: 'Nama Lengkap',
               icon: Icons.person_outline,
               enabled: isEditing,
-              validator: (v) => (v == null || v.isEmpty) ? 'Wajib diisi' : (v.length < 3 ? 'Terlalu pendek' : null),
+              isSmallScreen: isSmallScreen,
+              validator: (v) => (v == null || v.isEmpty)
+                  ? 'Wajib diisi'
+                  : (v.length < 3 ? 'Terlalu pendek' : null),
             ),
-            const SizedBox(height: 14),
+            SizedBox(height: isSmallScreen ? 10 : 14),
             _buildTextField(
               controller: _phoneController,
               label: 'Nomor HP',
               icon: Icons.phone_android,
               enabled: isEditing,
               keyboardType: TextInputType.phone,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(13)],
+              isSmallScreen: isSmallScreen,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(13),
+              ],
               prefix: '+62',
             ),
-            const SizedBox(height: 14),
-            _buildReadOnlyField(Icons.email_outlined, 'Email', userEmail ?? '-'),
+            SizedBox(height: isSmallScreen ? 10 : 14),
+            _buildReadOnlyField(
+              Icons.email_outlined,
+              'Email',
+              userEmail ?? '-',
+              isSmallScreen,
+            ),
           ],
         ),
       ),
@@ -490,6 +558,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     required String label,
     required IconData icon,
     required bool enabled,
+    required bool isSmallScreen,
     TextInputType keyboardType = TextInputType.text,
     List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
@@ -501,29 +570,61 @@ class _ProfileScreenState extends State<ProfileScreen> {
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       validator: validator,
-      style: TextStyle(fontSize: 14, color: enabled ? primaryBlue : Colors.grey[700]),
+      style: TextStyle(
+        fontSize: isSmallScreen ? 13 : 14,
+        color: enabled ? primaryBlue : Colors.grey[700],
+      ),
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(fontSize: 13, color: Colors.grey[600]),
+        labelStyle: TextStyle(
+          fontSize: isSmallScreen ? 12 : 13,
+          color: Colors.grey[600],
+        ),
         prefixIcon: prefix != null
             ? Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                child: Text(prefix, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: primaryBlue)),
+                padding: EdgeInsets.symmetric(horizontal: isSmallScreen ? 10 : 12),
+                child: Text(
+                  prefix,
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 13 : 14,
+                    fontWeight: FontWeight.w600,
+                    color: primaryBlue,
+                  ),
+                ),
               )
-            : Icon(icon, size: 20),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[300]!)),
-        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: Colors.grey[300]!)),
-        focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: accentOrange)),
+            : Icon(icon, size: isSmallScreen ? 18 : 20),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey[300]!),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: const BorderSide(color: accentOrange),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.red[300]!),
+        ),
         filled: true,
         fillColor: enabled ? Colors.white : Colors.grey[50],
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: isSmallScreen ? 12 : 14,
+          vertical: isSmallScreen ? 12 : 14,
+        ),
       ),
     );
   }
 
-  Widget _buildReadOnlyField(IconData icon, String label, String value) {
+  Widget _buildReadOnlyField(IconData icon, String label, String value, bool isSmallScreen) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+      padding: EdgeInsets.symmetric(
+        horizontal: isSmallScreen ? 12 : 14,
+        vertical: isSmallScreen ? 12 : 14,
+      ),
       decoration: BoxDecoration(
         color: Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
@@ -531,25 +632,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: Colors.grey[500]),
-          const SizedBox(width: 12),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: TextStyle(fontSize: 11, color: Colors.grey[500])),
-              Text(value, style: const TextStyle(fontSize: 14, color: Color(0xFF1E3C72))),
-            ],
+          Icon(icon, size: isSmallScreen ? 18 : 20, color: Colors.grey[500]),
+          SizedBox(width: isSmallScreen ? 10 : 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 10 : 11,
+                    color: Colors.grey[500],
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: isSmallScreen ? 13 : 14,
+                    color: primaryBlue,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
           ),
-          const Spacer(),
-          const Icon(Icons.lock, size: 14, color: Colors.grey),
+          Icon(Icons.lock, size: isSmallScreen ? 12 : 14, color: Colors.grey),
         ],
       ),
     );
   }
 
-  // ==================== ACTIONS ====================
-  Widget _buildActionButtons() {
+  // ==================== ACTION BUTTONS ====================
+  Widget _buildActionButtons({required bool isSmallScreen}) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         if (isEditing)
           SizedBox(
@@ -559,17 +678,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: ElevatedButton.styleFrom(
                 backgroundColor: accentOrange,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                padding: EdgeInsets.symmetric(
+                  vertical: isSmallScreen ? 12 : 14,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                elevation: 2,
               ),
               child: isSaving
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : const Row(
+                  ? SizedBox(
+                      width: isSmallScreen ? 18 : 20,
+                      height: isSmallScreen ? 18 : 20,
+                      child: const CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                  : Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.save_rounded, size: 20),
-                        SizedBox(width: 8),
-                        Text('Simpan Perubahan', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                        Icon(Icons.save_rounded, size: isSmallScreen ? 18 : 20),
+                        SizedBox(width: isSmallScreen ? 6 : 8),
+                        Text(
+                          'Simpan Perubahan',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: isSmallScreen ? 13 : 14,
+                          ),
+                        ),
                       ],
                     ),
             ),
@@ -582,15 +719,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
               style: OutlinedButton.styleFrom(
                 foregroundColor: Colors.red,
                 side: const BorderSide(color: Colors.red),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                padding: EdgeInsets.symmetric(
+                  vertical: isSmallScreen ? 12 : 14,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
               ),
-              child: const Row(
+              child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.logout_rounded, size: 20),
-                  SizedBox(width: 8),
-                  Text('Keluar dari Aplikasi', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                  Icon(Icons.logout_rounded, size: isSmallScreen ? 18 : 20),
+                  SizedBox(width: isSmallScreen ? 6 : 8),
+                  Text(
+                    'Keluar dari Aplikasi',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: isSmallScreen ? 13 : 14,
+                    ),
+                  ),
                 ],
               ),
             ),

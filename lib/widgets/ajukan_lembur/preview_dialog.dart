@@ -6,9 +6,12 @@ class PreviewDialog extends StatelessWidget {
   final String? fungsiPengawas;
   final List<Map<String, dynamic>> validMiras;
   final DateTime? tanggalLembur;
+  final DateTime? tanggalSelesai;      // 🔥 BARU: Rentang akhir
   final TimeOfDay? jamMulai;
   final TimeOfDay? jamSelesai;
   final double totalJam;
+  final bool isMultiDay;               // 🔥 BARU: Flag multi-hari
+  final bool isOvernight;              // 🔥 BARU: Flag lintas malam
   final String locationType;
   final String? selectedAddress;
   final TextEditingController rtController;
@@ -28,9 +31,12 @@ class PreviewDialog extends StatelessWidget {
     this.fungsiPengawas,
     required this.validMiras,
     this.tanggalLembur,
+    this.tanggalSelesai,          // 🔥 BARU
     this.jamMulai,
     this.jamSelesai,
     required this.totalJam,
+    this.isMultiDay = false,      // 🔥 BARU
+    this.isOvernight = false,     // 🔥 BARU
     required this.locationType,
     this.selectedAddress,
     required this.rtController,
@@ -112,33 +118,33 @@ class PreviewDialog extends StatelessWidget {
                       fontSize: 13,
                     ),
                   ),
-                  if (isWeekend) ...[
+                  // 🔥 BADGE: Weekend / Multi-Day / Overnight
+                  if (isWeekend || isMultiDay || isOvernight) ...[
                     const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: Colors.orange.withValues(alpha: 0.9),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.beach_access_rounded,
-                              color: Colors.white, size: 14),
-                          SizedBox(width: 6),
-                          Text(
-                            'Lembur Hari Libur',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w600,
-                            ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      alignment: WrapAlignment.center,
+                      children: [
+                        if (isWeekend)
+                          _buildHeaderBadge(
+                            icon: Icons.beach_access_rounded,
+                            label: 'Hari Libur',
+                            color: Colors.orange,
                           ),
-                        ],
-                      ),
+                        if (isMultiDay)
+                          _buildHeaderBadge(
+                            icon: Icons.date_range_rounded,
+                            label: 'Multi-Hari',
+                            color: Colors.purple,
+                          ),
+                        if (isOvernight)
+                          _buildHeaderBadge(
+                            icon: Icons.nights_stay_rounded,
+                            label: 'Lintas Malam',
+                            color: const Color(0xFF7B1FA2),
+                          ),
+                      ],
                     ),
                   ],
                 ],
@@ -184,21 +190,43 @@ class PreviewDialog extends StatelessWidget {
                     ),
                     const SizedBox(height: 14),
                     
-                    // Waktu Lembur
+                    // 🔥 WAKTU LEMBUR (UPDATED!)
                     _buildSection(
                       icon: Icons.schedule_rounded,
                       title: 'Waktu Lembur',
-                      color: const Color(0xFFFF9800),
+                      color: isMultiDay || isOvernight 
+                          ? Colors.purple 
+                          : const Color(0xFFFF9800),
                       children: [
-                        _buildInfoRow(
-                          'Tanggal',
-                          tanggalLembur != null
-                              ? formatTanggal(tanggalLembur!)
-                              : '-',
-                        ),
+                        // 🔥 TANGGAL: Single atau Rentang
+                        if (isMultiDay && tanggalLembur != null && tanggalSelesai != null) ...[
+                          _buildInfoRow(
+                            'Tanggal Mulai',
+                            formatTanggal(tanggalLembur!),
+                          ),
+                          _buildInfoRow(
+                            'Tanggal Selesai',
+                            formatTanggal(tanggalSelesai!),
+                            valueColor: Colors.purple,
+                          ),
+                          _buildInfoRow(
+                            'Total Hari',
+                            '${tanggalSelesai!.difference(tanggalLembur!).inDays + 1} hari',
+                            valueColor: Colors.purple,
+                            isBold: true,
+                          ),
+                        ] else ...[
+                          _buildInfoRow(
+                            'Tanggal',
+                            tanggalLembur != null
+                                ? formatTanggal(tanggalLembur!)
+                                : '-',
+                          ),
+                        ],
+                        // 🔥 JAM
                         _buildInfoRow(
                           'Jam',
-                          '${jamMulai != null ? formatTime(jamMulai!) : '--:--'} - ${jamSelesai != null ? formatTime(jamSelesai!) : '--:--'}',
+                          '${jamMulai != null ? formatTime(jamMulai!) : '--:--'} → ${jamSelesai != null ? formatTime(jamSelesai!) : '--:--'}${isOvernight ? ' (+1 hari)' : ''}',
                         ),
                         _buildInfoRow(
                           'Durasi',
@@ -206,8 +234,16 @@ class PreviewDialog extends StatelessWidget {
                         ),
                         _buildInfoRow(
                           'Jenis',
-                          isWeekend ? 'Hari Libur' : 'Hari Kerja',
-                          valueColor: isWeekend ? Colors.orange : Colors.blue,
+                          isMultiDay 
+                              ? 'Campuran (Hari Kerja & Libur)' 
+                              : isWeekend 
+                                  ? 'Hari Libur' 
+                                  : 'Hari Kerja',
+                          valueColor: isMultiDay 
+                              ? Colors.purple 
+                              : isWeekend 
+                                  ? Colors.orange 
+                                  : Colors.blue,
                         ),
                       ],
                     ),
@@ -277,6 +313,12 @@ class PreviewDialog extends StatelessWidget {
                           'Jumlah Mitra',
                           '${validMiras.length} orang',
                         ),
+                        if (isMultiDay)
+                          _buildInfoRow(
+                            'Catatan',
+                            'Biaya dihitung per hari (weekday/weekend)',
+                            valueColor: Colors.purple,
+                          ),
                         const Padding(
                           padding: EdgeInsets.symmetric(vertical: 8),
                           child: Divider(height: 1),
@@ -317,7 +359,7 @@ class PreviewDialog extends StatelessWidget {
                       ],
                     ),
                     
-                    // Warning untuk lokasi di luar radius (jika ada)
+                    // Warning untuk lokasi di luar radius
                     if (locationType == 'proyek') ...[
                       const SizedBox(height: 14),
                       Container(
@@ -341,6 +383,39 @@ class PreviewDialog extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 12,
                                   color: Colors.orange.shade800,
+                                  height: 1.4,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    
+                    // 🔥 Warning Multi-Day
+                    if (isMultiDay) ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.purple.shade50,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.purple.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              Icons.info_outline_rounded,
+                              color: Colors.purple.shade700,
+                              size: 20,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                'Lembur multi-hari akan dicatat per tanggal dan biaya dihitung sesuai rate weekday/weekend masing-masing hari.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.purple.shade800,
                                   height: 1.4,
                                 ),
                               ),
@@ -379,7 +454,7 @@ class PreviewDialog extends StatelessWidget {
                         side: const BorderSide(color: Color(0xFF1976D2)),
                       ),
                       child: const Text(
-                        'PERIKSA KEMBALI',
+                        'KEMBALI',
                         style: TextStyle(
                           fontWeight: FontWeight.w600,
                           color: Color(0xFF1976D2),
@@ -407,7 +482,7 @@ class PreviewDialog extends StatelessWidget {
                           Icon(Icons.send_rounded, color: Colors.white, size: 18),
                           SizedBox(width: 8),
                           Text(
-                            'KONFIRMASI & AJUKAN',
+                            'AJUKAN LEMBUR',
                             style: TextStyle(
                               color: Colors.white,
                               fontWeight: FontWeight.bold,
@@ -423,6 +498,36 @@ class PreviewDialog extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  // 🔥 BADGE DI HEADER
+  Widget _buildHeaderBadge({
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.9),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: Colors.white, size: 14),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
       ),
     );
   }

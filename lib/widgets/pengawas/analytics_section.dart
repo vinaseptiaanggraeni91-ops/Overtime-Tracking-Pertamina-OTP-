@@ -1,9 +1,7 @@
 // lib/widgets/pengawas/analytics_section.dart
-
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../dashboard/pengawas/pengawas_dashboard.dart';
 import '../../core/services/pengawas_service.dart';
 
 class AnalyticsSection extends StatefulWidget {
@@ -23,11 +21,19 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
   bool _isLoading = true;
   List<double> _weeklyData = [0, 0, 0, 0, 0, 0, 0];
 
-  // Color constants matching pengawas dashboard
-  static const Color primaryBlue = Color(0xFF448AFF);
-  static const Color accentOrange = Color(0xFFFFAB40);
-  static const Color textDark = Color(0xFF1A2332);
-  static const Color textMedium = Color(0xFF475569);
+  // ═══════════════════════════════════════════════════════
+  // 🔵 COLOR PALETTE
+  // ═══════════════════════════════════════════════════════
+  static const Color primaryBlue = Color(0xFF1565C0);
+  static const Color darkBlue = Color(0xFF0D47A1);
+  static const Color accentBlue = Color(0xFF42A5F5);
+  static const Color lightBlue = Color(0xFFBBDEFB);
+  static const Color surfaceWhite = Color(0xFFFFFFFF);
+  static const Color textDark = Color(0xFF0D1B2A);
+  static const Color textMid = Color(0xFF546E7A);
+  static const Color textLight = Color(0xFF90A4AE);
+  static const Color borderColor = Color(0xFFE3E8F0);
+  static const Color bgCard = Color(0xFFF5F9FF);
 
   @override
   void initState() {
@@ -42,7 +48,6 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
       final today = DateTime(now.year, now.month, now.day);
       final startOfWeek = today.subtract(Duration(days: today.weekday - 1));
 
-      // Sesuaikan collection name dengan struktur data pengawas
       final snapshot = await firestore
           .collection('lembur_mitra')
           .where('tanggal', isGreaterThanOrEqualTo: Timestamp.fromDate(startOfWeek))
@@ -74,7 +79,7 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
     } catch (e) {
       debugPrint('AnalyticsSection Error: $e');
       
-      // Fallback: generate sample data from PengawasDashboardData
+      // Fallback: generate sample data
       final avg = (widget.data.totalLemburToday / 7).clamp(0.0, 25.0);
       
       if (mounted) {
@@ -105,111 +110,36 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
     final hasData = _weeklyData.any((e) => e > 0);
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16), // ⬅️ padding dikurangi dari 18 ke 16
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: surfaceWhite,
         borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: borderColor, width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withAlpha(10),
-            blurRadius: 20,
+            color: primaryBlue.withOpacity(0.06),
+            blurRadius: 24,
             offset: const Offset(0, 8),
+            spreadRadius: 1,
+          ),
+          BoxShadow(
+            color: accentBlue.withOpacity(0.03),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min, // ⬅️ TAMBAHKAN INI
         children: [
           // HEADER
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: primaryBlue.withAlpha(20),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(
-                      Icons.analytics_rounded,
-                      color: primaryBlue,
-                      size: 20,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  const Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Lembur Mingguan',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                          color: textDark,
-                        ),
-                      ),
-                      SizedBox(height: 2),
-                      Text(
-                        'Analisis aktivitas lembur mingguan',
-                        style: TextStyle(fontSize: 11, color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              InkWell(
-                onTap: _refresh,
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: primaryBlue.withAlpha(16),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            color: primaryBlue,
-                          ),
-                        )
-                      : const Icon(Icons.refresh_rounded, size: 20, color: primaryBlue),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 18),
+          _buildHeader(),
+          const SizedBox(height: 16), // ⬅️ dikurangi dari 18 ke 16
 
-          // INFO CHIPS (menggunakan data dari PengawasDashboardData)
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              _buildChip(
-                label: 'Total',
-                value: '${widget.data.totalLemburToday}',
-                icon: Icons.work_history_rounded,
-                color: primaryBlue,
-              ),
-              _buildChip(
-                label: 'Pending',
-                value: '${widget.data.pendingApproval}',
-                icon: Icons.pending_actions_rounded,
-                color: Colors.orange,
-              ),
-              _buildChip(
-                label: 'Online',
-                value: '${widget.data.onlineMembers}',
-                icon: Icons.people_alt_rounded,
-                color: Colors.green,
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
+          // 🔥🔥🔥 INFO CHIPS - SUDAH DIPERBAIKI
+          _buildInfoChips(),
+          const SizedBox(height: 18), // ⬅️ dikurangi dari 20 ke 18
 
           // CHART
           AnimatedSwitcher(
@@ -234,7 +164,7 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
                               horizontalInterval: (maxY / 4).clamp(1, 25),
                               getDrawingHorizontalLine: (value) {
                                 return FlLine(
-                                  color: Colors.grey.withAlpha(20),
+                                  color: Colors.grey.withOpacity(0.15),
                                   strokeWidth: 1,
                                 );
                               },
@@ -254,7 +184,7 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
                                   getTitlesWidget: (value, meta) {
                                     return Text(
                                       '${value.toInt()}j',
-                                      style: const TextStyle(fontSize: 10, color: Colors.grey),
+                                      style: const TextStyle(fontSize: 10, color: textMid),
                                     );
                                   },
                                 ),
@@ -273,7 +203,7 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
                                           style: TextStyle(
                                             fontSize: 10,
                                             fontWeight: isToday ? FontWeight.bold : FontWeight.w500,
-                                            color: isToday ? primaryBlue : Colors.grey,
+                                            color: isToday ? primaryBlue : textMid,
                                           ),
                                         ),
                                       );
@@ -319,18 +249,33 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
                                   BarChartRodData(
                                     toY: value,
                                     width: barWidth,
-                                    borderRadius: const BorderRadius.only(
-                                      topLeft: Radius.circular(6),
-                                      topRight: Radius.circular(6),
+                                    borderRadius: const BorderRadius.vertical(
+                                      top: Radius.circular(6),
                                     ),
-                                    gradient: LinearGradient(
-                                      begin: Alignment.bottomCenter,
-                                      end: Alignment.topCenter,
-                                      colors: isSelected
-                                          ? [accentOrange, accentOrange.withAlpha(180)]
-                                          : isToday
-                                              ? [primaryBlue, primaryBlue.withAlpha(200)]
-                                              : [primaryBlue.withAlpha(140), primaryBlue.withAlpha(90)],
+                                    gradient: isSelected
+                                        ? const LinearGradient(
+                                            begin: Alignment.bottomCenter,
+                                            end: Alignment.topCenter,
+                                            colors: [Color(0xFFFFAB40), Color(0xFFFF8F00)],
+                                          )
+                                        : isToday
+                                            ? const LinearGradient(
+                                                begin: Alignment.bottomCenter,
+                                                end: Alignment.topCenter,
+                                                colors: [darkBlue, primaryBlue],
+                                              )
+                                            : LinearGradient(
+                                                begin: Alignment.bottomCenter,
+                                                end: Alignment.topCenter,
+                                                colors: [
+                                                  primaryBlue.withOpacity(0.5),
+                                                  primaryBlue.withOpacity(0.3),
+                                                ],
+                                              ),
+                                    backDrawRodData: BackgroundBarChartRodData(
+                                      show: true,
+                                      toY: maxY,
+                                      color: lightBlue.withOpacity(0.15),
                                     ),
                                   ),
                                 ],
@@ -340,7 +285,7 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
                         ),
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 16), // ⬅️ dikurangi dari 18 ke 16
 
           // LEGEND
           Center(
@@ -351,6 +296,139 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
     );
   }
 
+  // ═══════════════════════════════════════════════════════
+  // HEADER
+  // ═══════════════════════════════════════════════════════
+  Widget _buildHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Flexible( // ⬅️ TAMBAHKAN Flexible
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10), // ⬅️ dikurangi dari 11 ke 10
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [primaryBlue, accentBlue],
+                  ),
+                  borderRadius: BorderRadius.circular(12), // ⬅️ dikurangi dari 14 ke 12
+                  boxShadow: [
+                    BoxShadow(
+                      color: primaryBlue.withOpacity(0.3),
+                      blurRadius: 14,
+                      offset: const Offset(0, 5),
+                    ),
+                  ],
+                ),
+                child: const Icon(
+                  Icons.analytics_rounded,
+                  size: 18, // ⬅️ dikurangi dari 20 ke 18
+                  color: Colors.white,
+                ),
+              ),
+              const SizedBox(width: 10), // ⬅️ dikurangi dari 12 ke 10
+              Flexible( // ⬅️ TAMBAHKAN Flexible
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: const [
+                    Text(
+                      'Lembur Mingguan',
+                      style: TextStyle(
+                        fontSize: 14, // ⬅️ dikurangi dari 15 ke 14
+                        fontWeight: FontWeight.w700,
+                        color: textDark,
+                        letterSpacing: -0.2,
+                      ),
+                      overflow: TextOverflow.ellipsis, // ⬅️ TAMBAHKAN
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      'Analisis aktivitas lembur',
+                      style: TextStyle(
+                        fontSize: 10, // ⬅️ dikurangi dari 11 ke 10
+                        color: textMid,
+                        fontWeight: FontWeight.w400,
+                      ),
+                      overflow: TextOverflow.ellipsis, // ⬅️ TAMBAHKAN
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(width: 8), // ⬅️ TAMBAHKAN spacing
+        InkWell(
+          onTap: _refresh,
+          borderRadius: BorderRadius.circular(10), // ⬅️ dikurangi dari 12 ke 10
+          child: Container(
+            padding: const EdgeInsets.all(8), // ⬅️ dikurangi dari 10 ke 8
+            decoration: BoxDecoration(
+              color: primaryBlue.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10), // ⬅️ dikurangi dari 12 ke 10
+              border: Border.all(color: primaryBlue.withOpacity(0.1)),
+            ),
+            child: _isLoading
+                ? const SizedBox(
+                    width: 16, // ⬅️ dikurangi dari 18 ke 16
+                    height: 16, // ⬅️ dikurangi dari 18 ke 16
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: primaryBlue,
+                    ),
+                  )
+                : const Icon(Icons.refresh_rounded, size: 18, color: primaryBlue), // ⬅️ dikurangi dari 20 ke 18
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 🔥🔥🔥 INFO CHIPS - SUDAH DIPERBAIKI TOTAL
+  // ═══════════════════════════════════════════════════════
+  Widget _buildInfoChips() {
+    final totalToday = widget.data.totalLemburToday + widget.data.todayPending;
+    final pendingToday = widget.data.todayPending;
+    final onlineMembers = widget.data.onlineMembers;
+
+    // 🔥 GUNAKAN Row + Expanded biar nggak overflow di OPPO
+    return Row(
+      children: [
+        Expanded(
+          child: _buildChip(
+            label: 'Total',
+            value: '$totalToday',
+            icon: Icons.work_history_rounded,
+            color: primaryBlue,
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: _buildChip(
+            label: 'Pending',
+            value: '$pendingToday',
+            icon: Icons.pending_actions_rounded,
+            color: pendingToday > 0 ? const Color(0xFFFF9800) : const Color(0xFF43A047),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Expanded(
+          child: _buildChip(
+            label: 'Online',
+            value: '$onlineMembers',
+            icon: Icons.people_alt_rounded,
+            color: const Color(0xFF43A047),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildChip({
     required String label,
     required String value,
@@ -358,24 +436,32 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
     required Color color,
   }) {
     return Container(
-      constraints: const BoxConstraints(minWidth: 95),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8), // ⬅️ padding horizontal dikurangi
       decoration: BoxDecoration(
-        color: color.withAlpha(16),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withAlpha(40)),
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(10), // ⬅️ radius dikurangi
+        border: Border.all(color: color.withOpacity(0.15)),
       ),
-      child: Row(
+      child: Column( // ⬅️ UBAH JADI COLUMN biar lebih compact
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: color),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              '$label: $value',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: color),
+          Icon(icon, size: 16, color: color), // ⬅️ icon di atas, lebih besar
+          const SizedBox(height: 4),
+          Text(
+            value, // ⬅️ angka besar di bawah
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w700,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            label, // ⬅️ label kecil di bawah
+            style: TextStyle(
+              fontSize: 9,
+              fontWeight: FontWeight.w500,
+              color: color.withOpacity(0.7),
             ),
           ),
         ],
@@ -383,6 +469,9 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
     );
   }
 
+  // ═══════════════════════════════════════════════════════
+  // LEGEND
+  // ═══════════════════════════════════════════════════════
   Widget _buildLegend(String label, Color color) {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -391,42 +480,93 @@ class _AnalyticsSectionState extends State<AnalyticsSection> {
           width: 12,
           height: 12,
           decoration: BoxDecoration(
-            color: color,
+            gradient: const LinearGradient(
+              begin: Alignment.bottomCenter,
+              end: Alignment.topCenter,
+              colors: [darkBlue, primaryBlue],
+            ),
             borderRadius: BorderRadius.circular(4),
           ),
         ),
         const SizedBox(width: 6),
         Text(
           label,
-          style: TextStyle(fontSize: 11, color: Colors.grey[700], fontWeight: FontWeight.w500),
+          style: TextStyle(fontSize: 11, color: textMid, fontWeight: FontWeight.w500),
         ),
       ],
     );
   }
 
+  // ═══════════════════════════════════════════════════════
+  // EMPTY STATE
+  // ═══════════════════════════════════════════════════════
   Widget _buildEmptyState() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Container(
-            width: 70,
-            height: 70,
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: Colors.grey.withAlpha(10),
               shape: BoxShape.circle,
+              gradient: LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  primaryBlue.withOpacity(0.08),
+                  accentBlue.withOpacity(0.05),
+                ],
+              ),
+              border: Border.all(
+                color: lightBlue.withOpacity(0.4),
+                width: 1.5,
+              ),
             ),
-            child: Icon(Icons.bar_chart_rounded, size: 38, color: Colors.grey[350]),
+            child: Icon(
+              Icons.bar_chart_rounded,
+              size: 44,
+              color: textLight,
+            ),
           ),
-          const SizedBox(height: 14),
-          Text(
+          const SizedBox(height: 16),
+          const Text(
             'Belum ada data lembur',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.grey[700]),
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+              color: textMid,
+            ),
           ),
           const SizedBox(height: 4),
           Text(
             'Tidak ada aktivitas lembur minggu ini.',
-            style: TextStyle(fontSize: 11, color: Colors.grey[500]),
+            style: TextStyle(
+              fontSize: 11,
+              color: textLight,
+            ),
+          ),
+          const SizedBox(height: 16),
+          // Mini chart kosong
+          SizedBox(
+            height: 60,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(
+                7,
+                (index) => Container(
+                  width: 14,
+                  height: [15, 25, 10, 20, 8, 30, 12][index].toDouble(),
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  decoration: BoxDecoration(
+                    color: lightBlue.withOpacity(0.4),
+                    borderRadius: const BorderRadius.vertical(
+                      top: Radius.circular(4),
+                    ),
+                  ),
+                ),
+              ),
+            ),
           ),
         ],
       ),

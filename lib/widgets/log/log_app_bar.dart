@@ -21,7 +21,7 @@ class LogAppBar extends StatelessWidget implements PreferredSizeWidget {
   Widget build(BuildContext context) {
     return AppBar(
       title: Text(
-        'System Logs',
+        'Log Sistem',
         style: GoogleFonts.poppins(
           fontWeight: FontWeight.w600,
           color: Colors.white,

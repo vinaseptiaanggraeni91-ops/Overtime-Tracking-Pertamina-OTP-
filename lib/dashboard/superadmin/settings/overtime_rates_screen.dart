@@ -1,4 +1,4 @@
-// FILE: lib/dashboard/superadmin/settings/overtime_rates_screen.dart
+// lib/dashboard/superadmin/settings/overtime_rates_screen.dart
 
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -6,6 +6,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
+import '../../../core/services/overtime_rate_service.dart';
+import '/widgets/bottom_nav/app_bottom_nav.dart';
 
 var logger = Logger();
 
@@ -19,33 +21,31 @@ class OvertimeRatesScreen extends StatefulWidget {
 class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
     with TickerProviderStateMixin {
   final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  final OvertimeRateService _rateService = OvertimeRateService();
 
-  // Animation Controllers
+  // Animation
   late AnimationController _fadeController;
   late Animation<double> _fadeAnimation;
 
   // Data
   bool isLoading = true;
   bool isSaving = false;
-  bool isDarkMode = false;
-
-  // Default gaji untuk perhitungan
-  final double defaultGaji = 3000000;
-  
-  // Hasil perhitungan
-  late double upahPerJam;
+  Map<String, dynamic> _rates = {};
   
   // Form controllers
   final _formKey = GlobalKey<FormState>();
   final _gajiController = TextEditingController();
   
   // Tarif lembur
-  late OvertimeRate weekdayRate;
-  late OvertimeRate holidayRate;
+  double _upahPerJam = 0;
+  double _firstHourMultiplier = 1.5;
+  double _nextHoursMultiplier = 2.0;
+  double _first8HoursMultiplier = 2.0;
+  double _ninthHourMultiplier = 3.0;
+  double _tenthPlusMultiplier = 4.0;
   
-  // Riwayat perubahan
-  List<RateHistory> rateHistory = [];
+  // Riwayat
+  List<Map<String, dynamic>> _rateHistory = [];
 
   @override
   void initState() {
@@ -53,7 +53,7 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
 
     _fadeController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 600),
     );
     _fadeAnimation = CurvedAnimation(
       parent: _fadeController,
@@ -61,78 +61,54 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
     );
     _fadeController.forward();
 
-    _initializeDefaultRates();
-    _loadRatesFromFirestore();
+    _loadData();
   }
 
-  void _initializeDefaultRates() {
-    upahPerJam = defaultGaji / 173;
-    
-    weekdayRate = OvertimeRate(
-      id: 'weekday',
-      name: 'Lembur Hari Kerja',
-      description: 'Senin - Jumat',
-      baseRate: upahPerJam,
-      firstHourMultiplier: 1.5,
-      nextHoursMultiplier: 2.0,
-      icon: Icons.business_center,
-      color: const Color(0xFF2196F3),
-    );
-
-    holidayRate = OvertimeRate(
-      id: 'holiday',
-      name: 'Lembur Hari Libur',
-      description: 'Sabtu, Minggu & Tanggal Merah',
-      baseRate: upahPerJam,
-      first8HoursMultiplier: 2.0,
-      ninthHourMultiplier: 3.0,
-      tenthPlusMultiplier: 4.0,
-      icon: Icons.celebration,
-      color: const Color(0xFF4CAF50),
-    );
-
-    _gajiController.text = NumberFormat('#,###').format(defaultGaji);
-  }
-
-  Future<void> _loadRatesFromFirestore() async {
+  Future<void> _loadData() async {
     setState(() => isLoading = true);
 
     try {
-      final docSnapshot = await _firestore
-          .collection('settings')
-          .doc('overtime_rates')
-          .get();
-
-      if (docSnapshot.exists) {
-        final data = docSnapshot.data() as Map<String, dynamic>;
-        
-        if (data['base_salary'] != null) {
-          final gaji = (data['base_salary'] as num).toDouble();
-          _gajiController.text = NumberFormat('#,###').format(gaji);
-          upahPerJam = gaji / 173;
-        }
-
-        if (data['weekday_rate'] != null) {
-          final wd = data['weekday_rate'] as Map<String, dynamic>;
-          weekdayRate = weekdayRate.copyWith(
-            firstHourMultiplier: (wd['first_hour_multiplier'] as num?)?.toDouble() ?? 1.5,
-            nextHoursMultiplier: (wd['next_hours_multiplier'] as num?)?.toDouble() ?? 2.0,
-            isActive: wd['is_active'] ?? true,
-          );
-        }
-
-        if (data['holiday_rate'] != null) {
-          final hd = data['holiday_rate'] as Map<String, dynamic>;
-          holidayRate = holidayRate.copyWith(
-            first8HoursMultiplier: (hd['first_8_hours_multiplier'] as num?)?.toDouble() ?? 2.0,
-            ninthHourMultiplier: (hd['ninth_hour_multiplier'] as num?)?.toDouble() ?? 3.0,
-            tenthPlusMultiplier: (hd['tenth_plus_multiplier'] as num?)?.toDouble() ?? 4.0,
-            isActive: hd['is_active'] ?? true,
-          );
-        }
+      // Load rates dari service
+      _rates = await _rateService.loadOvertimeRates(forceRefresh: true);
+      
+      // Parse data
+      _upahPerJam = _rateService.getRatePerHour(_rates);
+      final gaji = _rateService.getBaseSalary(_rates);
+      _gajiController.text = NumberFormat('#,###').format(gaji);
+      
+      // Parse weekday rates
+      final weekday = _rates['weekday_rate'] as Map<String, dynamic>?;
+      if (weekday != null) {
+        _firstHourMultiplier = (weekday['first_hour_multiplier'] as num?)?.toDouble() ?? 1.5;
+        _nextHoursMultiplier = (weekday['next_hours_multiplier'] as num?)?.toDouble() ?? 2.0;
       }
+      
+      // Parse holiday rates
+      final holiday = _rates['holiday_rate'] as Map<String, dynamic>?;
+      if (holiday != null) {
+        _first8HoursMultiplier = (holiday['first_8_hours_multiplier'] as num?)?.toDouble() ?? 2.0;
+        _ninthHourMultiplier = (holiday['ninth_hour_multiplier'] as num?)?.toDouble() ?? 3.0;
+        _tenthPlusMultiplier = (holiday['tenth_plus_multiplier'] as num?)?.toDouble() ?? 4.0;
+      }
+      
+      // Load history
+      await _loadHistory();
 
-      final historySnapshot = await _firestore
+    } catch (e) {
+      logger.e('Error loading data: $e');
+      if (mounted) {
+        _showSnackbar('Gagal memuat data tarif', isError: true);
+      }
+    }
+
+    if (mounted) {
+      setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _loadHistory() async {
+    try {
+      final snapshot = await FirebaseFirestore.instance
           .collection('settings')
           .doc('overtime_rates')
           .collection('history')
@@ -140,20 +116,20 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
           .limit(10)
           .get();
 
-      rateHistory = historySnapshot.docs.map((doc) {
+      _rateHistory = snapshot.docs.map((doc) {
         final data = doc.data();
-        return RateHistory.fromMap(doc.id, data);
+        return {
+          'id': doc.id,
+          'base_salary': (data['base_salary'] as num?)?.toDouble() ?? 0,
+          'rate_per_hour': (data['rate_per_hour'] as num?)?.toDouble() ?? 0,
+          'changed_by': data['changed_by'] as String? ?? 'system',
+          'changed_at': (data['changed_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
+        };
       }).toList();
-
     } catch (e) {
-      logger.e('Error loading rates: $e');
-      if (mounted) {
-        _showErrorSnackbar('Gagal memuat data tarif');
-      }
-    }
-
-    if (mounted) {
-      setState(() => isLoading = false);
+      // Handle permission denied gracefully
+      logger.w('Could not load history: $e');
+      _rateHistory = [];
     }
   }
 
@@ -166,55 +142,40 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
       final gajiString = _gajiController.text.replaceAll(RegExp(r'[^\d]'), '');
       final gaji = double.parse(gajiString);
       
-      upahPerJam = gaji / 173;
+      _upahPerJam = gaji / 173;
 
       final ratesData = {
         'base_salary': gaji,
-        'rate_per_hour': upahPerJam,
-        'last_updated': FieldValue.serverTimestamp(),
-        'updated_by': _auth.currentUser?.email ?? 'system',
+        'rate_per_hour': _upahPerJam,
         'weekday_rate': {
-          'first_hour_multiplier': weekdayRate.firstHourMultiplier,
-          'next_hours_multiplier': weekdayRate.nextHoursMultiplier,
-          'is_active': weekdayRate.isActive,
+          'first_hour_multiplier': _firstHourMultiplier,
+          'next_hours_multiplier': _nextHoursMultiplier,
+          'is_active': true,
         },
         'holiday_rate': {
-          'first_8_hours_multiplier': holidayRate.first8HoursMultiplier,
-          'ninth_hour_multiplier': holidayRate.ninthHourMultiplier,
-          'tenth_plus_multiplier': holidayRate.tenthPlusMultiplier,
-          'is_active': holidayRate.isActive,
+          'first_8_hours_multiplier': _first8HoursMultiplier,
+          'ninth_hour_multiplier': _ninthHourMultiplier,
+          'tenth_plus_multiplier': _tenthPlusMultiplier,
+          'is_active': true,
         },
       };
 
-      await _firestore
-          .collection('settings')
-          .doc('overtime_rates')
-          .set(ratesData, SetOptions(merge: true));
+      await _rateService.updateOvertimeRates(
+        newRates: ratesData,
+        updatedBy: _auth.currentUser?.email ?? 'system',
+      );
 
-      await _firestore
-          .collection('settings')
-          .doc('overtime_rates')
-          .collection('history')
-          .add({
-        'base_salary': gaji,
-        'rate_per_hour': upahPerJam,
-        'weekday_rate': ratesData['weekday_rate'],
-        'holiday_rate': ratesData['holiday_rate'],
-        'changed_by': _auth.currentUser?.email ?? 'system',
-        'changed_at': FieldValue.serverTimestamp(),
-        'note': 'Perubahan tarif lembur',
-      });
-
-      await _loadRatesFromFirestore();
-
+      // Reload data
+      await _loadData();
+      
       if (mounted) {
-        _showSuccessSnackbar('Tarif lembur berhasil disimpan');
+        _showSnackbar('Tarif lembur berhasil disimpan');
       }
 
     } catch (e) {
       logger.e('Error saving rates: $e');
       if (mounted) {
-        _showErrorSnackbar('Gagal menyimpan tarif: $e');
+        _showSnackbar('Gagal menyimpan tarif', isError: true);
       }
     }
 
@@ -223,26 +184,11 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
     }
   }
 
-  Future<void> _refreshData() async {
-    await _loadRatesFromFirestore();
-    if (mounted) {
-      _showSuccessSnackbar('Data berhasil diperbarui');
-    }
-  }
-
-  String _formatRupiah(double value) {
-    return 'Rp ${NumberFormat('#,###').format(value)}';
-  }
-
-  Color _withOpacity(Color color, double opacity) {
-    return color.withValues(alpha: opacity);
-  }
-
-  void _showSuccessSnackbar(String message) {
+  void _showSnackbar(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(message),
-        backgroundColor: Colors.green,
+        backgroundColor: isError ? Colors.red : Colors.green,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         duration: const Duration(seconds: 2),
@@ -250,38 +196,8 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
     );
   }
 
-  void _showErrorSnackbar(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(message),
-        backgroundColor: Colors.red,
-        behavior: SnackBarBehavior.floating,
-        duration: const Duration(seconds: 3),
-      ),
-    );
-  }
-
-  void _showInfoDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Informasi Perhitungan', style: GoogleFonts.poppins()),
-        content: Text(
-          'Upah per jam dihitung berdasarkan rumus:\n'
-          '1/173 × Gaji Pokok Bulanan\n\n'
-          'Ketentuan Lembur:\n'
-          '• Hari Kerja: Jam pertama 1,5x, jam berikutnya 2x\n'
-          '• Hari Libur: 8 jam pertama 2x, jam ke-9 3x, jam ke-10 dst 4x',
-          style: GoogleFonts.poppins(fontSize: 13),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Tutup', style: GoogleFonts.poppins()),
-          ),
-        ],
-      ),
-    );
+  String _formatRupiah(double value) {
+    return OvertimeRateService.formatRupiahFull(value);
   }
 
   @override
@@ -293,14 +209,11 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isTablet = size.width > 600;
-
     return Scaffold(
-      backgroundColor: isDarkMode ? const Color(0xFF1A1A2E) : const Color(0xFFF5F7FA),
+      backgroundColor: const Color(0xFFF0F4F8),
       appBar: AppBar(
         title: Text(
-          'Konfigurasi Tarif Lembur',
+          'Tarif Lembur',
           style: GoogleFonts.poppins(
             fontWeight: FontWeight.w600,
             color: Colors.white,
@@ -316,80 +229,121 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh, color: Colors.white),
-            onPressed: _refreshData,
-          ),
-          IconButton(
-            icon: const Icon(Icons.info_outline, color: Colors.white),
-            onPressed: _showInfoDialog,
-          ),
-          IconButton(
-            icon: Icon(
-              isDarkMode ? Icons.light_mode : Icons.dark_mode,
-              color: Colors.white,
-            ),
-            onPressed: () => setState(() => isDarkMode = !isDarkMode),
+            onPressed: _loadData,
           ),
         ],
       ),
+      // 🔥 BOTTOM NAV: layar ini khusus superadmin (dibatasi di router)
+      bottomNavigationBar: const AppBottomNav(
+        userRole: 'superadmin',
+        currentIndex: 2, // TODO: sesuaikan index tab "Penataan/Settings" kalau beda
+      ),
       body: isLoading
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Memuat konfigurasi tarif...',
-                    style: GoogleFonts.poppins(
-                      color: isDarkMode ? Colors.white70 : Colors.grey[600],
+          ? _buildLoadingState()
+          : FadeTransition(
+              opacity: _fadeAnimation,
+              child: Form(
+                key: _formKey,
+                child: ListView(
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    // Gaji Card
+                    _buildSalaryCard(),
+                    const SizedBox(height: 16),
+                    
+                    // Weekday Rate Card
+                    _buildRateCard(
+                      title: 'Hari Kerja',
+                      subtitle: 'Senin - Jumat',
+                      color: const Color(0xFF2196F3),
+                      icon: Icons.business_center,
+                      firstLabel: 'Jam ke-1',
+                      firstValue: _firstHourMultiplier,
+                      nextLabel: 'Jam ke-2+',
+                      nextValue: _nextHoursMultiplier,
+                      onEdit: () => _showEditDialog2(
+                        title: 'Edit Tarif Hari Kerja',
+                        initialValue1: _firstHourMultiplier,
+                        initialValue2: _nextHoursMultiplier,
+                        label1: 'Multiplier Jam ke-1',
+                        label2: 'Multiplier Jam ke-2+',
+                        onSave: (v1, v2) {
+                          setState(() {
+                            _firstHourMultiplier = v1;
+                            _nextHoursMultiplier = v2;
+                          });
+                        },
+                      ),
                     ),
-                  ),
-                ],
-              ),
-            )
-          : Form(
-              key: _formKey,
-              child: ListView(
-                padding: EdgeInsets.all(isTablet ? 24 : 16),
-                children: [
-                  // Kartu Gaji Pokok
-                  _buildSalaryCard(),
-                  const SizedBox(height: 20),
-
-                  // Kartu Tarif Hari Kerja
-                  _buildRateCard(
-                    title: 'Tarif Lembur Hari Kerja',
-                    subtitle: 'Berlaku untuk Senin - Jumat',
-                    rate: weekdayRate,
-                    isHoliday: false,
-                    onEdit: () => _showEditWeekdayRateDialog(),
-                  ),
-                  const SizedBox(height: 16),
-
-                  // Kartu Tarif Hari Libur
-                  _buildRateCard(
-                    title: 'Tarif Lembur Hari Libur',
-                    subtitle: 'Berlaku untuk Sabtu, Minggu & Tanggal Merah',
-                    rate: holidayRate,
-                    isHoliday: true,
-                    onEdit: () => _showEditHolidayRateDialog(),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Ringkasan Perhitungan
-                  _buildSummaryCard(),
-                  const SizedBox(height: 20),
-
-                  // Riwayat Perubahan
-                  if (rateHistory.isNotEmpty) _buildHistorySection(),
-                  const SizedBox(height: 24),
-
-                  // Tombol Simpan
-                  _buildSaveButton(),
-                  const SizedBox(height: 32),
-                ],
+                    const SizedBox(height: 16),
+                    
+                    // Holiday Rate Card
+                    _buildRateCard(
+                      title: 'Hari Libur',
+                      subtitle: 'Sabtu, Minggu & Tanggal Merah',
+                      color: const Color(0xFF4CAF50),
+                      icon: Icons.celebration,
+                      firstLabel: '8 jam pertama',
+                      firstValue: _first8HoursMultiplier,
+                      nextLabel: 'Jam ke-9',
+                      nextValue: _ninthHourMultiplier,
+                      extraLabel: 'Jam ke-10+',
+                      extraValue: _tenthPlusMultiplier,
+                      onEdit: () => _showEditDialog3(
+                        title: 'Edit Tarif Hari Libur',
+                        initialValue1: _first8HoursMultiplier,
+                        initialValue2: _ninthHourMultiplier,
+                        initialValue3: _tenthPlusMultiplier,
+                        label1: 'Multiplier 8 jam pertama',
+                        label2: 'Multiplier Jam ke-9',
+                        label3: 'Multiplier Jam ke-10+',
+                        onSave: (v1, v2, v3) {
+                          setState(() {
+                            _first8HoursMultiplier = v1;
+                            _ninthHourMultiplier = v2;
+                            _tenthPlusMultiplier = v3;
+                          });
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    
+                    // Summary
+                    _buildSummaryCard(),
+                    const SizedBox(height: 16),
+                    
+                    // History
+                    if (_rateHistory.isNotEmpty) _buildHistorySection(),
+                    const SizedBox(height: 16),
+                    
+                    // Save Button
+                    _buildSaveButton(),
+                    const SizedBox(height: 32),
+                  ],
+                ),
               ),
             ),
+    );
+  }
+
+  Widget _buildLoadingState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(
+            color: Color(0xFF1E3C72),
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'Memuat tarif lembur...',
+            style: GoogleFonts.poppins(
+              color: Colors.grey[600],
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -401,9 +355,9 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
     );
 
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF2A2A3E) : Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -422,7 +376,7 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
                   color: const Color(0xFF1E3C72).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(10),
                 ),
                 child: const Icon(
                   Icons.payments,
@@ -434,14 +388,14 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
               Text(
                 'Gaji Pokok Bulanan',
                 style: GoogleFonts.poppins(
-                  fontSize: 16,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
-                  color: isDarkMode ? Colors.white : const Color(0xFF1E293B),
+                  color: const Color(0xFF1E293B),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
@@ -449,20 +403,25 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
                 child: TextFormField(
                   controller: _gajiController,
                   style: GoogleFonts.poppins(
-                    fontSize: 24,
+                    fontSize: 20,
                     fontWeight: FontWeight.w600,
-                    color: isDarkMode ? Colors.white : const Color(0xFF1E3C72),
+                    color: const Color(0xFF1E3C72),
                   ),
                   decoration: InputDecoration(
                     prefixText: 'Rp ',
                     prefixStyle: GoogleFonts.poppins(
-                      fontSize: 24,
+                      fontSize: 20,
                       fontWeight: FontWeight.w600,
-                      color: isDarkMode ? Colors.white70 : Colors.grey[600],
+                      color: Colors.grey[600],
                     ),
                     border: InputBorder.none,
                     enabledBorder: InputBorder.none,
                     focusedBorder: InputBorder.none,
+                    hintText: '0',
+                    hintStyle: TextStyle(
+                      fontSize: 20,
+                      color: Colors.grey[400],
+                    ),
                   ),
                   keyboardType: TextInputType.number,
                   validator: (value) {
@@ -493,48 +452,45 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
               ),
               Container(
                 padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 6,
+                  horizontal: 10,
+                  vertical: 4,
                 ),
                 decoration: BoxDecoration(
                   color: Colors.grey[200],
-                  borderRadius: BorderRadius.circular(20),
+                  borderRadius: BorderRadius.circular(16),
                 ),
                 child: Text(
-                  '/ bulan',
+                  '/bulan',
                   style: GoogleFonts.poppins(
                     color: Colors.grey[700],
-                    fontSize: 12,
+                    fontSize: 11,
                   ),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: const Color(0xFF1E3C72).withValues(alpha: 0.05),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: const Color(0xFF1E3C72).withValues(alpha: 0.1),
-              ),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(
-                  'Nilai upah per jam',
+                  'Upah per jam',
                   style: GoogleFonts.poppins(
                     color: Colors.grey[700],
-                    fontSize: 14,
+                    fontSize: 13,
                   ),
                 ),
                 Text(
                   _formatRupiah(gajiBersih / 173),
                   style: GoogleFonts.poppins(
                     color: const Color(0xFF1E3C72),
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -549,210 +505,21 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
   Widget _buildRateCard({
     required String title,
     required String subtitle,
-    required OvertimeRate rate,
-    required bool isHoliday,
+    required Color color,
+    required IconData icon,
+    required String firstLabel,
+    required double firstValue,
+    required String nextLabel,
+    required double nextValue,
+    String? extraLabel,
+    double? extraValue,
     required VoidCallback onEdit,
   }) {
+    final hasExtra = extraLabel != null && extraValue != null;
+
     return Container(
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            color: isDarkMode ? const Color(0xFF2A2A3E) : Colors.white,
-            border: Border.all(
-              color: Colors.grey[300]!,
-              width: 1,
-            ),
-          ),
-          child: Column(
-            children: [
-              // Header
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: rate.color.withValues(alpha: 0.05),
-                  border: Border(
-                    bottom: BorderSide(
-                      color: Colors.grey[300]!,
-                      width: 1,
-                    ),
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: rate.color.withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Icon(rate.icon, color: rate.color, size: 20),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            title,
-                            style: GoogleFonts.poppins(
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                              color: isDarkMode ? Colors.white : const Color(0xFF1E293B),
-                            ),
-                          ),
-                          Text(
-                            subtitle,
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              color: Colors.grey[600],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Switch(
-                      value: rate.isActive,
-                      onChanged: (value) {
-                        setState(() {
-                          if (isHoliday) {
-                            holidayRate = holidayRate.copyWith(isActive: value);
-                          } else {
-                            weekdayRate = weekdayRate.copyWith(isActive: value);
-                          }
-                        });
-                      },
-                      activeThumbColor: rate.color,
-                    ),
-                  ],
-                ),
-              ),
-
-              // Content
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  children: [
-                    if (!isHoliday) ...[
-                      _buildRateRow(
-                        'Jam pertama',
-                        '${rate.firstHourMultiplier?.toStringAsFixed(1)}x',
-                        _formatRupiah(upahPerJam * rate.firstHourMultiplier!),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildRateRow(
-                        'Jam kedua dan seterusnya',
-                        '${rate.nextHoursMultiplier?.toStringAsFixed(1)}x',
-                        _formatRupiah(upahPerJam * rate.nextHoursMultiplier!),
-                      ),
-                    ] else ...[
-                      _buildRateRow(
-                        '8 jam pertama',
-                        '${rate.first8HoursMultiplier?.toStringAsFixed(1)}x',
-                        _formatRupiah(upahPerJam * rate.first8HoursMultiplier!),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildRateRow(
-                        'Jam ke-9',
-                        '${rate.ninthHourMultiplier?.toStringAsFixed(1)}x',
-                        _formatRupiah(upahPerJam * rate.ninthHourMultiplier!),
-                      ),
-                      const SizedBox(height: 12),
-                      _buildRateRow(
-                        'Jam ke-10 dan seterusnya',
-                        '${rate.tenthPlusMultiplier?.toStringAsFixed(1)}x',
-                        _formatRupiah(upahPerJam * rate.tenthPlusMultiplier!),
-                      ),
-                    ],
-
-                    const Divider(height: 24),
-
-                    // Tombol Edit
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.end,
-                      children: [
-                        TextButton.icon(
-                          onPressed: onEdit,
-                          icon: Icon(Icons.edit, size: 16, color: rate.color),
-                          label: Text(
-                            'Edit Tarif',
-                            style: GoogleFonts.poppins(
-                              color: rate.color,
-                              fontSize: 12,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRateRow(String label, String multiplier, String amount) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            fontSize: 13,
-            color: isDarkMode ? Colors.white70 : Colors.grey[700],
-          ),
-        ),
-        Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFF6B35).withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                multiplier,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
-                  color: const Color(0xFFFF6B35),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              amount,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w600,
-                color: isDarkMode ? Colors.white : const Color(0xFF1E293B),
-              ),
-            ),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSummaryCard() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF2A2A3E) : Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -763,56 +530,181 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
         ],
       ),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF4CAF50).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.calculate,
-                  color: Color(0xFF4CAF50),
-                  size: 20,
+          // Header
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.05),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(16),
+              ),
+              border: Border(
+                bottom: BorderSide(
+                  color: Colors.grey[200]!,
+                  width: 1,
                 ),
               ),
-              const SizedBox(width: 12),
-              Text(
-                'Ringkasan Tarif',
-                style: GoogleFonts.poppins(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                  color: isDarkMode ? Colors.white : const Color(0xFF1E293B),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: color, size: 18),
                 ),
-              ),
-            ],
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.poppins(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF1E293B),
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: GoogleFonts.poppins(
+                          fontSize: 10,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Text(
+                    'Aktif',
+                    style: GoogleFonts.poppins(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.green,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildSummaryItem(
-                  'Upah per Jam',
-                  _formatRupiah(upahPerJam),
-                  Icons.access_time,
+          
+          // Content
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: Column(
+              children: [
+                _buildRateRow(firstLabel, '${firstValue.toStringAsFixed(1)}x', color),
+                const SizedBox(height: 8),
+                _buildRateRow(nextLabel, '${nextValue.toStringAsFixed(1)}x', color),
+                if (hasExtra) ...[
+                  const SizedBox(height: 8),
+                  _buildRateRow(extraLabel!, '${extraValue!.toStringAsFixed(1)}x', color),
+                ],
+                const Divider(height: 20),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: onEdit,
+                    icon: Icon(Icons.edit, size: 14, color: color),
+                    label: Text(
+                      'Ubah',
+                      style: GoogleFonts.poppins(
+                        color: color,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      minimumSize: Size.zero,
+                    ),
+                  ),
                 ),
-              ),
-              Container(
-                width: 1,
-                height: 40,
-                color: Colors.grey[300],
-              ),
-              Expanded(
-                child: _buildSummaryItem(
-                  'Berlaku sejak',
-                  DateFormat('dd/MM/yyyy').format(DateTime.now()),
-                  Icons.update,
-                ),
-              ),
-            ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildRateRow(String label, String value, Color color) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: GoogleFonts.poppins(
+            fontSize: 12,
+            color: Colors.grey[700],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Text(
+            value,
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildSummaryCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _buildSummaryItem(
+              'Upah per Jam',
+              _formatRupiah(_upahPerJam),
+              Icons.access_time,
+            ),
+          ),
+          Container(
+            width: 1,
+            height: 40,
+            color: Colors.grey[300],
+          ),
+          Expanded(
+            child: _buildSummaryItem(
+              'Tarif Terakhir',
+              DateFormat('dd/MM/yyyy').format(DateTime.now()),
+              Icons.update,
+            ),
           ),
         ],
       ),
@@ -830,19 +722,19 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
             Text(
               label,
               style: GoogleFonts.poppins(
-                fontSize: 11,
+                fontSize: 10,
                 color: Colors.grey[600],
               ),
             ),
           ],
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           value,
           style: GoogleFonts.poppins(
-            fontSize: 14,
+            fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: isDarkMode ? Colors.white : const Color(0xFF1E293B),
+            color: const Color(0xFF1E293B),
           ),
         ),
       ],
@@ -851,9 +743,9 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
 
   Widget _buildHistorySection() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF2A2A3E) : Colors.white,
+        color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -868,97 +760,75 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
         children: [
           Row(
             children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF9C27B0).withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Icon(
-                  Icons.history,
-                  color: Color(0xFF9C27B0),
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
+              const Icon(Icons.history, size: 18, color: Color(0xFF9C27B0)),
+              const SizedBox(width: 8),
               Text(
                 'Riwayat Perubahan',
                 style: GoogleFonts.poppins(
-                  fontSize: 15,
+                  fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: isDarkMode ? Colors.white : const Color(0xFF1E293B),
+                  color: const Color(0xFF1E293B),
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: rateHistory.length > 3 ? 3 : rateHistory.length,
-            separatorBuilder: (_, __) => const Divider(height: 1),
-            itemBuilder: (context, index) {
-              final history = rateHistory[index];
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 8),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 32,
-                      height: 32,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E3C72).withValues(alpha: 0.1),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.edit,
-                        size: 16,
-                        color: Color(0xFF1E3C72),
-                      ),
+          const SizedBox(height: 12),
+          ..._rateHistory.take(3).map((history) {
+            final changedAt = history['changed_at'] as DateTime;
+            return Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Row(
+                children: [
+                  Container(
+                    width: 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E3C72),
+                      shape: BoxShape.circle,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            _formatRupiah(history.baseSalary),
-                            style: GoogleFonts.poppins(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: isDarkMode ? Colors.white : const Color(0xFF1E293B),
-                            ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _formatRupiah(history['base_salary'] as double),
+                          style: GoogleFonts.poppins(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w500,
+                            color: const Color(0xFF1E293B),
                           ),
-                          Text(
-                            'Diubah oleh: ${history.changedBy}',
-                            style: GoogleFonts.poppins(
-                              fontSize: 11,
-                              color: Colors.grey[600],
-                            ),
+                        ),
+                        Text(
+                          'By: ${history['changed_by']}',
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            color: Colors.grey[600],
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    Text(
-                      DateFormat('dd/MM/yy').format(history.changedAt),
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: Colors.grey[500],
-                      ),
+                  ),
+                  Text(
+                    DateFormat('dd/MM/yy HH:mm').format(changedAt),
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      color: Colors.grey[500],
                     ),
-                  ],
-                ),
-              );
-            },
-          ),
-          if (rateHistory.length > 3)
+                  ),
+                ],
+              ),
+            );
+          }),
+          if (_rateHistory.length > 3)
             Padding(
-              padding: const EdgeInsets.only(top: 12),
+              padding: const EdgeInsets.only(top: 8),
               child: Center(
                 child: Text(
-                  '+${rateHistory.length - 3} perubahan lainnya',
+                  '+ ${_rateHistory.length - 3} perubahan lainnya',
                   style: GoogleFonts.poppins(
-                    fontSize: 11,
+                    fontSize: 10,
                     color: Colors.grey[500],
                   ),
                 ),
@@ -972,7 +842,7 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
   Widget _buildSaveButton() {
     return Container(
       width: double.infinity,
-      height: 52,
+      height: 50,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(12),
         gradient: const LinearGradient(
@@ -1005,9 +875,9 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
                 ),
               )
             : Text(
-                'Simpan Konfigurasi',
+                'Simpan Tarif Lembur',
                 style: GoogleFonts.poppins(
-                  fontSize: 15,
+                  fontSize: 14,
                   fontWeight: FontWeight.w600,
                   color: Colors.white,
                 ),
@@ -1016,310 +886,154 @@ class _OvertimeRatesScreenState extends State<OvertimeRatesScreen>
     );
   }
 
-  void _showEditWeekdayRateDialog() {
-    final firstHourController = TextEditingController(
-      text: weekdayRate.firstHourMultiplier?.toStringAsFixed(1),
-    );
-    final nextHoursController = TextEditingController(
-      text: weekdayRate.nextHoursMultiplier?.toStringAsFixed(1),
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Edit Tarif Hari Kerja',
-          style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: firstHourController,
-                decoration: InputDecoration(
-                  labelText: 'Multiplier Jam Pertama',
-                  suffixText: 'x',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Masukkan multiplier';
-                  }
-                  final mult = double.tryParse(value);
-                  if (mult == null || mult < 1) {
-                    return 'Multiplier minimal 1';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: nextHoursController,
-                decoration: InputDecoration(
-                  labelText: 'Multiplier Jam Kedua dst',
-                  suffixText: 'x',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Masukkan multiplier';
-                  }
-                  final mult = double.tryParse(value);
-                  if (mult == null || mult < 1) {
-                    return 'Multiplier minimal 1';
-                  }
-                  return null;
-                },
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Batal', style: GoogleFonts.poppins()),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                setState(() {
-                  weekdayRate = weekdayRate.copyWith(
-                    firstHourMultiplier: double.parse(firstHourController.text),
-                    nextHoursMultiplier: double.parse(nextHoursController.text),
-                  );
-                });
-                Navigator.pop(context);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1E3C72),
-            ),
-            child: Text('Simpan', style: GoogleFonts.poppins()),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showEditHolidayRateDialog() {
-    final first8Controller = TextEditingController(
-      text: holidayRate.first8HoursMultiplier?.toStringAsFixed(1),
-    );
-    final ninthController = TextEditingController(
-      text: holidayRate.ninthHourMultiplier?.toStringAsFixed(1),
-    );
-    final tenthController = TextEditingController(
-      text: holidayRate.tenthPlusMultiplier?.toStringAsFixed(1),
-    );
-    final formKey = GlobalKey<FormState>();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(
-          'Edit Tarif Hari Libur',
-          style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w600),
-        ),
-        content: Form(
-          key: formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                controller: first8Controller,
-                decoration: InputDecoration(
-                  labelText: 'Multiplier 8 Jam Pertama',
-                  suffixText: 'x',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Masukkan multiplier';
-                  }
-                  final mult = double.tryParse(value);
-                  if (mult == null || mult < 1) {
-                    return 'Multiplier minimal 1';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: ninthController,
-                decoration: InputDecoration(
-                  labelText: 'Multiplier Jam ke-9',
-                  suffixText: 'x',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Masukkan multiplier';
-                  }
-                  final mult = double.tryParse(value);
-                  if (mult == null || mult < 1) {
-                    return 'Multiplier minimal 1';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 12),
-              TextFormField(
-                controller: tenthController,
-                decoration: InputDecoration(
-                  labelText: 'Multiplier Jam ke-10 dst',
-                  suffixText: 'x',
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                ),
-                keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Masukkan multiplier';
-                  }
-                  final mult = double.tryParse(value);
-                  if (mult == null || mult < 1) {
-                    return 'Multiplier minimal 1';
-                  }
-                  return null;
-                },
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text('Batal', style: GoogleFonts.poppins()),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              if (formKey.currentState!.validate()) {
-                setState(() {
-                  holidayRate = holidayRate.copyWith(
-                    first8HoursMultiplier: double.parse(first8Controller.text),
-                    ninthHourMultiplier: double.parse(ninthController.text),
-                    tenthPlusMultiplier: double.parse(tenthController.text),
-                  );
-                });
-                Navigator.pop(context);
-              }
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1E3C72),
-            ),
-            child: Text('Simpan', style: GoogleFonts.poppins()),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ==================== MODEL CLASSES ====================
-
-class OvertimeRate {
-  final String id;
-  final String name;
-  final String description;
-  final double baseRate;
-  final double? firstHourMultiplier;
-  final double? nextHoursMultiplier;
-  final double? first8HoursMultiplier;
-  final double? ninthHourMultiplier;
-  final double? tenthPlusMultiplier;
-  final IconData icon;
-  final Color color;
-  final bool isActive;
-
-  OvertimeRate({
-    required this.id,
-    required this.name,
-    required this.description,
-    required this.baseRate,
-    this.firstHourMultiplier,
-    this.nextHoursMultiplier,
-    this.first8HoursMultiplier,
-    this.ninthHourMultiplier,
-    this.tenthPlusMultiplier,
-    required this.icon,
-    required this.color,
-    this.isActive = true,
-  });
-
-  OvertimeRate copyWith({
-    String? id,
-    String? name,
-    String? description,
-    double? baseRate,
-    double? firstHourMultiplier,
-    double? nextHoursMultiplier,
-    double? first8HoursMultiplier,
-    double? ninthHourMultiplier,
-    double? tenthPlusMultiplier,
-    IconData? icon,
-    Color? color,
-    bool? isActive,
+  // ==================== EDIT DIALOGS ====================
+  
+  // For 2 parameters (Weekday)
+  void _showEditDialog2({
+    required String title,
+    required double initialValue1,
+    required double initialValue2,
+    required String label1,
+    required String label2,
+    required void Function(double, double) onSave,
   }) {
-    return OvertimeRate(
-      id: id ?? this.id,
-      name: name ?? this.name,
-      description: description ?? this.description,
-      baseRate: baseRate ?? this.baseRate,
-      firstHourMultiplier: firstHourMultiplier ?? this.firstHourMultiplier,
-      nextHoursMultiplier: nextHoursMultiplier ?? this.nextHoursMultiplier,
-      first8HoursMultiplier: first8HoursMultiplier ?? this.first8HoursMultiplier,
-      ninthHourMultiplier: ninthHourMultiplier ?? this.ninthHourMultiplier,
-      tenthPlusMultiplier: tenthPlusMultiplier ?? this.tenthPlusMultiplier,
-      icon: icon ?? this.icon,
-      color: color ?? this.color,
-      isActive: isActive ?? this.isActive,
+    final controller1 = TextEditingController(text: initialValue1.toStringAsFixed(1));
+    final controller2 = TextEditingController(text: initialValue2.toStringAsFixed(1));
+    final formKey = GlobalKey<FormState>();
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          title,
+          style: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildTextField(controller1, label1),
+              const SizedBox(height: 10),
+              _buildTextField(controller2, label2),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Batal', style: GoogleFonts.poppins()),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                final v1 = double.parse(controller1.text);
+                final v2 = double.parse(controller2.text);
+                onSave(v1, v2);
+                Navigator.pop(context);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E3C72),
+            ),
+            child: Text('Simpan', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
     );
   }
-}
 
-class RateHistory {
-  final String id;
-  final double baseSalary;
-  final double ratePerHour;
-  final String changedBy;
-  final DateTime changedAt;
+  // For 3 parameters (Holiday)
+  void _showEditDialog3({
+    required String title,
+    required double initialValue1,
+    required double initialValue2,
+    required double initialValue3,
+    required String label1,
+    required String label2,
+    required String label3,
+    required void Function(double, double, double) onSave,
+  }) {
+    final controller1 = TextEditingController(text: initialValue1.toStringAsFixed(1));
+    final controller2 = TextEditingController(text: initialValue2.toStringAsFixed(1));
+    final controller3 = TextEditingController(text: initialValue3.toStringAsFixed(1));
+    final formKey = GlobalKey<FormState>();
 
-  RateHistory({
-    required this.id,
-    required this.baseSalary,
-    required this.ratePerHour,
-    required this.changedBy,
-    required this.changedAt,
-  });
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          title,
+          style: GoogleFonts.poppins(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        content: Form(
+          key: formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildTextField(controller1, label1),
+              const SizedBox(height: 10),
+              _buildTextField(controller2, label2),
+              const SizedBox(height: 10),
+              _buildTextField(controller3, label3),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Batal', style: GoogleFonts.poppins()),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (formKey.currentState!.validate()) {
+                final v1 = double.parse(controller1.text);
+                final v2 = double.parse(controller2.text);
+                final v3 = double.parse(controller3.text);
+                onSave(v1, v2, v3);
+                Navigator.pop(context);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF1E3C72),
+            ),
+            child: Text('Simpan', style: GoogleFonts.poppins()),
+          ),
+        ],
+      ),
+    );
+  }
 
-  factory RateHistory.fromMap(String id, Map<String, dynamic> map) {
-    return RateHistory(
-      id: id,
-      baseSalary: (map['base_salary'] as num?)?.toDouble() ?? 0,
-      ratePerHour: (map['rate_per_hour'] as num?)?.toDouble() ?? 0,
-      changedBy: map['changed_by'] as String? ?? 'system',
-      changedAt: (map['changed_at'] as Timestamp?)?.toDate() ?? DateTime.now(),
+  Widget _buildTextField(TextEditingController controller, String label) {
+    return TextFormField(
+      controller: controller,
+      decoration: InputDecoration(
+        labelText: label,
+        suffixText: 'x',
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(8),
+        ),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        labelStyle: GoogleFonts.poppins(fontSize: 12),
+      ),
+      keyboardType: TextInputType.number,
+      style: GoogleFonts.poppins(fontSize: 13),
+      validator: (value) {
+        if (value == null || value.isEmpty) {
+          return 'Masukkan multiplier';
+        }
+        final mult = double.tryParse(value);
+        if (mult == null || mult < 1) {
+          return 'Multiplier minimal 1';
+        }
+        return null;
+      },
     );
   }
 }

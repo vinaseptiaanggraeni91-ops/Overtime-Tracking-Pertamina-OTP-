@@ -4,9 +4,7 @@ class TeamHelpers {
   static String getFungsiLabel(String fungsi) {
     switch (fungsi.toLowerCase()) {
       case 'operation':
-        return 'Operation';
-      case 'lab':
-        return 'Laboratorium';
+        return 'Operational';
       case 'maintenance':
         return 'Maintenance';
       case 'hsse':

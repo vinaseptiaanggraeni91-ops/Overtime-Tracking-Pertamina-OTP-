@@ -80,6 +80,8 @@ class _UserFormSheetState extends State<UserFormSheet> {
     _isOfficerSafety = _role == 'officer_safety';
     _filteredWorkers = List.from(widget.availableWorkers);
 
+    // Satu-satunya listener untuk perubahan teks ID Pekerja.
+    // (Sebelumnya juga dipanggil via onChanged di TextFormField -> dobel trigger)
     _idPekerjaCtrl.addListener(_onIdPekerjaChanged);
     _idPekerjaFocus.addListener(() {
       if (!_idPekerjaFocus.hasFocus) {
@@ -136,6 +138,7 @@ class _UserFormSheetState extends State<UserFormSheet> {
 
   Future<bool> _validateWorker() async {
     final idPekerja = _idPekerjaCtrl.text.trim();
+    // ID Pekerja bersifat opsional untuk semua role -> kosong dianggap valid.
     if (idPekerja.isEmpty) return true;
 
     setState(() {
@@ -202,7 +205,7 @@ class _UserFormSheetState extends State<UserFormSheet> {
   @override
   Widget build(BuildContext context) {
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
-    
+
     return Container(
       constraints: BoxConstraints(
         maxHeight: MediaQuery.of(context).size.height * 0.9, // Maksimal 90% tinggi layar
@@ -226,7 +229,7 @@ class _UserFormSheetState extends State<UserFormSheet> {
         children: [
           // 🔥 Header Fixed (tidak ikut scroll)
           _buildFixedHeader(),
-          
+
           // 🔥 Scrollable Content
           Flexible(
             child: SingleChildScrollView(
@@ -242,7 +245,7 @@ class _UserFormSheetState extends State<UserFormSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // ID Pekerja
+                    // ID Pekerja (opsional untuk semua role)
                     _buildCompactSection(
                       icon: Icons.badge_rounded,
                       title: 'ID Pekerja',
@@ -292,7 +295,13 @@ class _UserFormSheetState extends State<UserFormSheet> {
                             keyboardType: TextInputType.phone,
                             validator: (v) {
                               if (v == null || v.trim().isEmpty) return 'Wajib diisi';
-                              if (v.trim().length < 10 || v.trim().length > 13) return '10-13 digit';
+                              final trimmed = v.trim();
+                              final digitOnly = RegExp(r'^[0-9]+$');
+                              if (!digitOnly.hasMatch(trimmed)) return 'Hanya boleh angka';
+                              if (trimmed.length < 10 || trimmed.length > 13) return '10-13 digit';
+                              if (!trimmed.startsWith('0') && !trimmed.startsWith('62')) {
+                                return 'Harus diawali 0 atau 62';
+                              }
                               return null;
                             },
                           ),
@@ -320,15 +329,17 @@ class _UserFormSheetState extends State<UserFormSheet> {
                     _buildCompactSection(
                       icon: Icons.admin_panel_settings_rounded,
                       title: 'Role & Departemen',
-                      subtitle: 'Hak akses pengguna',
+                      subtitle: isEdit ? 'Fungsi & departemen dikunci saat edit' : 'Hak akses pengguna',
                       child: Column(
                         children: [
+                          // 🔒 Role dikunci saat edit
                           _buildCompactDropdown(
                             label: 'Role Pengguna',
                             value: _role,
                             icon: Icons.shield_outlined,
                             items: UserHelpers.roleList,
                             labels: UserHelpers.roleLabelList,
+                            enabled: !isEdit, // Disabled saat edit
                             onChanged: (v) {
                               setState(() {
                                 _role = v;
@@ -339,15 +350,55 @@ class _UserFormSheetState extends State<UserFormSheet> {
                           ),
                           if (!_isOfficerSafety) ...[
                             const SizedBox(height: 12),
+                            // 🔒 Departemen dikunci saat edit
                             _buildCompactDropdown(
                               label: 'Departemen',
                               value: _fungsi,
                               icon: Icons.business_outlined,
                               items: UserHelpers.fungsiList,
                               labels: UserHelpers.fungsiLabelList,
+                              enabled: !isEdit, // Disabled saat edit
                               onChanged: (v) => setState(() => _fungsi = v),
                             ),
                           ],
+                          // 🚨 Catatan saat mode edit
+                          if (isEdit) ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFFF8E1), // Kuning muda
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: const Color(0xFFFFB300).withOpacity(0.5),
+                                ),
+                              ),
+                              child: Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Icon(
+                                    Icons.info_outline_rounded,
+                                    size: 18,
+                                    color: const Color(0xFFF57F17),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      'Edit data untuk fungsi & departemen hanya bisa diubah di menu Master Worker.',
+                                      style: GoogleFonts.inter(
+                                        fontSize: 12,
+                                        color: const Color(0xFFE65100),
+                                        fontWeight: FontWeight.w500,
+                                        height: 1.4,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          // Info HSSE untuk Officer Safety
                           if (_isOfficerSafety) ...[
                             const SizedBox(height: 12),
                             Container(
@@ -423,7 +474,7 @@ class _UserFormSheetState extends State<UserFormSheet> {
             ),
           ),
           const SizedBox(height: 16),
-          
+
           // Header dengan icon dan title
           Row(
             children: [
@@ -456,7 +507,7 @@ class _UserFormSheetState extends State<UserFormSheet> {
                 ),
               ),
               const SizedBox(width: 14),
-              
+
               // Title and subtitle
               Expanded(
                 child: Column(
@@ -483,7 +534,7 @@ class _UserFormSheetState extends State<UserFormSheet> {
                   ],
                 ),
               ),
-              
+
               // Close button
               Material(
                 color: Colors.transparent,
@@ -647,42 +698,56 @@ class _UserFormSheetState extends State<UserFormSheet> {
     required List<String> items,
     required List<String> labels,
     required ValueChanged<String> onChanged,
+    bool enabled = true, // 🔥 PARAMETER BARU: untuk mengunci dropdown
   }) {
     return DropdownButtonFormField<String>(
       value: value,
       dropdownColor: Colors.white,
       style: GoogleFonts.inter(
         fontSize: 14,
-        color: UserHelpers.textPrimary,
+        color: enabled ? UserHelpers.textPrimary : UserHelpers.textHint,
         height: 1.3,
       ),
       icon: Icon(
         Icons.keyboard_arrow_down_rounded,
-        color: UserHelpers.textSecondary,
+        color: enabled ? UserHelpers.textSecondary : UserHelpers.dividerColor,
         size: 20,
       ),
       decoration: InputDecoration(
         labelText: label,
         labelStyle: GoogleFonts.inter(
           fontSize: 13,
-          color: UserHelpers.textSecondary,
+          color: enabled ? UserHelpers.textSecondary : UserHelpers.textHint,
           fontWeight: FontWeight.w500,
         ),
-        prefixIcon: Icon(icon, size: 18, color: UserHelpers.headerBlue.withOpacity(0.6)),
+        prefixIcon: Icon(
+          icon,
+          size: 18,
+          color: enabled
+              ? UserHelpers.headerBlue.withOpacity(0.6)
+              : UserHelpers.textHint.withOpacity(0.5),
+        ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: enabled ? Colors.white : UserHelpers.dividerColor.withOpacity(0.3),
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: UserHelpers.dividerColor),
+          borderSide: BorderSide(
+            color: enabled ? UserHelpers.dividerColor : UserHelpers.dividerColor.withOpacity(0.3),
+          ),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: UserHelpers.dividerColor),
+          borderSide: BorderSide(
+            color: enabled ? UserHelpers.dividerColor : UserHelpers.dividerColor.withOpacity(0.3),
+          ),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: UserHelpers.headerBlue, width: 1.5),
+          borderSide: BorderSide(
+            color: enabled ? UserHelpers.headerBlue : UserHelpers.dividerColor.withOpacity(0.3),
+            width: 1.5,
+          ),
         ),
       ),
       items: items.asMap().entries.map((e) {
@@ -694,9 +759,11 @@ class _UserFormSheetState extends State<UserFormSheet> {
           ),
         );
       }).toList(),
-      onChanged: (v) {
-        if (v != null) onChanged(v);
-      },
+      onChanged: enabled
+          ? (v) {
+              if (v != null) onChanged(v);
+            }
+          : null, // Disabled jika enabled = false
     );
   }
 
@@ -797,7 +864,7 @@ class _UserFormSheetState extends State<UserFormSheet> {
                 ),
               ),
             ),
-            onChanged: (_) => _onIdPekerjaChanged(),
+            // onChanged dihapus -> cukup addListener di initState (menghindari trigger dobel)
             onTap: () {
               if (_idPekerjaCtrl.text.isNotEmpty) {
                 setState(() => _showWorkerDropdown = true);

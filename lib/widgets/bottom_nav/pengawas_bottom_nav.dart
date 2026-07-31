@@ -1,3 +1,4 @@
+// lib/widgets/bottom_nav/pengawas_bottom_nav.dart
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
@@ -13,15 +14,12 @@ class PengawasBottomNav extends StatelessWidget {
   void _onTabTapped(BuildContext context, int index) {
     switch (index) {
       case 0:
-        // Dashboard - pop all and go to dashboard
         context.go('/pengawas-dashboard');
         break;
       case 1:
-        // Pengajuan lembur
         context.push('/ajukan-lembur');
         break;
       case 2:
-        // Profile
         context.push('/profile');
         break;
     }
@@ -38,12 +36,12 @@ class PengawasBottomNav extends StatelessWidget {
       _NavItem(
         icon: Icons.add_alert_outlined,
         activeIcon: Icons.add_alert_rounded,
-        label: 'Pengajuan Lembur',
+        label: 'Pengajuan', // 🔥 DIPER PENDEK (sebelumnya: 'Pengajuan Lembur')
       ),
       _NavItem(
         icon: Icons.person_outline_rounded,
         activeIcon: Icons.person_rounded,
-        label: 'Profile',
+        label: 'Profil',
       ),
     ];
 
@@ -134,6 +132,7 @@ class PengawasBottomNav extends StatelessWidget {
                                   item.label,
                                   overflow: TextOverflow.ellipsis,
                                   maxLines: 1,
+                                  textAlign: TextAlign.center,
                                   style: TextStyle(
                                     color: Colors.white,
                                     fontSize: isSelected ? 11 : 10,

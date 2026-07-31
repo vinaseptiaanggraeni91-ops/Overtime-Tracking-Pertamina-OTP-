@@ -1,6 +1,7 @@
 // lib/widgets/team_summary.dart
 
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class TeamSummary extends StatelessWidget {
   final List<Map<String, dynamic>> teamMembers;
@@ -22,7 +23,6 @@ class TeamSummary extends StatelessWidget {
 
   // ==================== FIELD EXTRACTORS ====================
   
-  /// Extract nama anggota dengan multiple fallback
   String _getMemberName(Map<String, dynamic> member) {
     return (member['nama_lengkap']?.toString() ?? '').isNotEmpty
         ? member['nama_lengkap']!.toString()
@@ -30,20 +30,11 @@ class TeamSummary extends StatelessWidget {
             ? member['nama']!.toString()
             : (member['name']?.toString() ?? '').isNotEmpty
                 ? member['name']!.toString()
-                : (member['display_name']?.toString() ?? '').isNotEmpty
-                    ? member['display_name']!.toString()
-                    : (member['displayName']?.toString() ?? '').isNotEmpty
-                        ? member['displayName']!.toString()
-                        : (member['full_name']?.toString() ?? '').isNotEmpty
-                            ? member['full_name']!.toString()
-                            : (member['fullName']?.toString() ?? '').isNotEmpty
-                                ? member['fullName']!.toString()
-                                : (member['email']?.toString() ?? '').isNotEmpty
-                                    ? member['email']!.toString().split('@')[0]
-                                    : 'Unknown';
+                : (member['email']?.toString() ?? '').isNotEmpty
+                    ? member['email']!.toString().split('@')[0]
+                    : 'Unknown';
   }
 
-  /// Extract role dengan multiple fallback
   String _getMemberRole(Map<String, dynamic> member) {
     return (member['role']?.toString() ?? '').isNotEmpty
         ? member['role']!.toString()
@@ -51,12 +42,9 @@ class TeamSummary extends StatelessWidget {
             ? member['user_role']!.toString()
             : (member['jabatan']?.toString() ?? '').isNotEmpty
                 ? member['jabatan']!.toString()
-                : (member['position']?.toString() ?? '').isNotEmpty
-                    ? member['position']!.toString()
-                    : 'mitra';
+                : 'mitra';
   }
 
-  /// Extract photo URL dengan multiple fallback
   String? _getMemberPhotoUrl(Map<String, dynamic> member) {
     return (member['photo_url']?.toString() ?? '').isNotEmpty
         ? member['photo_url']!.toString()
@@ -64,53 +52,100 @@ class TeamSummary extends StatelessWidget {
             ? member['photoUrl']!.toString()
             : (member['avatar']?.toString() ?? '').isNotEmpty
                 ? member['avatar']!.toString()
-                : (member['profile_picture']?.toString() ?? '').isNotEmpty
-                    ? member['profile_picture']!.toString()
-                    : (member['image_url']?.toString() ?? '').isNotEmpty
-                        ? member['image_url']!.toString()
-                        : null;
+                : null;
   }
 
-  /// Extract isOnline dengan multiple fallback
+  /// 🔥 PERBAIKAN UTAMA: Prioritaskan last_active, default false
   bool _getMemberIsOnline(Map<String, dynamic> member) {
-    if (member.containsKey('isOnline')) return member['isOnline'] == true;
-    if (member.containsKey('is_online')) return member['is_online'] == true;
-    if (member.containsKey('online')) return member['online'] == true;
-    if (member.containsKey('status_online')) return member['status_online'] == true;
-    if (member.containsKey('isActive')) return member['isActive'] == true;
+    // 🔥 STEP 1: Cek last_active dulu (ini yang paling akurat)
+    final lastActive = member['last_active'] ?? member['lastActive'] ?? member['timestamp'] ?? member['last_seen'];
+    
+    if (lastActive != null) {
+      try {
+        DateTime? lastActiveTime;
+        if (lastActive is DateTime) {
+          lastActiveTime = lastActive;
+        } else if (lastActive is Timestamp) {
+          lastActiveTime = lastActive.toDate();
+        }
+        
+        if (lastActiveTime != null) {
+          final diff = DateTime.now().difference(lastActiveTime);
+          // 🔥 Hanya online jika last_active dalam 10 menit terakhir
+          // dan status_online juga mendukung
+          if (diff.inMinutes < 10) {
+            // Cek status tambahan
+            final status = member['status']?.toString().toLowerCase() ?? '';
+            if (status == 'offline' || status == 'inactive') {
+              return false;
+            }
+            return true;
+          }
+          // 🔥 Jika last_active lebih dari 10 menit, pasti offline
+          return false;
+        }
+      } catch (_) {}
+    }
+
+    // 🔥 STEP 2: Cek isOnline tapi hanya jika ada last_active yang mendukung
+    final isOnlineField = member['isOnline'] ?? member['is_online'] ?? member['online'] ?? false;
+    
+    // 🔥 JANGAN PERCAYA isOnline jika nilainya true tapi tidak ada last_active
+    if (isOnlineField is bool && isOnlineField == true) {
+      // Cek apakah ada last_active yang mendukung
+      if (lastActive == null) {
+        // Tidak ada last_active, anggap offline
+        return false;
+      }
+      return true;
+    }
+
+    // 🔥 STEP 3: Cek status field
+    final status = member['status']?.toString().toLowerCase() ?? '';
+    if (status == 'online' || status == 'active') {
+      // Cek apakah ada last_active yang mendukung
+      if (lastActive == null) {
+        return false;
+      }
+      return true;
+    }
+    if (status == 'offline' || status == 'inactive') {
+      return false;
+    }
+
+    // 🔥 DEFAULT: FALSE (offline)
     return false;
   }
 
-  /// Extract email dengan multiple fallback
-  String _getMemberEmail(Map<String, dynamic> member) {
-    return (member['email']?.toString() ?? '').isNotEmpty
-        ? member['email']!.toString()
-        : (member['email_address']?.toString() ?? '').isNotEmpty
-            ? member['email_address']!.toString()
-            : '-';
+  /// Get last active time
+  DateTime? _getLastActive(Map<String, dynamic> member) {
+    final lastActive = member['last_active'] ?? member['lastActive'] ?? member['timestamp'] ?? member['last_seen'];
+    if (lastActive == null) return null;
+    
+    if (lastActive is DateTime) return lastActive;
+    if (lastActive is Timestamp) return lastActive.toDate();
+    return null;
   }
 
-  /// Extract phone dengan multiple fallback
-  String _getMemberPhone(Map<String, dynamic> member) {
-    return (member['phone']?.toString() ?? '').isNotEmpty
-        ? member['phone']!.toString()
-        : (member['phone_number']?.toString() ?? '').isNotEmpty
-            ? member['phone_number']!.toString()
-            : (member['no_hp']?.toString() ?? '').isNotEmpty
-                ? member['no_hp']!.toString()
-            : '-';
+  /// Format waktu last active
+  String _formatLastActive(DateTime? time) {
+    if (time == null) return 'Offline';
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 1) return 'Online';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m lalu';
+    if (diff.inHours < 24) return '${diff.inHours}j lalu';
+    if (diff.inDays < 7) return '${diff.inDays}h lalu';
+    if (diff.inDays < 30) return '${(diff.inDays / 7).floor()}m lalu';
+    return '${(diff.inDays / 30).floor()}bl lalu';
   }
 
-  /// Get initial character untuk avatar fallback
   String _getInitial(String name) {
     if (name.isEmpty || name == 'Unknown') return '?';
-    // Ambil karakter pertama, hapus spasi di depan
     final trimmed = name.trim();
     if (trimmed.isEmpty) return '?';
     return trimmed[0].toUpperCase();
   }
 
-  /// Get color for avatar background based on name (consistent color per person)
   Color _getAvatarColor(String name) {
     if (name.isEmpty || name == 'Unknown') return Colors.grey;
     final hash = name.hashCode;
@@ -133,6 +168,9 @@ class TeamSummary extends StatelessWidget {
   Widget build(BuildContext context) {
     final primaryColor = accentColor ?? const Color(0xFF1E3C72);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    // 🔥 HITUNG ULANG ONLINE MEMBERS berdasarkan data sebenarnya
+    final actualOnlineCount = teamMembers.where((m) => _getMemberIsOnline(m)).length;
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -183,7 +221,9 @@ class TeamSummary extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.green.withAlpha(isDark ? 40 : 20),
+                      color: actualOnlineCount > 0 
+                          ? Colors.green.withAlpha(isDark ? 40 : 20)
+                          : (isDark ? Colors.grey[800]! : Colors.grey[200]!),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
@@ -191,16 +231,16 @@ class TeamSummary extends StatelessWidget {
                       children: [
                         Container(
                           width: 8, height: 8,
-                          decoration: const BoxDecoration(
-                            color: Colors.green,
+                          decoration: BoxDecoration(
+                            color: actualOnlineCount > 0 ? Colors.green : Colors.grey,
                             shape: BoxShape.circle,
                           ),
                         ),
                         const SizedBox(width: 6),
                         Text(
-                          '$onlineMembers Online',
-                          style: const TextStyle(
-                            color: Colors.green,
+                          '$actualOnlineCount Online',
+                          style: TextStyle(
+                            color: actualOnlineCount > 0 ? Colors.green : Colors.grey,
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                           ),
@@ -264,16 +304,14 @@ class TeamSummary extends StatelessWidget {
             )
           else
             ...teamMembers.take(5).map((member) {
-              // ✅ GUNAKAN EXTRACTORS DENGAN MULTIPLE FALLBACK
               final role = _getMemberRole(member);
               final roleColor = getRoleColor(role);
               final isOnline = _getMemberIsOnline(member);
               final photoUrl = _getMemberPhotoUrl(member);
               final name = _getMemberName(member);
-              final email = _getMemberEmail(member);
-              final phone = _getMemberPhone(member);
               final initial = _getInitial(name);
-              final avatarColor = _getAvatarColor(name);
+              final lastActive = _getLastActive(member);
+              final lastActiveText = _formatLastActive(lastActive);
 
               return Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -291,7 +329,7 @@ class TeamSummary extends StatelessWidget {
                             border: Border.all(
                               color: isOnline 
                                   ? Colors.green 
-                                  : (isDark ? Colors.grey[700]! : Colors.grey[200]!),
+                                  : (isDark ? Colors.grey[700]! : Colors.grey[300]!),
                               width: 2,
                             ),
                           ),
@@ -333,6 +371,7 @@ class TeamSummary extends StatelessWidget {
                                   ),
                           ),
                         ),
+                        // 🔥 Indicator online hanya jika benar-benar online
                         if (isOnline)
                           Positioned(
                             bottom: 0,
@@ -385,18 +424,22 @@ class TeamSummary extends StatelessWidget {
                                   ),
                                 ),
                               ),
-                              // Email tooltip (optional, muncul di expanded view)
-                              if (email != '-' && email.isNotEmpty) ...[
+                              // 🔥 Tampilkan last active
+                              if (!isOnline && lastActive != null) ...[
                                 const SizedBox(width: 4),
-                                Flexible(
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? Colors.grey[800] : Colors.grey[100],
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
                                   child: Text(
-                                    email,
+                                    lastActiveText,
                                     style: TextStyle(
-                                      fontSize: 9,
-                                      color: isDark ? Colors.grey[500] : Colors.grey[400],
+                                      fontSize: 8,
+                                      color: isDark ? Colors.grey[500] : Colors.grey[500],
+                                      fontWeight: FontWeight.w500,
                                     ),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ],
@@ -428,6 +471,7 @@ class TeamSummary extends StatelessWidget {
                             color: isOnline 
                                 ? Colors.green 
                                 : (isDark ? Colors.grey[500] : Colors.grey[400]),
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
                       ],
@@ -460,27 +504,43 @@ class TeamSummary extends StatelessWidget {
               ),
             ),
 
-          // ✅ TAMBAHAN: Quick stats jika ada data
+          // Quick stats
           if (teamMembers.isNotEmpty) ...[
             const SizedBox(height: 12),
             const Divider(height: 1),
             const SizedBox(height: 8),
-            // Online percentage
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 Icon(
                   Icons.wifi_rounded,
                   size: 12,
-                  color: Colors.green.withAlpha(180),
+                  color: actualOnlineCount > 0 ? Colors.green.withAlpha(180) : Colors.grey.withAlpha(180),
                 ),
                 const SizedBox(width: 4),
                 Text(
-                  '${totalMembers > 0 ? ((onlineMembers / totalMembers) * 100).toStringAsFixed(0) : 0}% online',
+                  '${totalMembers > 0 ? ((actualOnlineCount / totalMembers) * 100).toStringAsFixed(0) : 0}% online',
                   style: TextStyle(
                     fontSize: 10,
                     color: isDark ? Colors.grey[400] : Colors.grey[500],
                     fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Container(
+                  width: 4,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: isDark ? Colors.grey[700] : Colors.grey[300],
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  'Update real-time',
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: isDark ? Colors.grey[500] : Colors.grey[400],
                   ),
                 ),
               ],

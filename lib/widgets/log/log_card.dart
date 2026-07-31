@@ -1,3 +1,5 @@
+// lib/widgets/log/log_card.dart
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -65,6 +67,7 @@ class LogCard extends StatelessWidget {
             children: [
               Row(
                 children: [
+                  // ========== ICON ==========
                   Container(
                     width: 40,
                     height: 40,
@@ -79,6 +82,8 @@ class LogCard extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(width: 12),
+
+                  // ========== MIDDLE: TYPE & DESCRIPTION ==========
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -124,35 +129,49 @@ class LogCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      Text(
-                        timestamp != null
-                            ? DateFormat('HH:mm:ss').format(timestamp)
-                            : '-',
-                        style: GoogleFonts.poppins(
-                          fontSize: 10,
-                          color: Colors.grey[500],
+                  
+                  // ========== RIGHT: TIME & USER ==========
+                  // 🔥 FIX: Pakai ConstrainedBox biar ga overflow
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: 100, // Batasi lebar maksimal
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          timestamp != null
+                              ? DateFormat('HH:mm:ss').format(timestamp)
+                              : '-',
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            color: Colors.grey[500],
+                          ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        user,
-                        style: GoogleFonts.poppins(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                          color: primaryBlue,
+                        const SizedBox(height: 4),
+                        Text(
+                          user,
+                          style: GoogleFonts.poppins(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w500,
+                            color: primaryBlue,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),
+              
+              // ========== TARGET & SESSION ==========
               if (targetUser != null || sessionId != null) ...[
                 const SizedBox(height: 12),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 4,
                   children: [
                     if (targetUser != null)
                       Container(
@@ -170,6 +189,7 @@ class LogCard extends StatelessWidget {
                             fontSize: 8,
                             color: Colors.grey[600],
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                     if (sessionId != null)

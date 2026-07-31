@@ -61,7 +61,7 @@ class LogHeader extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(
-              'System Logs Monitor',
+              'Log Sistem',
               style: textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.bold,
                 color: Colors.white,

@@ -870,7 +870,6 @@ class _MitraSelectionDialogState extends State<MitraSelectionDialog>
   Color _getFungsiColor(String fungsi) {
     switch (fungsi.toLowerCase()) {
       case 'operation': return const Color(0xFF1976D2);
-      case 'lab': return const Color(0xFF4CAF50);
       case 'maintenance': return const Color(0xFFFF9800);
       case 'hsse': return const Color(0xFF9C27B0);
       case 'gpr': return const Color(0xFFF44336);
@@ -881,12 +880,12 @@ class _MitraSelectionDialogState extends State<MitraSelectionDialog>
 
   String _getFungsiLabel(String fungsi) {
     switch (fungsi.toLowerCase()) {
-      case 'operation': return 'Operasi';
+      case 'operation': return 'Operasional';
       case 'lab': return 'Lab';
       case 'maintenance': return 'Maintenance';
       case 'hsse': return 'HSSE';
       case 'gpr': return 'GPR';
-      case 'bs': return 'BS';
+      case 'bs': return 'Business Support';
       default: return fungsi;
     }
   }

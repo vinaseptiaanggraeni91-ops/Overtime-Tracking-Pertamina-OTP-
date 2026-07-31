@@ -10,12 +10,14 @@ class ApprovalApproveDialog extends StatefulWidget {
   final Map<String, dynamic> data;
   final List<Map<String, dynamic>> mitraList;
   final Function(String notes) onConfirm;
+  final bool isSuperadmin; // ✅ PARAMETER BARU
 
   const ApprovalApproveDialog({
     super.key,
     required this.data,
     required this.mitraList,
     required this.onConfirm,
+    this.isSuperadmin = false, // ✅ Default false
   });
 
   @override
@@ -24,10 +26,13 @@ class ApprovalApproveDialog extends StatefulWidget {
 
 class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
   final TextEditingController _catatanController = TextEditingController();
-  
-  // 🔥 STATIC CACHE - Dibuat sekali, dipakai semua instance dialog
+
+  // 🔥 STATIC CACHE
   static final _rateService = OvertimeRateService();
   static final Map<String, String> _fungsiLabelCache = {};
+
+  // ✅ GETTER ROLE LABEL
+  String get _roleLabel => widget.isSuperadmin ? 'Superadmin' : 'Manager';
 
   @override
   void dispose() {
@@ -79,7 +84,8 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
                   children: [
                     if (isUrgent || isOverride || isOutsideRadius || isWeekend)
                       _buildWarningSection(isUrgent, isOverride, isOutsideRadius, isWeekend, lokasiString),
-                    
+
+                    // ✅ Info box dengan role label
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
@@ -93,7 +99,7 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              'Anda akan menyetujui pengajuan lembur ini',
+                              'Anda akan menyetujui pengajuan lembur ini sebagai $_roleLabel',
                               style: GoogleFonts.poppins(
                                 fontSize: 11,
                                 color: Colors.green[700],
@@ -104,9 +110,9 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
                         ],
                       ),
                     ),
-                    
+
                     const SizedBox(height: 12),
-                    
+
                     _buildSectionTitle('Ringkasan Pengajuan'),
                     const SizedBox(height: 8),
                     _buildInfoCard([
@@ -117,18 +123,18 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
                       if (lokasiString.isNotEmpty)
                         _buildInfoRow('Lokasi', lokasiString, Icons.location_on_outlined, Colors.deepOrange),
                     ]),
-                    
+
                     const SizedBox(height: 10),
-                    
+
                     _buildBiayaCard(totalBiaya, biayaPerMitra, mitraCount),
-                    
+
                     if (mitraCount > 0 && mitraCount <= 5) ...[
                       const SizedBox(height: 10),
                       _buildMitraList(),
                     ],
-                    
+
                     const SizedBox(height: 12),
-                    
+
                     _buildSectionTitle('Catatan Approval'),
                     const SizedBox(height: 8),
                     _buildCatatanField(),
@@ -136,7 +142,7 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
                 ),
               ),
             ),
-            
+
             _buildActionButtons(),
           ],
         ),
@@ -163,9 +169,20 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
           ),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(
-              'Setujui Pengajuan',
-              style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15, color: const Color(0xFF1E293B)),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  'Setujui Pengajuan',
+                  style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15, color: const Color(0xFF1E293B)),
+                ),
+                // ✅ Subtitle role
+                Text(
+                  'Sebagai $_roleLabel',
+                  style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                ),
+              ],
             ),
           ),
           Material(
@@ -398,7 +415,7 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
         maxLines: 2,
         style: GoogleFonts.poppins(fontSize: 11),
         decoration: InputDecoration(
-          hintText: 'Tambahkan catatan (opsional)...',
+          hintText: 'Tambahkan catatan ($_roleLabel)...',
           hintStyle: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[400]),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
           contentPadding: const EdgeInsets.all(10),
@@ -450,7 +467,11 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
                       const Icon(Icons.check_rounded, size: 16),
                       const SizedBox(width: 4),
                       Flexible(
-                        child: Text('Setujui', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                        child: Text(
+                          'Setujui ($_roleLabel)', // ✅ Label dinamis
+                          style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600),
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ),
                     ],
                   ),
@@ -477,7 +498,6 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
     return '';
   }
 
-  // 🔥 CACHED VERSION
   String _getFungsiLabelCached(String? f) {
     final key = f?.toLowerCase() ?? 'default';
     return _fungsiLabelCache[key] ??= _computeFungsiLabel(key);
@@ -486,23 +506,27 @@ class _ApprovalApproveDialogState extends State<ApprovalApproveDialog> {
   String _computeFungsiLabel(String fungsi) {
     switch (fungsi) {
       case 'operation': return 'Operation';
-      case 'lab': return 'Laboratorium';
       case 'maintenance': return 'Maintenance';
       case 'hsse': return 'HSSE';
       case 'gpr': return 'GPR';
-      case 'bs': return 'BS';
+      case 'bs': return 'Business Support';
       default: return fungsi.isNotEmpty ? fungsi : 'Unknown';
     }
   }
 }
 
 // ================================================
-// APPROVAL REJECT DIALOG (✅ UDAH OPTIMAL)
+// APPROVAL REJECT DIALOG
 // ================================================
 class ApprovalRejectDialog extends StatefulWidget {
   final Function(String notes) onConfirm;
+  final bool isSuperadmin; // ✅ PARAMETER BARU
 
-  const ApprovalRejectDialog({super.key, required this.onConfirm});
+  const ApprovalRejectDialog({
+    super.key,
+    required this.onConfirm,
+    this.isSuperadmin = false, // ✅ Default false
+  });
 
   @override
   State<ApprovalRejectDialog> createState() => _ApprovalRejectDialogState();
@@ -511,6 +535,9 @@ class ApprovalRejectDialog extends StatefulWidget {
 class _ApprovalRejectDialogState extends State<ApprovalRejectDialog> {
   final TextEditingController _alasanController = TextEditingController();
   String? _errorText;
+
+  // ✅ GETTER ROLE LABEL
+  String get _roleLabel => widget.isSuperadmin ? 'Superadmin' : 'Manager';
 
   @override
   void dispose() {
@@ -547,7 +574,21 @@ class _ApprovalRejectDialogState extends State<ApprovalRejectDialog> {
                   ),
                   const SizedBox(width: 10),
                   Expanded(
-                    child: Text('Tolak Pengajuan', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15, color: const Color(0xFF1E293B))),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Tolak Pengajuan',
+                          style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 15, color: const Color(0xFF1E293B)),
+                        ),
+                        // ✅ Subtitle role
+                        Text(
+                          'Sebagai $_roleLabel',
+                          style: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[500], fontWeight: FontWeight.w500),
+                        ),
+                      ],
+                    ),
                   ),
                   Material(
                     color: Colors.transparent,
@@ -564,7 +605,7 @@ class _ApprovalRejectDialogState extends State<ApprovalRejectDialog> {
                 ],
               ),
             ),
-            
+
             // Content
             Flexible(
               child: SingleChildScrollView(
@@ -611,7 +652,7 @@ class _ApprovalRejectDialogState extends State<ApprovalRejectDialog> {
                         autofocus: true,
                         style: GoogleFonts.poppins(fontSize: 11),
                         decoration: InputDecoration(
-                          hintText: 'Tulis alasan penolakan...',
+                          hintText: 'Tulis alasan penolakan ($_roleLabel)...',
                           hintStyle: GoogleFonts.poppins(fontSize: 10, color: Colors.grey[400]),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
                           contentPadding: const EdgeInsets.all(10),
@@ -637,7 +678,7 @@ class _ApprovalRejectDialogState extends State<ApprovalRejectDialog> {
                 ),
               ),
             ),
-            
+
             // Action Buttons
             Container(
               padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
@@ -686,7 +727,11 @@ class _ApprovalRejectDialogState extends State<ApprovalRejectDialog> {
                               const Icon(Icons.close_rounded, size: 16),
                               const SizedBox(width: 4),
                               Flexible(
-                                child: Text('Tolak', style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600), overflow: TextOverflow.ellipsis),
+                                child: Text(
+                                  'Tolak ($_roleLabel)', // ✅ Label dinamis
+                                  style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                             ],
                           ),

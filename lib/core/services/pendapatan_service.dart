@@ -1,25 +1,14 @@
 // lib/core/services/pendapatan_service.dart
-// ============================================================================
-// PENDAPATAN SERVICE - Menghitung estimasi pendapatan mitra
-// ============================================================================
-//
-// Service ini menghitung ESTIMASI pendapatan mitra berdasarkan:
-// - Lembur yang SUDAH selesai (status: selesai / disetujui)
-// - Absensi yang SUDAH dilakukan (check-in & check-out)
-// - Tarif lembur per jam (mengacu ke OvertimeRateService)
-//
-// NOTE: Ini hanya ESTIMASI, bukan gaji final!
-// ============================================================================
-
+// 🔥 VERSION 4.0 - FULL SYNC: Gunakan OvertimeRateService untuk tarif AKURAT
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '/core/services/overtime_rate_service.dart'; // 🔥 IMPORT OVERTIME RATE SERVICE
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  MODEL: PendapatanItem                                                ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
-
+// ============================================================
+// 📦 MODEL: PendapatanItem
+// ============================================================
 class PendapatanItem {
   final String id;
   final String? lemburId;
@@ -30,15 +19,23 @@ class PendapatanItem {
   final double totalJam;
   final String? jenisLembur;
   final String? statusAbsensi;
-  final String? statusLembur; // pending, disetujui, selesai, ditolak, kadaluarsa, dibatalkan
-  final DateTime? absensiWaktu; // check-in time
-  final DateTime? completedAt; // check-out time
+  final String? statusLembur;
+  final DateTime? absensiWaktu;
+  final DateTime? completedAt;
   final double tarifPerJam;
   final double estimasiPendapatan;
   final String? fotoUrl;
   final String? lokasi;
   final String? namaPengawas;
   final DateTime? createdAt;
+
+  final bool isPaid;
+  final DateTime? paidAt;
+  final String? paidByName;
+  final String? paidNote;
+  final String? keterlambatanAlasan;
+  final bool memenuhiSyaratBayar;
+  final List<String> syaratBelumTerpenuhi;
 
   const PendapatanItem({
     required this.id,
@@ -59,108 +56,88 @@ class PendapatanItem {
     this.lokasi,
     this.namaPengawas,
     this.createdAt,
+    this.isPaid = false,
+    this.paidAt,
+    this.paidByName,
+    this.paidNote,
+    this.keterlambatanAlasan,
+    this.memenuhiSyaratBayar = false,
+    this.syaratBelumTerpenuhi = const [],
   });
 
-  /// Format pendapatan ke Rupiah
   String get formattedPendapatan {
-    final formatter = NumberFormat.currency(
-      locale: 'id_ID',
-      symbol: 'Rp ',
-      decimalDigits: 0,
-    );
-    return formatter.format(estimasiPendapatan);
+    return NumberFormat.currency(
+      locale: 'id_ID', symbol: 'Rp ', decimalDigits: 0,
+    ).format(estimasiPendapatan);
   }
 
-  /// Format durasi (check-in → check-out)
   String get formattedDurasiAbsensi {
     if (absensiWaktu == null || completedAt == null) {
       return '${jamMulai ?? "-"} → ${jamSelesai ?? "-"}';
     }
-    final checkIn = DateFormat('HH:mm').format(absensiWaktu!);
-    final checkOut = DateFormat('HH:mm').format(completedAt!);
-    return '$checkIn → $checkOut';
+    return '${DateFormat('HH:mm').format(absensiWaktu!)} → ${DateFormat('HH:mm').format(completedAt!)}';
   }
 
-  /// Status absensi label
   String get absensiStatusLabel {
     switch (statusAbsensi) {
-      case 'selesai':
-        return '✅ Selesai';
-      case 'selesai_terlambat':
-        return '⚠️ Terlambat';
-      case 'sudah_absen':
-        return '📸 Sudah Check-in';
-      case 'belum_absen':
-        return '⏳ Belum Absen';
-      case 'expired':
-        return '❌ Kadaluarsa';
-      default:
-        return statusAbsensi ?? '-';
+      case 'selesai': return '✅ Selesai';
+      case 'selesai_terlambat': return '⚠️ Terlambat';
+      case 'check_in':
+      case 'sudah_absen': return '📸 Check-in';
+      case 'belum_absen': return '⏳ Belum Absen';
+      case 'expired': return '❌ Kadaluarsa';
+      default: return statusAbsensi ?? '-';
     }
   }
 
-  /// Warna status
   Color get absensiStatusColor {
     switch (statusAbsensi) {
-      case 'selesai':
-        return Colors.green;
-      case 'selesai_terlambat':
-        return Colors.orange;
-      case 'sudah_absen':
-        return Colors.blue;
-      case 'belum_absen':
-        return Colors.grey;
-      case 'expired':
-        return Colors.red;
-      default:
-        return Colors.grey;
+      case 'selesai': return Colors.green;
+      case 'selesai_terlambat': return Colors.orange;
+      case 'check_in':
+      case 'sudah_absen': return Colors.blue;
+      default: return Colors.grey;
     }
   }
 
-  /// Status lembur label
   String get statusLemburLabel {
     switch (statusLembur) {
-      case 'disetujui':
-        return 'Disetujui';
-      case 'ditolak':
-        return 'Ditolak';
-      case 'pending':
-        return 'Pending';
-      case 'selesai':
-        return 'Selesai';
-      case 'kadaluarsa':
-        return 'Kadaluarsa';
-      case 'dibatalkan':
-        return 'Dibatalkan';
-      default:
-        return statusLembur ?? '-';
+      case 'disetujui': return 'Disetujui';
+      case 'ditolak': return 'Ditolak';
+      case 'pending': return 'Pending';
+      case 'selesai': return 'Selesai';
+      default: return statusLembur ?? '-';
     }
   }
 
-  /// Warna status lembur
-  Color get statusLemburColor {
-    switch (statusLembur) {
-      case 'disetujui':
-        return Colors.green;
-      case 'ditolak':
-        return Colors.red;
-      case 'pending':
-        return Colors.orange;
-      case 'selesai':
-        return Colors.blue;
-      case 'kadaluarsa':
-        return Colors.grey;
-      case 'dibatalkan':
-        return Colors.grey;
-      default:
-        return Colors.grey;
+  String get pembayaranLabel => isPaid ? '✅ Sudah Dibayar' : '💰 Belum Dibayar';
+  Color get pembayaranColor => isPaid ? Colors.green : Colors.orange;
+  IconData get pembayaranIcon => isPaid ? Icons.check_circle : Icons.pending;
+
+  String get paidAtFormatted {
+    if (paidAt == null) return '-';
+    return DateFormat('dd MMM yyyy, HH:mm', 'id_ID').format(paidAt!);
+  }
+
+  bool get bisaDibayar {
+    if (isPaid) return false;
+    if (statusLembur?.toLowerCase() == 'dibatalkan') return false;
+    if (!['disetujui', 'selesai', 'approved'].contains(statusLembur?.toLowerCase())) return false;
+    if (statusAbsensi != 'selesai' && statusAbsensi != 'selesai_terlambat') return false;
+
+    final isTerlambat = statusAbsensi == 'selesai_terlambat';
+    if (isTerlambat) {
+      final hasDokumentasi = fotoUrl != null && fotoUrl!.isNotEmpty;
+      final hasAlasan = keterlambatanAlasan != null && keterlambatanAlasan!.isNotEmpty;
+      return hasDokumentasi && hasAlasan;
     }
+    return absensiWaktu != null && completedAt != null;
   }
 }
 
-// ╔══════════════════════════════════════════════════════════════════════════╗
-// ║  SERVICE: PendapatanService                                           ║
-// ╚══════════════════════════════════════════════════════════════════════════╝
+// ============================================================
+// 🔥 PENDAPATAN SERVICE - V4 PAKAI OVERTIME RATE SERVICE
+// ============================================================
 
 class PendapatanService {
   static final PendapatanService _instance = PendapatanService._internal();
@@ -168,310 +145,411 @@ class PendapatanService {
   PendapatanService._internal();
 
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-
+  final OvertimeRateService _rateService = OvertimeRateService(); // 🔥 Pakai OvertimeRateService
   static const String _cLembur = 'lembur_mitra';
 
- 
-  // TARIF DASAR PER JAM (fallback kalau settings ga ada)
- 
-  static const double tarifDasarPerJam = 25000; // Rp 25.000/jam
-  static const double multiplierHariLibur = 2.0;
-  static const double multiplierMalam = 1.5;
-
-  // Cache rates
+  // 🔥 Cache untuk rates & tarif
   Map<String, dynamic>? _cachedRates;
   DateTime? _lastRatesFetch;
-  static const Duration _ratesCacheDuration = Duration(minutes: 5);
+  static const Duration _ratesCache = Duration(minutes: 5);
 
- 
-  // HELPER: Parse jam dari string "HH:mm"
- 
-  DateTime _parseJam(DateTime tanggal, String jamStr) {
-    final parts = jamStr.split(':');
-    final jam = int.tryParse(parts[0]) ?? 0;
-    final menit = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
-    return DateTime(tanggal.year, tanggal.month, tanggal.day, jam, menit);
+  static const List<String> _validStatuses = [
+    'pending', 'manager_approved', 'pending_hsse',
+    'manager_approval_pending_hsse', 'manager_approved_pending_hsse',
+    'disetujui', 'approved', 'selesai', 'ditolak',
+  ];
+
+  bool _isValidStatus(String? status) {
+    if (status == null) return false;
+    return _validStatuses.contains(status.toLowerCase());
   }
 
- 
-  // LOAD RATES DARI FIRESTORE SETTINGS
- 
-  Future<Map<String, dynamic>> _loadRates() async {
-    // Return cache if valid
-    if (_cachedRates != null &&
-        _lastRatesFetch != null &&
-        DateTime.now().difference(_lastRatesFetch!) < _ratesCacheDuration) {
-      return _cachedRates!;
-    }
-
-    try {
-      final doc = await _firestore
-          .collection('settings')
-          .doc('overtime_rates')
-          .get();
-
-      if (doc.exists && doc.data() != null) {
-        _cachedRates = doc.data();
-        _lastRatesFetch = DateTime.now();
-        return _cachedRates!;
-      }
-    } catch (e) {
-      debugPrint('⚠️ PendapatanService: Gagal load rates - $e');
-    }
-
-    // Fallback default
-    _cachedRates = _getDefaultRates();
-    _lastRatesFetch = DateTime.now();
-    return _cachedRates!;
+  bool _isDibatalkan(Map<String, dynamic> data) {
+    final status = (data['status'] as String? ?? '').toLowerCase();
+    return status == 'dibatalkan';
   }
 
-  Map<String, dynamic> _getDefaultRates() {
+  // ============================================================
+  // 🔥 CEK PERSYARATAN BAYAR (SAMA DENGAN REPORT SERVICE)
+  // ============================================================
+
+  Map<String, dynamic> _cekPersyaratanBayar(Map<String, dynamic> data) {
+    final status = data['status']?.toString().toLowerCase() ?? '';
+    final absensiStatus = data['absensi_status']?.toString() ?? '';
+    final isPaid = data['is_paid'] == true || data['isPaid'] == true;
+    final isTerlambat = absensiStatus == 'selesai_terlambat';
+
+    final hasCheckIn = data['check_in_time'] != null ||
+                      data['check_in_waktu'] != null ||
+                      data['check_in'] != null ||
+                      data['absensi_waktu'] != null;
+
+    final hasCheckOut = data['check_out_time'] != null ||
+                       data['check_out_waktu'] != null ||
+                       data['check_out'] != null ||
+                       data['completed_at'] != null;
+
+    final fotoCheckIn = data['check_in_foto_url'] ??
+                       data['absensi_foto_url'] ??
+                       data['foto_url'] ??
+                       data['bukti_foto_url'];
+    final fotoCheckOut = data['check_out_foto_url'] ?? data['foto_check_out'];
+    final hasDokumentasi = (fotoCheckIn != null && fotoCheckIn.toString().isNotEmpty) ||
+                           (fotoCheckOut != null && fotoCheckOut.toString().isNotEmpty);
+
+    String? keterlambatanAlasan;
+    if (data['absensi_keterlambatan'] is Map) {
+      final map = data['absensi_keterlambatan'] as Map;
+      keterlambatanAlasan = map['alasan']?.toString();
+    }
+    final hasAlasan = keterlambatanAlasan != null && keterlambatanAlasan.isNotEmpty;
+
+    bool isValid;
+    final List<String> syaratKurang = [];
+
+    if (isPaid) {
+      isValid = false;
+      syaratKurang.add('Sudah dibayar');
+    } else if (_isDibatalkan(data)) {
+      isValid = false;
+      syaratKurang.add('Pengajuan dibatalkan');
+    } else if (!['disetujui', 'selesai', 'approved'].contains(status)) {
+      isValid = false;
+      syaratKurang.add('Status: $status');
+    } else if (absensiStatus != 'selesai' && absensiStatus != 'selesai_terlambat') {
+      isValid = false;
+      syaratKurang.add('Absensi: $absensiStatus');
+    } else if (isTerlambat) {
+      if (!hasDokumentasi) syaratKurang.add('Tidak ada dokumentasi/bukti');
+      if (!hasAlasan) syaratKurang.add('Tidak ada alasan keterlambatan');
+      isValid = hasDokumentasi && hasAlasan;
+    } else {
+      if (!hasCheckIn) syaratKurang.add('Belum check-in');
+      if (!hasCheckOut) syaratKurang.add('Belum check-out');
+      if (!hasDokumentasi) syaratKurang.add('Tidak ada foto bukti');
+      isValid = hasCheckIn && hasCheckOut && hasDokumentasi;
+    }
+
     return {
-      'rate_per_hour': tarifDasarPerJam,
-      'base_salary': 3000000.0,
-      'jam_kerja_per_bulan': 173,
+      'valid': isValid,
+      'syarat_kurang': syaratKurang,
+      'detail': {
+        'status': status,
+        'absensi_status': absensiStatus,
+        'is_terlambat': isTerlambat,
+        'has_check_in': hasCheckIn,
+        'has_check_out': hasCheckOut,
+        'has_dokumentasi': hasDokumentasi,
+        'alasan_keterlambatan': keterlambatanAlasan,
+        'has_alasan_keterlambatan': hasAlasan,
+        'is_paid': isPaid,
+        'is_dibatalkan': _isDibatalkan(data),
+      }
     };
   }
 
- 
-  // HITUNG TARIF PER JAM
- 
-  Future<double> _hitungTarifPerJam({
-    required String? jenisLembur,
-    required DateTime tanggal,
-    required String? jamMulai,
-    required String? jamSelesai,
-  }) async {
-    final rates = await _loadRates();
-    double tarif = (rates['rate_per_hour'] as num?)?.toDouble() ?? tarifDasarPerJam;
+  // ============================================================
+  // 🔥 LOAD RATES - DARI OVERTIME RATE SERVICE (FIRESTORE)
+  // ============================================================
 
-    // Multiplier hari libur
-    if (jenisLembur != null && jenisLembur.toLowerCase() == 'hari_libur') {
-      tarif *= multiplierHariLibur;
+  Future<Map<String, dynamic>> _loadRates() async {
+    // Gunakan cache lokal untuk performance
+    if (_cachedRates != null && _lastRatesFetch != null &&
+        DateTime.now().difference(_lastRatesFetch!) < _ratesCache) {
+      return _cachedRates!;
     }
 
-    // Multiplier malam (jika jam selesai > 22:00)
-    if (jamMulai != null && jamSelesai != null) {
-      final selesaiTime = _parseJam(tanggal, jamSelesai);
-      if (selesaiTime.hour >= 22) {
-        final mulaiTime = _parseJam(tanggal, jamMulai);
-        if (mulaiTime.hour >= 22) {
-          tarif *= multiplierMalam;
-        }
-      }
+    // 🔥 AMBIL DARI OVERTIME RATE SERVICE (FIRESTORE)
+    try {
+      final rates = await _rateService.loadOvertimeRates();
+      _cachedRates = rates;
+      _lastRatesFetch = DateTime.now();
+      debugPrint('✅ PendapatanService: Rates loaded from OvertimeRateService');
+      return rates;
+    } catch (e) {
+      debugPrint('❌ PendapatanService: Gagal load rates, pakai default: $e');
+      _cachedRates = _getDefaultRates();
+      _lastRatesFetch = DateTime.now();
+      return _cachedRates!;
     }
-
-    return tarif;
   }
 
- 
-  // GET PENDAPATAN MITRA (STREAM - REAL TIME)
- 
+  Map<String, dynamic> _getDefaultRates() {
+    const defaultGaji = 3000000.0;
+    final upahPerJam = defaultGaji / 173;
+    return {
+      'base_salary': defaultGaji,
+      'rate_per_hour': upahPerJam.roundToDouble(),
+      'jam_kerja_per_bulan': 173,
+      'weekday_rate': {
+        'first_hour_multiplier': 1.5,
+        'next_hours_multiplier': 2.0,
+        'is_active': true,
+      },
+      'holiday_rate': {
+        'first_8_hours_multiplier': 2.0,
+        'ninth_hour_multiplier': 3.0,
+        'tenth_plus_multiplier': 4.0,
+        'is_active': true,
+      },
+    };
+  }
+
+  Future<double> getTarifPerJam() async {
+    final rates = await _loadRates();
+    return (rates['rate_per_hour'] as num?)?.toDouble() ?? (3000000.0 / 173).roundToDouble();
+  }
+
+  // ═══════════════════════════════════════════════════════
+  // 🔥🔥🔥 STREAM PENDAPATAN - REAL-TIME DENGAN TARIF AKURAT
+  // ═══════════════════════════════════════════════════════
+
   Stream<List<PendapatanItem>> getPendapatanStream({
     required String mitraId,
     String? bulan,
   }) {
-    // 🔧 QUERY KOMPATIBEL DENGAN STRUKTUR DATA OvertimeService
-    // Filter: user_id = mitraId, absensi_status = 'selesai'
-    // NOTE: pakai user_id (bukan mitra_id) karena ini field yang dipakai
-    // oleh OvertimeService untuk role 'mitra'
+    debugPrint('💰 [REAL-TIME] getPendapatanStream: mitraId=$mitraId, bulan=$bulan');
+
     var query = _firestore
         .collection(_cLembur)
-        .where('user_id', isEqualTo: mitraId)
-        .where('absensi_status', isEqualTo: 'selesai')
-        .orderBy('tanggal', descending: true);
+        .where('mitra_id', isEqualTo: mitraId)
+        .where('absensi_status', whereIn: ['selesai', 'selesai_terlambat']);
 
-    // Filter bulan (pakai field 'tahun_bulan' yang sudah ada)
     if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
       query = query.where('tahun_bulan', isEqualTo: bulan);
     }
 
-    return query.snapshots().asyncMap((snapshot) async {
-      final List<PendapatanItem> items = [];
-
-      for (var doc in snapshot.docs) {
-        try {
-          final data = doc.data();
-
-          // Parse data dari Firestore (sesuai struktur OvertimeHistory)
-          final tanggal = (data['tanggal'] as Timestamp?)?.toDate() ??
-              (data['tanggal_lembur'] as Timestamp?)?.toDate() ??
-              DateTime.now();
-
-          final jamMulai = data['jam_mulai'] as String? ?? '';
-          final jamSelesai = data['jam_selesai'] as String? ?? '';
-          final totalJam = (data['total_jam_desimal'] as num?)?.toDouble() ?? 0;
-          final jenisLembur = data['jenis_lembur'] as String? ?? 'hari_kerja';
-          final statusAbsensi = data['absensi_status'] as String? ?? '';
-          final statusLembur = data['status'] as String? ?? '';
-          final namaPengawas =
-              data['nama_pengawas'] ?? data['diajukan_oleh_nama'] ?? '-';
-
-          // Parse lokasi
-          String? lokasi;
-          if (data['lokasi'] is Map) {
-            lokasi =
-                (data['lokasi'] as Map)['alamat']?.toString() ??
-                (data['lokasi'] as Map)['nama_lokasi']?.toString() ??
-                'Kantor';
-          } else {
-            lokasi = 'Kantor';
-          }
-
-          // Parse waktu absensi
-          DateTime? absensiWaktu;
-          DateTime? completedAt;
-
-          if (data['absensi_waktu'] is Timestamp) {
-            absensiWaktu = (data['absensi_waktu'] as Timestamp).toDate();
-          }
-          if (data['completed_at'] is Timestamp) {
-            completedAt = (data['completed_at'] as Timestamp).toDate();
-          }
-
-          // Hitung tarif per jam
-          final tarifPerJam = await _hitungTarifPerJam(
-            jenisLembur: jenisLembur,
-            tanggal: tanggal,
-            jamMulai: jamMulai,
-            jamSelesai: jamSelesai,
-          );
-
-          // Hitung estimasi pendapatan
-          final estimasiPendapatan = totalJam * tarifPerJam;
-
-          items.add(PendapatanItem(
-            id: doc.id,
-            lemburId: data['lembur_id'] as String? ?? doc.id,
-            groupId: data['group_id'] as String? ?? '',
-            tanggal: tanggal,
-            jamMulai: jamMulai,
-            jamSelesai: jamSelesai,
-            totalJam: totalJam,
-            jenisLembur: jenisLembur,
-            statusAbsensi: statusAbsensi,
-            statusLembur: statusLembur,
-            absensiWaktu: absensiWaktu,
-            completedAt: completedAt,
-            tarifPerJam: tarifPerJam,
-            estimasiPendapatan: estimasiPendapatan,
-            fotoUrl: data['absensi_foto_url'] as String?,
-            lokasi: lokasi,
-            namaPengawas: namaPengawas,
-            createdAt:
-                (data['created_at'] as Timestamp?)?.toDate() ?? tanggal,
-          ));
-        } catch (e) {
-          debugPrint('❌ PendapatanService: Error parsing doc ${doc.id} - $e');
-          // Skip item yang error parsing
-        }
-      }
-
-      // Sort by tanggal descending (untuk jaga-jaga)
-      items.sort((a, b) => b.tanggal.compareTo(a.tanggal));
-
+    return query.orderBy('tanggal', descending: true).snapshots().asyncMap((snapshot) async {
+      debugPrint('💰 [REAL-TIME] Update diterima: ${snapshot.docs.length} dokumen');
+      final items = await _parseDocuments(snapshot.docs);
+      debugPrint('💰 [REAL-TIME] Selesai parse: ${items.length} items');
       return items;
-    }).handleError((error) {
-      debugPrint('❌ PendapatanService: Stream error - $error');
-      // Return list kosong instead of error
-      return <PendapatanItem>[];
+    }).handleError((error, stackTrace) {
+      debugPrint('❌ [REAL-TIME] Stream error: $error');
+      throw error;
     });
   }
 
- 
-  // GET RINGKASAN PENDAPATAN BULANAN (FUTURE)
- 
-  Future<Map<String, dynamic>> getRingkasanPendapatan({
-    required String mitraId,
-    String? bulan,
-  }) async {
-    try {
-      var query = _firestore
-          .collection(_cLembur)
-          .where('user_id', isEqualTo: mitraId)
-          .where('absensi_status', isEqualTo: 'selesai');
+  // ═══════════════════════════════════════════════════════
+  // 🔥 PARSE DOCUMENTS - DENGAN TARIF DARI OVERTIME RATE SERVICE
+  // ═══════════════════════════════════════════════════════
 
-      if (bulan != null && bulan.isNotEmpty && bulan != 'semua') {
-        query = query.where('tahun_bulan', isEqualTo: bulan);
-      }
+  Future<List<PendapatanItem>> _parseDocuments(
+    List<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
+  ) async {
+    // 🔥 LOAD RATES SEKALI untuk semua dokumen
+    final rates = await _loadRates();
+    final baseRatePerHour = (rates['rate_per_hour'] as num?)?.toDouble() ?? (3000000.0 / 173).roundToDouble();
+    
+    debugPrint('💰 Base rate per hour: Rp ${NumberFormat('#,###').format(baseRatePerHour)}');
 
-      final snapshot = await query.get();
+    final List<PendapatanItem> items = [];
 
-      int totalLembur = 0;
-      double totalJam = 0;
-      double totalPendapatan = 0;
-      int tepatWaktu = 0;
-      int terlambat = 0;
-      double rataRataPerHari = 0;
-
-      final Set<String> hariUnik = {};
-
-      for (var doc in snapshot.docs) {
+    for (var doc in docs) {
+      try {
         final data = doc.data();
 
-        final tanggal =
-            (data['tanggal'] as Timestamp?)?.toDate() ?? DateTime.now();
-        final totalJamItem =
-            (data['total_jam_desimal'] as num?)?.toDouble() ?? 0;
-        final jenisLembur = data['jenis_lembur'] as String? ?? 'hari_kerja';
-        final jamMulai = data['jam_mulai'] as String? ?? '';
-        final jamSelesai = data['jam_selesai'] as String? ?? '';
-        final absensiStatus = data['absensi_status'] as String? ?? '';
+        if (_isDibatalkan(data)) continue;
+        if (!_isValidStatus(data['status']?.toString())) continue;
 
-        final tarif = await _hitungTarifPerJam(
-          jenisLembur: jenisLembur,
+        final tanggal = (data['tanggal'] as Timestamp?)?.toDate() ??
+            (data['tanggal_lembur'] as Timestamp?)?.toDate() ??
+            DateTime.now();
+        final jamMulai = data['jam_mulai']?.toString() ?? '';
+        final jamSelesai = data['jam_selesai']?.toString() ?? '';
+
+        // ═══════════════ TOTAL JAM ═══════════════
+        DateTime? absensiWaktu;
+        DateTime? completedAt;
+
+        if (data['absensi_waktu'] is Timestamp) {
+          absensiWaktu = (data['absensi_waktu'] as Timestamp).toDate();
+        }
+        if (data['check_in_waktu'] is Timestamp) {
+          absensiWaktu ??= (data['check_in_waktu'] as Timestamp).toDate();
+        }
+        if (data['check_in_time'] is Timestamp) {
+          absensiWaktu ??= (data['check_in_time'] as Timestamp).toDate();
+        }
+        if (data['check_in'] is Timestamp) {
+          absensiWaktu ??= (data['check_in'] as Timestamp).toDate();
+        }
+
+        if (data['completed_at'] is Timestamp) {
+          completedAt = (data['completed_at'] as Timestamp).toDate();
+        }
+        if (data['check_out_waktu'] is Timestamp) {
+          completedAt ??= (data['check_out_waktu'] as Timestamp).toDate();
+        }
+        if (data['check_out_time'] is Timestamp) {
+          completedAt ??= (data['check_out_time'] as Timestamp).toDate();
+        }
+        if (data['check_out'] is Timestamp) {
+          completedAt ??= (data['check_out'] as Timestamp).toDate();
+        }
+        if (data['absensi_checkout_waktu'] is Timestamp) {
+          completedAt ??= (data['absensi_checkout_waktu'] as Timestamp).toDate();
+        }
+
+        double totalJam = 0;
+
+        if (absensiWaktu != null && completedAt != null) {
+          final durasi = completedAt.difference(absensiWaktu);
+          totalJam = durasi.inMinutes / 60.0;
+        }
+
+        if (totalJam == 0) {
+          totalJam = (data['actual_total_jam'] as num?)?.toDouble() ?? 0;
+        }
+        if (totalJam == 0) {
+          totalJam = (data['total_jam_real'] as num?)?.toDouble() ?? 0;
+        }
+        if (totalJam == 0) {
+          totalJam = (data['total_jam_desimal'] as num?)?.toDouble() ?? 0;
+        }
+        if (totalJam == 0 && jamMulai.isNotEmpty && jamSelesai.isNotEmpty) {
+          final partsMulai = jamMulai.split(':');
+          final partsSelesai = jamSelesai.split(':');
+          if (partsMulai.length == 2 && partsSelesai.length == 2) {
+            final h1 = int.tryParse(partsMulai[0]) ?? 0;
+            final m1 = int.tryParse(partsMulai[1]) ?? 0;
+            final h2 = int.tryParse(partsSelesai[0]) ?? 0;
+            final m2 = int.tryParse(partsSelesai[1]) ?? 0;
+            totalJam = ((h2 * 60 + m2) - (h1 * 60 + m1)) / 60.0;
+            if (totalJam < 0) totalJam += 24;
+          }
+        }
+
+        // ═══════════════ PENDAPATAN - AMBIL DARI FIRESTORE, FALLBACK HITUNG ═══════════════
+        final jenisLembur = data['jenis_lembur']?.toString() ?? 'hari_kerja';
+        final statusAbsensi = data['absensi_status']?.toString() ?? '';
+        final statusLembur = data['status']?.toString() ?? '';
+
+        // 🔥 AMBIL INCOME DARI FIRESTORE (field sama dengan ReportService)
+        double estimasiPendapatan = (data['actual_income'] as num?)?.toDouble() ??
+            (data['income_amount'] as num?)?.toDouble() ??
+            (data['income'] as num?)?.toDouble() ??
+            (data['pendapatan_actual'] as num?)?.toDouble() ??
+            (data['total_bayaran'] as num?)?.toDouble() ??
+            (data['pendapatan'] as num?)?.toDouble() ??
+            0;
+
+        double tarifPerJam = (data['rate_per_hour'] as num?)?.toDouble() ?? 0;
+
+        // 🔥 FALLBACK: Hitung pakai OvertimeRateService kalau income = 0
+        if (estimasiPendapatan == 0 && totalJam > 0) {
+          final isHoliday = jenisLembur.toLowerCase() == 'hari_libur';
+          
+          // 🔥 GUNAKAN OVERTIME RATE SERVICE UNTUK KALKULASI AKURAT
+          estimasiPendapatan = _rateService.calculateOvertimeCost(
+            totalHours: totalJam,
+            isHoliday: isHoliday,
+            rates: rates,
+          );
+          
+          tarifPerJam = estimasiPendapatan / totalJam;
+          
+          debugPrint('💰 ${doc.id}: HITUNG via OvertimeRateService = Rp ${NumberFormat('#,###').format(estimasiPendapatan)} '
+              '(${totalJam.toStringAsFixed(1)} jam, ${isHoliday ? "LIBUR" : "KERJA"})');
+        } else if (tarifPerJam == 0 && totalJam > 0) {
+          tarifPerJam = estimasiPendapatan / totalJam;
+        }
+
+        // ═══════════════ CEK PERSYARATAN BAYAR ═══════════════
+        final cekSyarat = _cekPersyaratanBayar(data);
+        final memenuhiSyarat = cekSyarat['valid'] == true;
+        final syaratBelum = (cekSyarat['syarat_kurang'] as List?)?.cast<String>() ?? [];
+
+        // ═══════════════ PARSE LAINNYA ═══════════════
+        String? lokasi;
+        final locData = data['lokasi'];
+        if (locData is Map) {
+          lokasi = (locData['alamat'] ?? locData['nama_lokasi'] ?? 'Kantor').toString();
+        } else if (locData is String) {
+          lokasi = locData;
+        } else {
+          lokasi = 'Kantor';
+        }
+
+        final isPaid = data['is_paid'] == true || data['isPaid'] == true ||
+            data['gaji_diturunkan'] == true || data['status_bayar'] == 'dibayar' ||
+            data['status_bayar'] == 'sudah_dibayar' || data['status_pembayaran'] == 'lunas';
+
+        DateTime? paidAt;
+        if (data['paid_at'] is Timestamp) paidAt = (data['paid_at'] as Timestamp).toDate();
+        if (data['gaji_diturunkan_at'] is Timestamp) {
+          paidAt ??= (data['gaji_diturunkan_at'] as Timestamp).toDate();
+        }
+
+        final paidByName = data['paid_by_name']?.toString() ??
+            data['gaji_diturunkan_oleh']?.toString() ??
+            data['paid_by']?.toString();
+
+        final paidNote = data['paid_note']?.toString() ??
+            data['gaji_catatan']?.toString();
+
+        String? keterlambatanAlasan;
+        if (data['absensi_keterlambatan'] is Map) {
+          final map = data['absensi_keterlambatan'] as Map;
+          keterlambatanAlasan = map['alasan']?.toString();
+        }
+        if (data['keterlambatan_alasan'] != null) {
+          keterlambatanAlasan ??= data['keterlambatan_alasan']?.toString();
+        }
+
+        debugPrint('💰 ${doc.id}: jam=$totalJam, tarif=$tarifPerJam, '
+            'pendapatan=$estimasiPendapatan, isPaid=$isPaid, '
+            'memenuhiSyarat=$memenuhiSyarat');
+
+        items.add(PendapatanItem(
+          id: doc.id,
+          lemburId: data['lembur_id']?.toString() ?? doc.id,
+          groupId: data['group_id']?.toString() ?? '',
           tanggal: tanggal,
           jamMulai: jamMulai,
           jamSelesai: jamSelesai,
-        );
-
-        totalLembur++;
-        totalJam += totalJamItem;
-        totalPendapatan += totalJamItem * tarif;
-
-        if (absensiStatus == 'selesai') {
-          tepatWaktu++;
-        } else if (absensiStatus == 'selesai_terlambat') {
-          terlambat++;
-        }
-
-        hariUnik.add(DateFormat('yyyy-MM-dd').format(tanggal));
+          totalJam: totalJam,
+          jenisLembur: jenisLembur,
+          statusAbsensi: statusAbsensi,
+          statusLembur: statusLembur,
+          absensiWaktu: absensiWaktu,
+          completedAt: completedAt,
+          tarifPerJam: tarifPerJam,
+          estimasiPendapatan: estimasiPendapatan,
+          fotoUrl: data['absensi_foto_url']?.toString() ?? data['check_in_foto_url']?.toString(),
+          lokasi: lokasi,
+          namaPengawas: data['nama_pengawas']?.toString() ?? data['diajukan_oleh_nama']?.toString() ?? '-',
+          createdAt: (data['created_at'] as Timestamp?)?.toDate() ?? tanggal,
+          isPaid: isPaid,
+          paidAt: paidAt,
+          paidByName: paidByName,
+          paidNote: paidNote,
+          keterlambatanAlasan: keterlambatanAlasan,
+          memenuhiSyaratBayar: memenuhiSyarat,
+          syaratBelumTerpenuhi: syaratBelum,
+        ));
+      } catch (e) {
+        debugPrint('❌ Error parsing doc ${doc.id}: $e');
       }
-
-      // Rata-rata pendapatan per hari lembur
-      if (hariUnik.isNotEmpty) {
-        rataRataPerHari = totalPendapatan / hariUnik.length;
-      }
-
-      return {
-        'totalLembur': totalLembur,
-        'totalJam': totalJam,
-        'totalPendapatan': totalPendapatan,
-        'tepatWaktu': tepatWaktu,
-        'terlambat': terlambat,
-        'rataRataPerHari': rataRataPerHari,
-        'totalHariLembur': hariUnik.length,
-        'tarifDasar': tarifDasarPerJam,
-      };
-    } catch (e) {
-      debugPrint('❌ PendapatanService: getRingkasanPendapatan error - $e');
-      return {
-        'totalLembur': 0,
-        'totalJam': 0,
-        'totalPendapatan': 0,
-        'tepatWaktu': 0,
-        'terlambat': 0,
-        'rataRataPerHari': 0,
-        'totalHariLembur': 0,
-        'tarifDasar': tarifDasarPerJam,
-      };
     }
+
+    items.sort((a, b) => b.tanggal.compareTo(a.tanggal));
+
+    final totalEstimasi = items.fold(0.0, (sum, i) => sum + i.estimasiPendapatan);
+    final totalDibayar = items.where((i) => i.isPaid).fold(0.0, (sum, i) => sum + i.estimasiPendapatan);
+    final totalBelum = items.where((i) => !i.isPaid).fold(0.0, (sum, i) => sum + i.estimasiPendapatan);
+
+    debugPrint('💰 [REAL-TIME] Total: ${items.length} items | '
+        'Pendapatan: Rp ${NumberFormat('#,###').format(totalEstimasi)} | '
+        'Dibayar: ${items.where((i) => i.isPaid).length} | '
+        'Belum: ${items.where((i) => !i.isPaid).length}');
+
+    return items;
   }
 
-  /// Clear cache rates
   void clearCache() {
     _cachedRates = null;
     _lastRatesFetch = null;
-    debugPrint('🧹 PendapatanService: Cache cleared');
+    _rateService.clearCache(); // 🔥 Clear cache OvertimeRateService juga
   }
 }
