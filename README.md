@@ -82,4 +82,3 @@ flutter run
 
 **Vina Septia Anggraeni**
 Lulusan Sistem Informasi, IPI Garut
-[LinkedIn] | [Portofolio]
