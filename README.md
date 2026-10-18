@@ -7,11 +7,9 @@ Aplikasi mobile berbasis Flutter untuk pengajuan, persetujuan, dan pemantauan le
 
 ## Tampilan Aplikasi
 
-| Login | Pengajuan Lembur | Persetujuan | Dashboard |
-|-------|------------------|-------------|-----------|
-| ![](docs/login.jpg) | ![](docs/pengajuan_lembur.jpg) | ![](docs/persetujuan_lembur.jpg) | ![](docs/dashboard.png) |
-
-Video demo: [link]
+| Login | Pengajuan Lembur | Persetujuan | 
+|-------|------------------|-------------|
+| ![](docs/login.jpg) | ![](docs/pengajuan_lembur.jpg) | ![](docs/persetujuan_lembur.jpg) |
 
 ## Latar Belakang Masalah
 
