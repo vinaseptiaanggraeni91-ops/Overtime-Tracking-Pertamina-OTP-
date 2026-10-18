@@ -426,7 +426,7 @@ class _LocationMenuScreenState extends State<LocationMenuScreen>
     if (difference.inDays > 0) return '${difference.inDays} hr';
     if (difference.inHours > 0) return '${difference.inHours} jam';
     if (difference.inMinutes > 0) return '${difference.inMinutes} mnt';
-    return 'br saja';
+    return 'baru saja';
   }
 
   Future<void> _launchMaps(double lat, double lng) async {

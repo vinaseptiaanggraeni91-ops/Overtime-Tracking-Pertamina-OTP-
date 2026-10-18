@@ -1001,6 +1001,14 @@ class DashboardService {
 
   Future<Map<String, dynamic>?> validateWorkerId(String idPekerja) async {
     try {
+      // 🔑 Pastikan ada sesi Firebase Auth sebelum query ke master_workers.
+      // Saat register, user belum punya akun sama sekali (request.auth == null),
+      // sedangkan rules master_workers mewajibkan isAuthenticated(). Anonymous
+      // sign-in memberi request.auth != null tanpa perlu akun permanen dulu.
+      if (_auth.currentUser == null) {
+        await _auth.signInAnonymously();
+      }
+
       final snapshot = await _firestore
           .collection(collectionMasterWorkers)
           .where('id_pekerja', isEqualTo: idPekerja.trim())
@@ -1641,7 +1649,7 @@ class DashboardService {
     if (diff.inDays > 0) return '${diff.inDays} hr';
     if (diff.inHours > 0) return '${diff.inHours} jam';
     if (diff.inMinutes > 0) return '${diff.inMinutes} mnt';
-    return 'br saja';
+    return 'baru saja';
   }
 
   Color getStatusColor(String status) {

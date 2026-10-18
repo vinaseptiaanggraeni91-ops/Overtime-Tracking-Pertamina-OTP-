@@ -5,9 +5,11 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:intl/intl.dart';
 import 'package:open_filex/open_filex.dart';
 import '/core/services/overtime_approval_service.dart';
 import '/core/services/overtime_rate_service.dart';
+import '/core/services/notification_service.dart';
 
 import '../../widgets/approval/approval_detail_bottom_sheet.dart';
 import '../../widgets/approval/approval_dialogs.dart';
@@ -1470,6 +1472,60 @@ class _ManagerApprovalLemburScreenState
           _selectedIds.remove(groupId);
           _isSelectAll = false;
         });
+      }
+
+      // 🔔 Kabari Pengawas pengaju hasil approval (fitur ini sebelumnya
+      // sudah ada di NotificationService tapi belum pernah dipanggil)
+      if (result.success) {
+        try {
+          final groupDoc = await _firestore.collection('pengajuan_lembur').doc(groupId).get();
+          final groupData = groupDoc.data();
+          if (groupData != null) {
+            final pengawasId = groupData['diajukan_oleh_id']?.toString() ?? groupData['pengawas_id']?.toString();
+            if (pengawasId != null && pengawasId.isNotEmpty) {
+              final pengawasNama = groupData['diajukan_oleh_nama']?.toString() ??
+                  groupData['nama_pengawas']?.toString() ??
+                  groupData['pengawas_nama']?.toString() ??
+                  'Pengawas';
+              final now = DateTime.now();
+              await NotificationService().sendApprovalResultNotification(
+                pengawasId: pengawasId,
+                pengawasNama: pengawasNama,
+                isApproved: isApprove,
+                approverName: _userName ?? 'Unknown',
+                approverRole: _userRole ?? 'manager',
+                spklNomor: result.spklNomor,
+                groupId: groupId,
+                notes: notes.isNotEmpty ? notes : null,
+                tanggal: DateFormat('d MMMM yyyy', 'id_ID').format(now),
+                waktu: DateFormat('HH:mm').format(now),
+                fungsi: groupData['fungsi']?.toString(),
+              );
+            } else {
+              debugPrint('⚠️ pengawasId tidak ditemukan di pengajuan_lembur/$groupId, notifikasi hasil approval tidak dikirim');
+            }
+          }
+        } catch (e) {
+          debugPrint('⚠️ Gagal kirim notifikasi hasil approval ke pengawas: $e');
+        }
+      }
+
+      // 🔔 Kabari Superadmin hasil approval (approve/reject), asal prosesnya sukses
+      if (result.success) {
+        NotificationService().notifySuperAdmins(
+          type: isApprove ? 'lembur_approved' : 'lembur_rejected',
+          title: isApprove ? '✅ Pengajuan Lembur Disetujui' : '❌ Pengajuan Lembur Ditolak',
+          message: '${_userName ?? "Manager"} (${_userFungsi ?? "-"}) '
+              '${isApprove ? "menyetujui" : "menolak"} pengajuan lembur.'
+              '${notes.isNotEmpty ? " Catatan: $notes" : ""}',
+          data: {
+            'groupId': groupId,
+            'approverName': _userName ?? '',
+            'approverRole': _userRole ?? '',
+            'isApprove': isApprove,
+          },
+          priority: 4,
+        );
       }
     } catch (e) {
       if (mounted) _showSnackbar('Gagal memproses: $e', isError: true);

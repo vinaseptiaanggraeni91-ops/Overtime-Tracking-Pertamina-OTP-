@@ -1,4 +1,5 @@
 // lib/features/pengawas/lembur/ajukan_lembur_screen.dart
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -24,6 +25,782 @@ import '/widgets/ajukan_lembur/mitra_selection_dialog.dart';
 import '/widgets/ajukan_lembur/preview_dialog.dart';
 import '/widgets/bottom_nav/pengawas_bottom_nav.dart';
 
+// ==================== PARTICLE CLASS ====================
+class _ConfettiParticle {
+  final Color color;
+  final double left;
+  final Duration delay;
+  final double size;
+  final double rotation;
+  final double speed;
+
+  _ConfettiParticle({
+    required this.color,
+    required this.left,
+    required this.delay,
+    required this.size,
+    required this.rotation,
+    required this.speed,
+  });
+}
+
+// ==================== SUCCESS DIALOG CONTENT ====================
+class _SuccessDialogContent extends StatefulWidget {
+  final String groupId;
+  final int validMirasCount;
+  final bool isMultiDay;
+  final bool isOvernight;
+  final String? namaPengawas;
+  final String? fungsiPengawas;
+  final String Function(double) formatRupiah;
+  final double totalBiayaLembur;
+  final VoidCallback onSelesai;
+
+  const _SuccessDialogContent({
+    required this.groupId,
+    required this.validMirasCount,
+    required this.isMultiDay,
+    required this.isOvernight,
+    this.namaPengawas,
+    this.fungsiPengawas,
+    required this.formatRupiah,
+    required this.totalBiayaLembur,
+    required this.onSelesai,
+  });
+
+  @override
+  State<_SuccessDialogContent> createState() => _SuccessDialogContentState();
+}
+
+class _SuccessDialogContentState extends State<_SuccessDialogContent>
+    with TickerProviderStateMixin {
+  late AnimationController _pulseController;
+  late AnimationController _slideController;
+  late AnimationController _confettiController;
+  late AnimationController _shimmerController;
+  late Animation<double> _pulseAnimation;
+  late Animation<Offset> _slideAnimation;
+  late List<_ConfettiParticle> _particles;
+
+  bool _showContent = false;
+  bool _showParticles = false;
+
+  @override
+  void initState() {
+    super.initState();
+
+    _pulseController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1500),
+    )..repeat(reverse: true);
+
+    _pulseAnimation = Tween<double>(begin: 0.9, end: 1.1).animate(
+      CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut),
+    );
+
+    _shimmerController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat();
+
+    _slideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, 0.3),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _slideController,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _confettiController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2500),
+    );
+
+    _particles = _generateConfettiParticles();
+
+    Future.delayed(const Duration(milliseconds: 200), () {
+      if (mounted) {
+        setState(() => _showParticles = true);
+        _confettiController.forward();
+      }
+    });
+
+    Future.delayed(const Duration(milliseconds: 400), () {
+      if (mounted) {
+        setState(() => _showContent = true);
+        _slideController.forward();
+      }
+    });
+  }
+
+  List<_ConfettiParticle> _generateConfettiParticles() {
+    final random = Random(DateTime.now().millisecondsSinceEpoch);
+    final particles = <_ConfettiParticle>[];
+    final colors = [
+      const Color(0xFFFF6B6B),
+      const Color(0xFF4ECDC4),
+      const Color(0xFFFFE66D),
+      const Color(0xFF95E1D3),
+      const Color(0xFFF38181),
+      const Color(0xFFAA96DA),
+      const Color(0xFF74B9FF),
+      const Color(0xFFA8E6CF),
+      const Color(0xFFFF8A80),
+      const Color(0xFFB388FF),
+    ];
+
+    for (int i = 0; i < 50; i++) {
+      particles.add(_ConfettiParticle(
+        color: colors[i % colors.length],
+        left: random.nextDouble(),
+        delay: Duration(milliseconds: random.nextInt(600)),
+        size: 5.0 + random.nextDouble() * 8,
+        rotation: random.nextDouble() * 2 * pi,
+        speed: 0.5 + random.nextDouble() * 1.5,
+      ));
+    }
+    return particles;
+  }
+
+  @override
+  void dispose() {
+    _pulseController.dispose();
+    _slideController.dispose();
+    _confettiController.dispose();
+    _shimmerController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 20),
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Stack(
+          clipBehavior: Clip.none,
+          children: [
+            Card(
+              elevation: 24,
+              shadowColor: const Color(0xFF1976D2).withValues(alpha: 0.35),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(28),
+              ),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(24, 52, 24, 24),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.white, Color(0xFFF5F8FF)],
+                  ),
+                  borderRadius: BorderRadius.circular(28),
+                ),
+                child: AnimatedBuilder(
+                  animation: _slideAnimation,
+                  builder: (context, child) {
+                    return Transform.translate(
+                      offset: _slideAnimation.value,
+                      child: Opacity(
+                        opacity: _showContent ? 1.0 : 0.0,
+                        child: child,
+                      ),
+                    );
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [Colors.green.shade400, Colors.green.shade600],
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.green.withValues(alpha: 0.3),
+                              blurRadius: 8,
+                              offset: const Offset(0, 2),
+                            ),
+                          ],
+                        ),
+                        child: const Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.verified_rounded, color: Colors.white, size: 16),
+                            SizedBox(width: 6),
+                            Text(
+                              'SUKSES',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w800,
+                                color: Colors.white,
+                                letterSpacing: 2.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      ShaderMask(
+                        shaderCallback: (bounds) => const LinearGradient(
+                          colors: [Color(0xFF0D47A1), Color(0xFF1976D2), Color(0xFF2196F3)],
+                        ).createShader(bounds),
+                        child: const Text(
+                          'Pengajuan Berhasil! 🎉',
+                          style: TextStyle(
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        'Lembur berhasil diajukan oleh',
+                        style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade600,
+                          height: 1.4,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              const Color(0xFF1976D2).withValues(alpha: 0.1),
+                              const Color(0xFF2196F3).withValues(alpha: 0.05),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(
+                            color: const Color(0xFF1976D2).withValues(alpha: 0.2),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.person_rounded,
+                              size: 16,
+                              color: const Color(0xFF1976D2).withValues(alpha: 0.7),
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              widget.namaPengawas ?? 'Pengawas',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.w700,
+                                color: Color(0xFF1976D2),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      AnimatedBuilder(
+                        animation: _shimmerController,
+                        builder: (context, child) {
+                          return Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  const Color(0xFF1976D2).withValues(alpha: 0.12),
+                                  const Color(0xFF2196F3).withValues(alpha: 0.08),
+                                ],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: const Color(0xFF1976D2).withValues(alpha: 0.2),
+                                width: 1.5,
+                              ),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF1976D2).withValues(alpha: 0.05),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ],
+                            ),
+                            child: Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.receipt_long_rounded,
+                                      size: 14,
+                                      color: Colors.grey.shade600,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'ID PENGAJUAN',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: Colors.grey.shade600,
+                                        letterSpacing: 2,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 12,
+                                    vertical: 6,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: const Color(0xFF1976D2).withValues(alpha: 0.15),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.tag_rounded,
+                                        size: 16,
+                                        color: const Color(0xFF1976D2).withValues(alpha: 0.8),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      SelectableText(
+                                        widget.groupId,
+                                        style: const TextStyle(
+                                          fontSize: 16,
+                                          fontFamily: 'monospace',
+                                          fontWeight: FontWeight.w700,
+                                          color: Color(0xFF1565C0),
+                                          letterSpacing: 1.2,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      IconButton(
+                                        icon: const Icon(
+                                          Icons.copy_rounded,
+                                          size: 18,
+                                          color: Color(0xFF1976D2),
+                                        ),
+                                        onPressed: () {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(
+                                              content: const Text('ID berhasil disalin!'),
+                                              behavior: SnackBarBehavior.floating,
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius: BorderRadius.circular(10),
+                                              ),
+                                              duration: const Duration(seconds: 1),
+                                            ),
+                                          );
+                                        },
+                                        padding: EdgeInsets.zero,
+                                        constraints: const BoxConstraints(),
+                                        splashRadius: 16,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'Simpan ID ini untuk referensi',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey.shade500,
+                                    fontStyle: FontStyle.italic,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildInfoCard(
+                              icon: Icons.people_alt_rounded,
+                              label: 'Total TAD',
+                              value: '${widget.validMirasCount} Orang',
+                              color: const Color(0xFF1976D2),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: _buildInfoCard(
+                              icon: Icons.account_balance_wallet_rounded,
+                              label: 'Estimasi Biaya',
+                              value: widget.formatRupiah(widget.totalBiayaLembur),
+                              color: const Color(0xFF43A047),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      if (widget.isMultiDay || widget.isOvernight)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            alignment: WrapAlignment.center,
+                            children: [
+                              if (widget.isMultiDay)
+                                _buildTag(
+                                  icon: Icons.calendar_view_week_rounded,
+                                  text: 'Multi-Hari',
+                                  color: Colors.purple,
+                                ),
+                              if (widget.isOvernight)
+                                _buildTag(
+                                  icon: Icons.nights_stay_rounded,
+                                  text: 'Lintas Malam',
+                                  color: Colors.indigo,
+                                ),
+                              _buildTag(
+                                icon: Icons.notifications_active_rounded,
+                                text: 'Notifikasi Terkirim',
+                                color: Colors.orange,
+                              ),
+                            ],
+                          ),
+                        ),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [
+                              Colors.blue.shade50,
+                              Colors.blue.shade100,
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.blue.shade200,
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.blue.withValues(alpha: 0.2),
+                                    blurRadius: 6,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: Icon(
+                                Icons.hourglass_bottom_rounded,
+                                size: 22,
+                                color: Colors.blue.shade700,
+                              ),
+                            ),
+                            const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Menunggu Persetujuan Manager',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w700,
+                                      color: Colors.blue.shade800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 3),
+                                  Text(
+                                    'Pengajuan akan segera ditinjau',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.blue.shade600,
+                                      height: 1.3,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              width: 8,
+                              height: 8,
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade400,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton(
+                          onPressed: widget.onSelesai,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF1976D2),
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(vertical: 16),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(16),
+                            ),
+                            elevation: 6,
+                            shadowColor: const Color(0xFF1976D2).withValues(alpha: 0.4),
+                          ),
+                          child: const Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                'SELESAI',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.5,
+                                ),
+                              ),
+                              SizedBox(width: 8),
+                              Icon(Icons.arrow_forward_rounded, size: 22),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: -40,
+              left: 0,
+              right: 0,
+              child: AnimatedBuilder(
+                animation: _pulseAnimation,
+                builder: (context, child) {
+                  return Transform.scale(
+                    scale: _pulseAnimation.value,
+                    child: child,
+                  );
+                },
+                child: Container(
+                  width: 80,
+                  height: 80,
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF43A047), Color(0xFF66BB6A), Color(0xFF81C784)],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.green.withValues(alpha: 0.4),
+                        blurRadius: 24,
+                        spreadRadius: 4,
+                        offset: const Offset(0, 10),
+                      ),
+                    ],
+                  ),
+                  child: const Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Icon(Icons.check_rounded, color: Colors.white, size: 48),
+                      Positioned(
+                        top: 14,
+                        right: 18,
+                        child: Icon(Icons.auto_awesome, color: Colors.white70, size: 12),
+                      ),
+                      Positioned(
+                        bottom: 14,
+                        left: 18,
+                        child: Icon(Icons.auto_awesome, color: Colors.white54, size: 8),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            if (_showParticles)
+              ..._particles.map((particle) {
+                return Positioned(
+                  top: -30,
+                  left: particle.left * MediaQuery.of(context).size.width * 0.75,
+                  child: AnimatedBuilder(
+                    animation: _confettiController,
+                    builder: (context, child) {
+                      final progress = _confettiController.value;
+                      final particleProgress =
+                          (progress - particle.delay.inMilliseconds / 2500).clamp(0.0, 1.0);
+
+                      if (particleProgress <= 0) return const SizedBox.shrink();
+
+                      return Transform.rotate(
+                        angle: particle.rotation + (particleProgress * 8 * particle.speed),
+                        child: Opacity(
+                          opacity: (1 - particleProgress * 0.7).clamp(0.0, 1.0),
+                          child: Transform.translate(
+                            offset: Offset(
+                              sin(particleProgress * 3) * 20,
+                              particleProgress * 300 * particle.speed,
+                            ),
+                            child: Container(
+                              width: particle.size,
+                              height: particle.size * 1.5,
+                              decoration: BoxDecoration(
+                                color: particle.color.withValues(alpha: 0.9),
+                                borderRadius: BorderRadius.circular(
+                                  particle.size > 6 ? 3 : 2,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoCard({
+    required IconData icon,
+    required String label,
+    required String value,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            color.withValues(alpha: 0.08),
+            color.withValues(alpha: 0.04),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: color.withValues(alpha: 0.15),
+          width: 1,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.05),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(icon, size: 20, color: color),
+          ),
+          const SizedBox(height: 10),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+              maxLines: 1,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10,
+              color: Colors.grey.shade600,
+              fontWeight: FontWeight.w600,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTag({
+    required IconData icon,
+    required String text,
+    required Color color,
+  }) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            color.withValues(alpha: 0.1),
+            color.withValues(alpha: 0.05),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: color.withValues(alpha: 0.25),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 5),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: color,
+              letterSpacing: 0.3,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ==================== MAIN PAGE ====================
 class AjukanLemburPage extends StatefulWidget {
   const AjukanLemburPage({super.key});
 
@@ -53,14 +830,14 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
   Map<String, bool> mitraDuplicateStatus = {};
   Map<String, String> mitraDuplicateIds = {};
 
-  // ==================== FORM DATA (🔥 UPGRADED!) ====================
-  DateTime? tanggalMulai;       // 🔥 GANTI dari tanggalLembur
-  DateTime? tanggalSelesai;     // 🔥 BARU: rentang akhir
+  // ==================== FORM DATA ====================
+  DateTime? tanggalMulai;
+  DateTime? tanggalSelesai;
   TimeOfDay? jamMulai;
   TimeOfDay? jamSelesai;
   double totalJam = 0.0;
-  bool isMultiDay = false;      // 🔥 BARU: flag multi-hari
-  bool isOvernight = false;     // 🔥 BARU: flag lintas malam
+  bool isMultiDay = false;
+  bool isOvernight = false;
   String urgensi = 'normal';
   String? fungsiPengawas;
   String? namaPengawas;
@@ -104,8 +881,8 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
   bool _allDataComplete() {
     return selectedMiras.isNotEmpty &&
         _validMiras.isNotEmpty &&
-        tanggalMulai != null &&          // 🔥
-        tanggalSelesai != null &&        // 🔥
+        tanggalMulai != null &&
+        tanggalSelesai != null &&
         jamMulai != null &&
         jamSelesai != null &&
         _selectedLocation != null &&
@@ -117,10 +894,10 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
 
   double get _completionPercentage {
     int completed = 0;
-    const total = 8;  // 🔥 Tambah 1 (tanggalSelesai)
+    const total = 8;
     if (selectedMiras.isNotEmpty && _validMiras.isNotEmpty) completed++;
-    if (tanggalMulai != null) completed++;      // 🔥
-    if (tanggalSelesai != null) completed++;    // 🔥 BARU
+    if (tanggalMulai != null) completed++;
+    if (tanggalSelesai != null) completed++;
     if (jamMulai != null && jamSelesai != null) completed++;
     if (_selectedLocation != null) completed++;
     if (alasanController.text.length >= 20) completed++;
@@ -129,8 +906,6 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
   }
 
   // ==================== HELPER FUNCTIONS ====================
-
-  /// Generate list semua tanggal dalam rentang
   List<DateTime> _getDatesInRange(DateTime start, DateTime end) {
     final dates = <DateTime>[];
     final startDay = DateTime(start.year, start.month, start.day);
@@ -141,7 +916,6 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
     return dates;
   }
 
-  /// Cek apakah tanggal weekend
   bool _isWeekend(DateTime date) =>
       date.weekday == DateTime.saturday || date.weekday == DateTime.sunday;
 
@@ -208,40 +982,37 @@ class _AjukanLemburPageState extends State<AjukanLemburPage>
     if (mounted) setState(() {});
   }
 
-  // ==================== DUPLICATE CHECK (🔥 UPGRADED: MULTI-HARI) ====================
-  // ==================== DUPLICATE CHECK (🔥 UPGRADED: PAKAI RENTANG) ====================
-Future<void> _checkDuplicateLembur() async {
-  if (tanggalMulai == null || tanggalSelesai == null || selectedMiras.isEmpty) return;
-  setState(() => isCheckingDuplicates = true);
+  // ==================== DUPLICATE CHECK ====================
+  Future<void> _checkDuplicateLembur() async {
+    if (tanggalMulai == null || tanggalSelesai == null || selectedMiras.isEmpty) return;
+    setState(() => isCheckingDuplicates = true);
 
-  // 🔥 GUNAKAN METHOD RENTANG — LEBIH EFISIEN!
-  for (final mitra in selectedMiras) {
-    final result = await _mitraLimitService.checkDuplicateLemburRentang(
-      mitraId: mitra['id'],
-      tanggalMulai: tanggalMulai!,
-      tanggalSelesai: tanggalSelesai!,
-    );
+    for (final mitra in selectedMiras) {
+      final result = await _mitraLimitService.checkDuplicateLemburRentang(
+        mitraId: mitra['id'],
+        tanggalMulai: tanggalMulai!,
+        tanggalSelesai: tanggalSelesai!,
+      );
 
-    if (mounted) {
-      setState(() {
-        mitraDuplicateStatus[mitra['id']] = result['is_duplicate'] ?? false;
-        if (result['is_duplicate'] == true && result['existing_ids'] != null) {
-          final ids = result['existing_ids'] as List;
-          mitraDuplicateIds[mitra['id']] = ids.isNotEmpty ? ids.first.toString() : '';
-        }
-      });
+      if (mounted) {
+        setState(() {
+          mitraDuplicateStatus[mitra['id']] = result['is_duplicate'] ?? false;
+          if (result['is_duplicate'] == true && result['existing_ids'] != null) {
+            final ids = result['existing_ids'] as List;
+            mitraDuplicateIds[mitra['id']] = ids.isNotEmpty ? ids.first.toString() : '';
+          }
+        });
+      }
     }
+    if (mounted) setState(() => isCheckingDuplicates = false);
   }
-  if (mounted) setState(() => isCheckingDuplicates = false);
-}
 
-  // ==================== CALCULATION (🔥 UPGRADED: MULTI-HARI + OVERNIGHT) ====================
+  // ==================== CALCULATION ====================
   void _recalculateBiaya() {
-    if (jamMulai == null || jamSelesai == null || 
+    if (jamMulai == null || jamSelesai == null ||
         tanggalMulai == null || tanggalSelesai == null ||
         _overtimeRates == null) return;
 
-    // 🔥 Build DateTime penuh (dukung overnight)
     final startDateTime = DateTime(
       tanggalMulai!.year, tanggalMulai!.month, tanggalMulai!.day,
       jamMulai!.hour, jamMulai!.minute,
@@ -265,14 +1036,12 @@ Future<void> _checkDuplicateLembur() async {
 
     totalJam = diffInMinutes / 60.0;
 
-    // 🔥 Deteksi multi-day & overnight
     isMultiDay = tanggalMulai!.year != tanggalSelesai!.year ||
                  tanggalMulai!.month != tanggalSelesai!.month ||
                  tanggalMulai!.day != tanggalSelesai!.day;
     isOvernight = !isMultiDay && (jamSelesai!.hour < jamMulai!.hour ||
                    (jamSelesai!.hour == jamMulai!.hour && jamSelesai!.minute <= jamMulai!.minute));
 
-    // 🔥 Kalkulasi biaya multi-hari (dipecah per hari)
     biayaLemburPerMitra = _calculateMultiDayCost(
       startDateTime: startDateTime,
       endDateTime: endDateTime,
@@ -285,7 +1054,6 @@ Future<void> _checkDuplicateLembur() async {
     _checkDuplicateLembur();
   }
 
-  /// 🔥 Kalkulasi biaya dengan memecah durasi per hari kalender
   double _calculateMultiDayCost({
     required DateTime startDateTime,
     required DateTime endDateTime,
@@ -379,7 +1147,7 @@ Future<void> _checkDuplicateLembur() async {
     }
   }
 
-  // ==================== VALIDASI TERPUSAT (🔥 UPGRADED) ====================
+  // ==================== VALIDASI TERPUSAT ====================
   String? _validateAllData() {
     if (selectedMiras.isEmpty) {
       return 'Pilih minimal satu TAD';
@@ -476,6 +1244,21 @@ Future<void> _checkDuplicateLembur() async {
             lemburIds: [groupId],
             overtimeRates: _overtimeRates!,
           );
+
+          // 🔔 Kabari Superadmin juga ada pengajuan lembur baru masuk
+          NotificationService().notifySuperAdmins(
+            type: 'lembur_submitted',
+            title: '📋 Pengajuan Lembur Baru',
+            message: '${namaPengawas ?? "Pengawas"} mengajukan lembur untuk ${_validMiras.length} mitra'
+                ' (${fungsiPengawas ?? "-"}).',
+            data: {
+              'groupId': groupId,
+              'pengawasNama': namaPengawas ?? '',
+              'fungsi': fungsiPengawas ?? '',
+              'jumlahMitra': _validMiras.length,
+            },
+            priority: 3,
+          );
         } catch (e) {
           debugPrint('⚠️ Gagal kirim notifikasi: $e');
         }
@@ -494,7 +1277,7 @@ Future<void> _checkDuplicateLembur() async {
     }
   }
 
-  // ==================== SAVE DATA (🔥 UPGRADED: SPLIT PER TANGGAL) ====================
+  // ==================== SAVE DATA ====================
   Future<void> _saveOvertimeData(bool hasLimitExceeded, String groupId) async {
     final batch = _firestore.batch();
     final now = Timestamp.now();
@@ -510,7 +1293,23 @@ Future<void> _checkDuplicateLembur() async {
       }
     }
 
-    // 🔥 DATA PENGAJUAN (DENGAN RENTANG TANGGAL)
+    // 🔥 PERSIAPKAN DATA MITRA UNTUK BERBAGAI FORMAT
+    final mitraListData = _validMiras
+        .map((m) => {
+              'id': m['id'],
+              'nama_mitra': m['nama_lengkap'],
+              'fungsi_mitra': m['fungsi'],
+            })
+        .toList();
+
+    final detailMitraData = _validMiras
+        .map((m) => {
+              'id': m['id'],
+              'nama': m['nama_lengkap'],
+              'fungsi': m['fungsi'],
+            })
+        .toList();
+
     final pengajuanRef = _firestore.collection('pengajuan_lembur').doc(groupId);
     batch.set(pengajuanRef, {
       'group_id': groupId,
@@ -521,12 +1320,10 @@ Future<void> _checkDuplicateLembur() async {
       'pengawas_id': _auth.currentUser?.uid,
       'nama_pengawas': namaPengawas,
       'pengawas_fungsi': fungsiPengawas,
-      // 🔥 DATA BARU: Rentang tanggal
       'tanggal_mulai': Timestamp.fromDate(tanggalMulai!),
       'tanggal_selesai': Timestamp.fromDate(tanggalSelesai!),
       'is_multi_day': isMultiDay,
       'is_overnight': isOvernight,
-      // Backward compatibility
       'tanggal_lembur': Timestamp.fromDate(tanggalMulai!),
       'tahun_bulan': DateFormat('yyyy-MM').format(tanggalMulai!),
       'jam_mulai': _formatTime(jamMulai!),
@@ -547,13 +1344,10 @@ Future<void> _checkDuplicateLembur() async {
       'rate_snapshot': _overtimeRates,
       'total_mitra': _validMiras.length,
       'mitra_ids': _validMiras.map((m) => m['id'] as String).toList(),
-      'detail_mitra': _validMiras
-          .map((m) => {
-                'id': m['id'],
-                'nama': m['nama_lengkap'],
-                'fungsi': m['fungsi'],
-              })
-          .toList(),
+      // 🔥 FIELD BARU: mitra_list (dibaca oleh SpklGeneratorService)
+      'mitra_list': mitraListData,
+      // Field existing: detail_mitra (backward compatible)
+      'detail_mitra': detailMitraData,
       'urgensi': urgensi,
       'alasan': alasanController.text.trim(),
       'is_override': hasLimitExceeded,
@@ -561,7 +1355,6 @@ Future<void> _checkDuplicateLembur() async {
       'location_type': _locationType,
     });
 
-    // 🔥 SPLIT PER TANGGAL di lembur_mitra
     final allDates = _getDatesInRange(tanggalMulai!, tanggalSelesai!);
 
     final baseMitraData = {
@@ -597,7 +1390,6 @@ Future<void> _checkDuplicateLembur() async {
       for (final date in allDates) {
         final isHoliday = _isWeekend(date);
 
-        // Jam spesifik untuk tanggal ini
         TimeOfDay dayStart = const TimeOfDay(hour: 0, minute: 0);
         TimeOfDay dayEnd = const TimeOfDay(hour: 23, minute: 59);
 
@@ -633,10 +1425,10 @@ Future<void> _checkDuplicateLembur() async {
 
     await batch.commit();
     debugPrint('✅ Data tersimpan untuk group: $groupId (${allDates.length} hari, ${_validMiras.length} mitra)');
+    debugPrint('✅ mitra_list tersimpan: ${mitraListData.length} mitra');
   }
 
   // ==================== DIALOGS ====================
-
   void _showValidationError(String message) {
     ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
@@ -760,108 +1552,75 @@ Future<void> _checkDuplicateLembur() async {
   }
 
   void _showSuccessDialog(String groupId) {
-    showDialog(
+    showGeneralDialog(
       context: context,
       barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: const Column(
-          children: [
-            Icon(Icons.check_circle_rounded, color: Colors.green, size: 56),
-            SizedBox(height: 12),
-            Text('Berhasil!',
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Text('Pengajuan lembur berhasil dikirim.'),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: Colors.grey.shade100,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Text('ID Pengajuan: ${groupId.substring(0, 8)}...',
-                  style: const TextStyle(fontFamily: 'monospace')),
-            ),
-            const SizedBox(height: 4),
-            if (isMultiDay || isOvernight)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.purple.shade50,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.info_outline, size: 14, color: Colors.purple.shade600),
-                    const SizedBox(width: 4),
-                    Text(
-                      isMultiDay ? 'Lembur Multi-Hari' : 'Lembur Lintas Malam',
-                      style: TextStyle(fontSize: 11, color: Colors.purple.shade600, fontWeight: FontWeight.w600),
-                    ),
-                  ],
-                ),
-              ),
-            const SizedBox(height: 8),
-            Text('${_validMiras.length} TAD telah didaftarkan',
-                style: const TextStyle(fontSize: 12, color: Colors.grey)),
-          ],
-        ),
-        actions: [
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              if (mounted) context.pop();
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF1976D2),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            ),
-            child: const Text('SELESAI'),
+      barrierLabel: 'Success',
+      barrierColor: Colors.black54,
+      transitionDuration: const Duration(milliseconds: 500),
+      pageBuilder: (context, anim1, anim2) {
+        return _SuccessDialogContent(
+          groupId: groupId,
+          validMirasCount: _validMiras.length,
+          isMultiDay: isMultiDay,
+          isOvernight: isOvernight,
+          namaPengawas: namaPengawas,
+          fungsiPengawas: fungsiPengawas,
+          formatRupiah: (double value) => _overtimeService.formatRupiah(value),
+          totalBiayaLembur: totalBiayaLembur,
+          onSelesai: () {
+            Navigator.pop(context);
+            if (mounted) context.pop();
+          },
+        );
+      },
+      transitionBuilder: (context, anim1, anim2, child) {
+        return ScaleTransition(
+          scale: CurvedAnimation(
+            parent: anim1,
+            curve: Curves.elasticOut,
           ),
-        ],
-      ),
+          child: FadeTransition(
+            opacity: anim1,
+            child: child,
+          ),
+        );
+      },
     );
   }
 
   void _showPreviewDialog() {
-  showDialog(
-    context: context,
-    builder: (context) => PreviewDialog(
-      namaPengawas: namaPengawas,
-      fungsiPengawas: fungsiPengawas,
-      validMiras: _validMiras,
-      tanggalLembur: tanggalMulai,
-      tanggalSelesai: tanggalSelesai,
-      jamMulai: jamMulai,
-      jamSelesai: jamSelesai,
-      totalJam: totalJam,
-      isMultiDay: isMultiDay,
-      isOvernight: isOvernight,
-      locationType: _locationType,
-      selectedAddress: _selectedAddress,
-      rtController: _rtController,
-      rwController: _rwController,
-      urgensi: urgensi,
-      biayaLemburPerMitra: biayaLemburPerMitra,
-      totalBiayaLembur: totalBiayaLembur,
-      alasan: alasanController.text,
-      formatTime: _formatTime,
-      formatTanggal: _formatTanggal,
-      // 🔥 FIX: Wrap untuk match type
-      formatRupiah: (double value) => _overtimeService.formatRupiah(value),
-      onConfirmed: () {
-        Navigator.pop(context);
-        _submit();
-      },
-    ),
-  );
-}
+    showDialog(
+      context: context,
+      builder: (context) => PreviewDialog(
+        namaPengawas: namaPengawas,
+        fungsiPengawas: fungsiPengawas,
+        validMiras: _validMiras,
+        tanggalLembur: tanggalMulai,
+        tanggalSelesai: tanggalSelesai,
+        jamMulai: jamMulai,
+        jamSelesai: jamSelesai,
+        totalJam: totalJam,
+        isMultiDay: isMultiDay,
+        isOvernight: isOvernight,
+        locationType: _locationType,
+        selectedAddress: _selectedAddress,
+        rtController: _rtController,
+        rwController: _rwController,
+        urgensi: urgensi,
+        biayaLemburPerMitra: biayaLemburPerMitra,
+        totalBiayaLembur: totalBiayaLembur,
+        alasan: alasanController.text,
+        formatTime: _formatTime,
+        formatTanggal: _formatTanggal,
+        formatRupiah: (double value) => _overtimeService.formatRupiah(value),
+        onConfirmed: () {
+          Navigator.pop(context);
+          _submit();
+        },
+      ),
+    );
+  }
 
   // ==================== BUILD ====================
   @override
@@ -1030,16 +1789,15 @@ Future<void> _checkDuplicateLembur() async {
                     photoProfileUrl: photoProfileUrl,
                   ),
                   const SizedBox(height: 16),
-                  // 🔥 Progress Stepper (updated)
                   ProgressStepper(
                     completionPercentage: _completionPercentage,
                     hasMitra: _validMiras.isNotEmpty,
-                    hasTanggal: tanggalMulai != null && tanggalSelesai != null,  // 🔥
+                    hasTanggal: tanggalMulai != null && tanggalSelesai != null,
                     hasWaktu: jamMulai != null && jamSelesai != null,
                     hasLokasi: _selectedLocation != null,
                     hasAlasan: alasanController.text.length >= 20,
-                    isMultiDay: isMultiDay,    // 🔥 BARU
-                    isOvernight: isOvernight,  // 🔥 BARU
+                    isMultiDay: isMultiDay,
+                    isOvernight: isOvernight,
                   ),
                   const SizedBox(height: 16),
                   if (_overtimeRates != null)
@@ -1053,7 +1811,7 @@ Future<void> _checkDuplicateLembur() async {
                     hasDuplicateMitra: _hasDuplicateMitra,
                     isCheckingDuplicates: isCheckingDuplicates,
                     fungsiPengawas: fungsiPengawas,
-                    tanggalLembur: tanggalMulai,    // 🔥
+                    tanggalLembur: tanggalMulai,
                     onAddMitra: _showMitraSelectionDialog,
                     onRemoveMitra: (mitra) {
                       setState(() {
@@ -1066,7 +1824,6 @@ Future<void> _checkDuplicateLembur() async {
                     formatTanggal: _formatTanggal,
                   ),
                   const SizedBox(height: 16),
-                  // 🔥🔥🔥 WAKTU SECTION V2 (MULTI-HARI) 🔥🔥🔥
                   WaktuSection(
                     tanggalMulai: tanggalMulai,
                     tanggalSelesai: tanggalSelesai,
@@ -1184,7 +1941,6 @@ Future<void> _checkDuplicateLembur() async {
                       validMirasCount: _validMiras.length,
                       biayaLemburPerMitra: biayaLemburPerMitra,
                       totalBiayaLembur: totalBiayaLembur,
-                      // 🔥 FIX: Wrap untuk match type
                       formatRupiah: (double value) => _overtimeService.formatRupiah(value),
                       isMultiDay: isMultiDay,
                       isOvernight: isOvernight,

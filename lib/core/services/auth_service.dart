@@ -25,6 +25,9 @@ import '../../screens/welcome_screen.dart';
 // NETWORK SERVICE
 import 'network_service.dart';
 
+// NOTIFICATION SERVICE
+import 'notification_service.dart';
+
 class AuthService {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -516,12 +519,18 @@ class AuthService {
           return _result(false, error: 'Nomor HP minimal 10 digit', code: 'invalid-phone');
         }
         
+        // 🔒 Catatan: pakai direct Firestore get() (bukan Cloud Function)
+        // karena project belum aktif Blaze plan. Ini tetap aman selama
+        // rule phone_mappings di firestore.rules memisahkan `get` (publik,
+        // per-dokumen — dipakai di sini) dari `list` (superadmin saja).
+        // Kalau nanti Blaze plan aktif, ganti ke Cloud Function
+        // `resolvePhoneToEmail` supaya bisa ditambah rate limiting.
         try {
           final phoneMapping = await _firestore
               .collection('phone_mappings')
               .doc(cleanPhone)
               .get();
-          
+
           if (!phoneMapping.exists) {
             return _result(false, error: 'Nomor HP tidak terdaftar', code: 'phone-not-found');
           }
@@ -712,6 +721,14 @@ class AuthService {
     try {
       final cleanPhone = phone.replaceAll(RegExp(r'[^\d]'), '');
 
+      // 🔑 Pengaman: emailCheck/phoneCheck di bawah query koleksi `users`,
+      // yang rules-nya butuh isAuthenticated(). Normalnya sudah ada sesi
+      // anonymous dari validateWorkerId() sebelum sampai sini, tapi jaga-jaga
+      // kalau register() dipanggil langsung tanpa lewat validasi ID dulu.
+      if (_auth.currentUser == null) {
+        await _auth.signInAnonymously();
+      }
+
       try {
         final emailCheck = await _firestore
             .collection('users')
@@ -794,6 +811,13 @@ class AuthService {
           'user_id': user.uid,
           'created_at': now,
         });
+
+        // 🔔 Kabari semua Superadmin aktif ada Mitra baru daftar
+        NotificationService().sendUserRegisteredNotification(
+          userName: nama.trim(),
+          userEmail: email.trim().toLowerCase(),
+          userPhone: cleanPhone,
+        );
 
         return RegisterResult(success: true, message: 'Registrasi berhasil! Silakan login.');
         
@@ -1449,6 +1473,16 @@ class AuthService {
   // RESET PASSWORD (USER SELF SERVICE)
   // =========================================================
   
+  // 🔗 GANTI SESUAI DOMAIN YANG SUDAH DI-VERIFY sebagai Android App Link /
+  // iOS Universal Link untuk project ini. Link reset password akan mengarah
+  // langsung ke sini (bukan ke halaman hosted Firebase), lalu dibuka oleh
+  // app itu sendiri via deep link, ditangani route '/reset-password'.
+  static const String _resetPasswordContinueUrl =
+      'https://GANTI-DENGAN-DOMAIN-ANDA.com/reset-password';
+  static const String _androidPackageName = 'com.pertamina.kmj.project_otp_kmj';
+  // 🔧 GANTI dengan bundle id iOS asli project ini kalau ada target iOS.
+  static const String _iosBundleId = 'com.pertamina.kmj.projectOtpKmj';
+
   Future<ResetPasswordResult> sendResetPasswordEmail({
     required String email,
     required String sessionId,
@@ -1457,8 +1491,22 @@ class AuthService {
       if (!await _checkConnectionAsync('sendResetPasswordEmail')) {
         return ResetPasswordResult(success: false, errorMessage: 'Tidak ada koneksi internet');
       }
-      
-      await _auth.sendPasswordResetEmail(email: email.trim());
+
+      final actionCodeSettings = ActionCodeSettings(
+        // sessionId ikut dibawa di continue URL murni buat referensi/log,
+        // TIDAK dipakai lagi untuk menentukan sukses/gagalnya reset.
+        url: '$_resetPasswordContinueUrl?session=$sessionId',
+        handleCodeInApp: true,
+        androidPackageName: _androidPackageName,
+        androidInstallApp: true,
+        androidMinimumVersion: '1',
+        iOSBundleId: _iosBundleId,
+      );
+
+      await _auth.sendPasswordResetEmail(
+        email: email.trim(),
+        actionCodeSettings: actionCodeSettings,
+      );
       await _addResetAuditTrail(action: 'reset_password_request', email: email, sessionId: sessionId);
       return ResetPasswordResult(success: true);
     } on FirebaseAuthException catch (e) {
@@ -1469,11 +1517,68 @@ class AuthService {
     }
   }
 
-  Future<void> confirmResetPassword({
-    required String email,
-    required String sessionId,
+  /// Validasi oobCode dari deep link & ambil email pemiliknya, sebelum
+  /// menampilkan form password baru. Dipanggil begitu app dibuka lewat
+  /// link reset password.
+  Future<CheckResetCodeResult> checkPasswordResetCode(String oobCode) async {
+    try {
+      final email = await _auth.verifyPasswordResetCode(oobCode);
+      return CheckResetCodeResult(success: true, email: email);
+    } on FirebaseAuthException catch (e) {
+      return CheckResetCodeResult(success: false, errorMessage: _getResetCodeErrorMessage(e.code));
+    } catch (e) {
+      debugPrint('CHECK RESET CODE ERROR: $e');
+      return CheckResetCodeResult(success: false, errorMessage: 'Link reset password tidak valid.');
+    }
+  }
+
+  /// Terapkan password baru menggunakan oobCode dari deep link.
+  /// Ini MENGGANTIKAN seluruh mekanisme lama (verifyPasswordReset yang
+  /// coba login pakai password palsu). Begitu method ini sukses, password
+  /// SUDAH PASTI berubah di sisi Firebase — tidak ada lagi tebak-tebakan.
+  Future<ResetPasswordResult> applyPasswordReset({
+    required String oobCode,
+    required String newPassword,
+    String? sessionId,
   }) async {
-    await _addResetAuditTrail(action: 'reset_password_complete', email: email, sessionId: sessionId);
+    try {
+      if (!await _checkConnectionAsync('applyPasswordReset')) {
+        return ResetPasswordResult(success: false, errorMessage: 'Tidak ada koneksi internet');
+      }
+
+      final email = await _auth.verifyPasswordResetCode(oobCode);
+      await _auth.confirmPasswordReset(code: oobCode, newPassword: newPassword);
+
+      await _addResetAuditTrail(
+        action: 'reset_password_complete',
+        email: email,
+        sessionId: sessionId ?? generateSessionId(),
+      );
+
+      return ResetPasswordResult(success: true);
+    } on FirebaseAuthException catch (e) {
+      return ResetPasswordResult(success: false, errorMessage: _getResetCodeErrorMessage(e.code));
+    } catch (e) {
+      debugPrint('APPLY PASSWORD RESET ERROR: $e');
+      return ResetPasswordResult(success: false, errorMessage: 'Terjadi kesalahan. Silakan coba lagi.');
+    }
+  }
+
+  String _getResetCodeErrorMessage(String code) {
+    switch (code) {
+      case 'expired-action-code':
+        return 'Link reset password sudah kedaluwarsa. Silakan minta link baru.';
+      case 'invalid-action-code':
+        return 'Link reset password tidak valid atau sudah pernah dipakai.';
+      case 'user-disabled':
+        return 'Akun ini dinonaktifkan. Hubungi admin.';
+      case 'user-not-found':
+        return 'Akun tidak ditemukan.';
+      case 'weak-password':
+        return 'Password terlalu lemah. Minimal 8 karakter dengan kombinasi huruf dan angka.';
+      default:
+        return 'Link reset password tidak valid (kode: $code).';
+    }
   }
 
   // =========================================================
@@ -1825,6 +1930,15 @@ class AuthService {
     required String sessionId,
   }) async {
     try {
+      // 🔑 Query email== butuh isAuthenticated() (rules `users` read).
+      // Di forgot-password flow user belum login, jadi pastikan ada sesi
+      // (anonymous cukup) sebelum query. Rules `users` update sudah dilonggarkan
+      // khusus untuk menambah SATU entry audit_trail (lihat isValidResetAuditAppend
+      // di firestore.rules), jadi write di bawah tidak perlu jadi diri sendiri/admin.
+      if (_auth.currentUser == null) {
+        await _auth.signInAnonymously();
+      }
+
       final query = await _firestore
           .collection('users')
           .where('email', isEqualTo: email.trim())
@@ -1881,6 +1995,13 @@ class ResetPasswordResult {
   final bool success;
   final String errorMessage;
   ResetPasswordResult({required this.success, this.errorMessage = ''});
+}
+
+class CheckResetCodeResult {
+  final bool success;
+  final String errorMessage;
+  final String? email;
+  CheckResetCodeResult({required this.success, this.errorMessage = '', this.email});
 }
 
 class CreateUserResult {

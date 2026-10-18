@@ -333,6 +333,17 @@ class LiveLocationService extends ChangeNotifier {
         ),
       );
 
+      // 🔥 Re-check state SETELAH await getCurrentPosition().
+      // Kenapa perlu: getCurrentPosition() bisa makan waktu sampai 10 detik,
+      // dan selama itu stopLiveTracking() bisa saja dipanggil dari flow lain
+      // (misal: overtime sudah expired), yang men-null-kan _currentUserId.
+      // Tanpa re-check ini, _currentUserId! di bawah bisa crash dengan
+      // "Null check operator used on a null value".
+      if (_isDisposed || !_isTracking || _currentUserId == null) {
+        debugPrint('⚠️ Tracking sudah dihentikan saat proses ambil lokasi, batalkan pengiriman');
+        return;
+      }
+
       // 🔥 Cek ulang koneksi sebelum simpan ke Firestore
       if (!_networkService.isOnline) {
         debugPrint('📴 Offline saat mau simpan, cache lokal dulu');

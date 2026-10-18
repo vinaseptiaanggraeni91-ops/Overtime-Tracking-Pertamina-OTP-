@@ -1,6 +1,3 @@
-// lib/widgets/absensi/location_validator.dart
-// VERSION: ULTIMATE FIX - RADIUS KETAT + PER-LOKASI + AUDIT LOG
-
 import 'dart:async';
 import 'dart:math';
 
@@ -11,14 +8,10 @@ import 'package:geolocator/geolocator.dart';
 import '/core/services/overtime_history_service.dart';
 
 class LocationValidator {
-  // ═══════════════════════════════════════════════════════
-  // 🔥🔥🔥 RADIUS CONSTANTS - REVISED KETAT
-  // ═══════════════════════════════════════════════════════
   
-  /// Radius default untuk lokasi kantor/gedung (100 meter)
+  
   static const double defaultRadiusOffice = 100.0;
   
-  /// Radius default untuk lokasi proyek lapangan (300 meter) - 🔥 DIPERKETAT dari 500
   static const double defaultRadiusProject = 300.0;
   
   /// 🔥 BATAS MAKSIMUM RADIUS YANG DIIZINKAN (2000 meter = 2km)

@@ -25,7 +25,17 @@ const Duration KONFIRMASI_GRACE_PERIOD = Duration(days: 3);
 const Duration CHECKIN_EARLY_WINDOW = Duration(minutes: 30);
 const Duration ABSENSI_NORMAL_WINDOW = Duration(minutes: 30);
 const Duration CHECKOUT_EARLY_WINDOW = Duration(minutes: 30);
-const Duration CHECKOUT_LATE_WINDOW = Duration(minutes: 30);
+// 🔥 FIX KRITIS: sebelumnya 30 menit, TIDAK SINKRON dengan AbsensiPage
+// (yang sejak awal memakai 2 jam sebagai window checkout normal).
+// Akibatnya: user checkout di menit ke-31 s/d jam ke-2 setelah jamSelesai
+// melihat UI masih membolehkan checkout, tapi backend SELALU menolak
+// dengan CHECKOUT_EXPIRED. Kebijakan resmi: toleransi checkout = 2 jam.
+const Duration CHECKOUT_LATE_WINDOW = Duration(hours: 2);
+// 🔥 BARU: setelah CHECKOUT_LATE_WINDOW lewat, user tidak langsung ditolak
+// mentah-mentah — dikasih waktu tambahan ini untuk mengisi form "konfirmasi
+// keterlambatan checkout" (alasan + bukti foto opsional), disamakan dengan
+// grace period yang sudah ada untuk keterlambatan check-in.
+const Duration CHECKOUT_KONFIRMASI_GRACE_PERIOD = Duration(days: 3);
 
 // ============================================================================
 // STATUS FILTER CONSTANTS
@@ -133,6 +143,7 @@ extension OvertimeHistoryAbsensi on OvertimeHistory {
       case 'check_out':         return '📤 Check Out';
       case 'selesai':           return '✅ Selesai';
       case 'selesai_terlambat': return '⚠️ Absen Terlambat';
+      case 'selesai_terlambat_checkout': return '⚠️ Checkout Terlambat';
       case 'tidak_lembur':      return '❌ Tidak Lembur';
       case 'expired':           return '⏰ Kadaluarsa';
       default:                  return absensiStatus;
@@ -142,7 +153,7 @@ extension OvertimeHistoryAbsensi on OvertimeHistory {
   Color get absensiStatusColor {
     switch (absensiStatus) {
       case 'check_in': case 'selesai': case 'sudah_absen': return Colors.green;
-      case 'selesai_terlambat': return Colors.orange;
+      case 'selesai_terlambat': case 'selesai_terlambat_checkout': return Colors.orange;
       case 'tidak_lembur': case 'expired': return Colors.red;
       case 'belum_absen': return Colors.blue;
       default: return Colors.grey;
@@ -154,7 +165,7 @@ extension OvertimeHistoryAbsensi on OvertimeHistory {
       case 'check_in': return Icons.login_rounded;
       case 'selesai': return Icons.check_circle_rounded;
       case 'sudah_absen': return Icons.verified_rounded;
-      case 'selesai_terlambat': return Icons.warning_amber_rounded;
+      case 'selesai_terlambat': case 'selesai_terlambat_checkout': return Icons.warning_amber_rounded;
       case 'tidak_lembur': return Icons.cancel_rounded;
       case 'expired': return Icons.timer_off_rounded;
       case 'belum_absen': return Icons.hourglass_empty_rounded;
@@ -163,12 +174,12 @@ extension OvertimeHistoryAbsensi on OvertimeHistory {
   }
 
   bool get isAbsensiResolved {
-    const resolved = ['selesai', 'selesai_terlambat', 'tidak_lembur', 'expired', 'check_in', 'sudah_absen'];
+    const resolved = ['selesai', 'selesai_terlambat', 'selesai_terlambat_checkout', 'tidak_lembur', 'expired', 'check_in', 'sudah_absen'];
     return resolved.contains(absensiStatus);
   }
 
   bool get isCheckedIn => absensiStatus == 'check_in' || absensiStatus == 'sudah_absen';
-  bool get isCheckedOut => absensiStatus == 'selesai' || absensiStatus == 'selesai_terlambat';
+  bool get isCheckedOut => absensiStatus == 'selesai' || absensiStatus == 'selesai_terlambat' || absensiStatus == 'selesai_terlambat_checkout';
   bool get canAbsen => !isAbsensiResolved || absensiStatus == 'belum_absen';
 }
 
@@ -410,6 +421,9 @@ class OvertimeAbsensiService {
   DateTime _hitungEarliestCheckIn(DateTime mulaiTime) => mulaiTime.subtract(CHECKIN_EARLY_WINDOW);
   DateTime _hitungCheckOutStart(DateTime selesaiTime) => selesaiTime.subtract(CHECKOUT_EARLY_WINDOW);
   DateTime _hitungCheckOutEnd(DateTime selesaiTime) => selesaiTime.add(CHECKOUT_LATE_WINDOW);
+  // 🔥 BARU: batas akhir untuk mengisi form konfirmasi keterlambatan checkout
+  DateTime _hitungBatasKonfirmasiCheckOut(DateTime selesaiTime) =>
+      _hitungCheckOutEnd(selesaiTime).add(CHECKOUT_KONFIRMASI_GRACE_PERIOD);
 
   bool _isPendingStatus(String? status) {
     if (status == null) return true;
@@ -658,7 +672,23 @@ class OvertimeAbsensiService {
       }
       
       if (now.isAfter(checkOutEnd)) {
-        return {'success': false, 'message': '❌ Batas check-out sudah lewat (maks ${DateFormat('HH:mm').format(checkOutEnd)}). Hubungi pengawas.', 'code': 'CHECKOUT_EXPIRED'};
+        final batasKonfirmasi = _hitungBatasKonfirmasiCheckOut(selesaiTime);
+
+        // 🔥 FIX: dulu langsung CHECKOUT_EXPIRED begitu lewat 30 menit (yang
+        // sekarang jadi 2 jam). Sekarang: masih ada grace period untuk isi
+        // konfirmasi keterlambatan checkout sebelum benar-benar dianggap
+        // expired.
+        if (now.isBefore(batasKonfirmasi)) {
+          return {
+            'success': false,
+            'message': '⏰ Batas checkout normal sudah lewat (maks ${DateFormat('HH:mm').format(checkOutEnd)}). Silakan isi konfirmasi keterlambatan checkout.',
+            'code': 'CHECKOUT_NEEDS_CONFIRMATION',
+            'checkOutEnd': checkOutEnd.toIso8601String(),
+            'batasKonfirmasi': batasKonfirmasi.toIso8601String(),
+          };
+        }
+
+        return {'success': false, 'message': '❌ Batas konfirmasi checkout sudah lewat (${DateFormat('dd MMM HH:mm').format(batasKonfirmasi)}). Hubungi pengawas.', 'code': 'CHECKOUT_EXPIRED'};
       }
 
       final checkInWaktu = data['check_in_waktu'] != null ? _parseTimestamp(data['check_in_waktu']) : data['check_in_time'] != null ? _parseTimestamp(data['check_in_time']) : null;
@@ -832,6 +862,236 @@ class OvertimeAbsensiService {
     } catch (e) {
       logger.e('❌ konfirmasiKeterlambatan error: $e');
       return {'success': false, 'message': 'Gagal memproses konfirmasi: ${e.toString()}', 'code': 'SYSTEM_ERROR'};
+    }
+  }
+
+  // ==========================================================================
+  // 3B. 🔥 BARU: KONFIRMASI KETERLAMBATAN CHECK-OUT
+  // Terpisah dari konfirmasiKeterlambatan() di atas (yang khusus check-in).
+  // Dipakai saat now sudah lewat checkOutEnd (jamSelesai + 2 jam) tapi masih
+  // dalam CHECKOUT_KONFIRMASI_GRACE_PERIOD.
+  // ==========================================================================
+
+  Future<Map<String, dynamic>> konfirmasiKeterlambatanCheckOut({
+    required String lemburId,
+    required String userId,
+    required String userName,
+    required String alasan,
+    String? buktiFotoUrl,
+    double? latitude,
+    double? longitude,
+    String? address,
+  }) async {
+    if (!_checkConnection('konfirmasiKeterlambatanCheckOut')) {
+      return {
+        'success': false,
+        'message': 'Tidak ada koneksi internet. Tidak dapat mengirim konfirmasi.',
+        'code': 'NO_CONNECTION'
+      };
+    }
+
+    try {
+      if (lemburId.isEmpty) return {'success': false, 'message': 'ID tidak valid', 'code': 'INVALID_ID'};
+
+      final alasanBersih = alasan.trim();
+      if (alasanBersih.isEmpty) return {'success': false, 'message': 'Alasan wajib diisi', 'code': 'EMPTY_ALASAN'};
+      if (alasanBersih.length < 10) return {'success': false, 'message': 'Alasan minimal 10 karakter (sekarang ${alasanBersih.length})', 'code': 'ALASAN_TOO_SHORT'};
+      if (alasanBersih.length > 500) return {'success': false, 'message': 'Alasan maksimal 500 karakter', 'code': 'ALASAN_TOO_LONG'};
+
+      final doc = await _findDoc(lemburId);
+      if (doc == null) return {'success': false, 'message': 'Data lembur tidak ditemukan atau telah dibatalkan', 'code': 'NOT_FOUND'};
+
+      final data = doc.data()!;
+      final ref = doc.reference;
+
+      final lemburStatus = (data['status'] as String? ?? '').toLowerCase();
+      if (_isCancelledStatus(lemburStatus)) {
+        return {'success': false, 'message': 'Lembur telah dibatalkan', 'code': 'CANCELLED'};
+      }
+
+      final currentAbsensi = data['absensi_status'] as String? ?? '';
+      if (currentAbsensi == 'selesai' ||
+          currentAbsensi == 'selesai_terlambat' ||
+          currentAbsensi == 'selesai_terlambat_checkout') {
+        return {'success': false, 'message': 'Anda sudah check-out', 'code': 'ALREADY_CHECKOUT'};
+      }
+      if (currentAbsensi != 'check_in' && currentAbsensi != 'sudah_absen') {
+        return {'success': false, 'message': 'Anda belum check-in. Tidak bisa konfirmasi checkout.', 'code': 'NOT_CHECKED_IN'};
+      }
+      if (data['checkout_keterlambatan'] != null) {
+        return {'success': false, 'message': 'Konfirmasi keterlambatan checkout sudah pernah dilakukan', 'code': 'ALREADY_CONFIRMED'};
+      }
+
+      if (!_hasAccess(data, userId)) {
+        return {'success': false, 'message': 'Anda tidak memiliki akses', 'code': 'ACCESS_DENIED'};
+      }
+
+      final now = DateTime.now();
+      final tanggal = _parseTimestamp(data['tanggal']);
+      final jamMulai = data['jam_mulai'] as String? ?? '00:00';
+      final jamSelesai = data['jam_selesai'] as String? ?? '00:00';
+
+      final mulaiTime = _parseJam(tanggal, jamMulai);
+      var selesaiTime = _parseJam(tanggal, jamSelesai);
+      if (selesaiTime.isBefore(mulaiTime)) selesaiTime = selesaiTime.add(const Duration(days: 1));
+
+      final checkOutEnd = _hitungCheckOutEnd(selesaiTime);
+      final batasKonfirmasi = _hitungBatasKonfirmasiCheckOut(selesaiTime);
+
+      if (now.isBefore(checkOutEnd)) {
+        return {'success': false, 'message': 'Anda masih dalam masa checkout normal. Silakan checkout biasa.', 'code': 'STILL_IN_RANGE'};
+      }
+
+      if (now.isAfter(batasKonfirmasi)) {
+        return {'success': false, 'message': '❌ Batas konfirmasi checkout sudah lewat (${DateFormat('dd MMM HH:mm').format(batasKonfirmasi)}). Hubungi pengawas.', 'code': 'CONFIRMATION_EXPIRED'};
+      }
+
+      final checkInWaktu = data['check_in_waktu'] != null
+          ? _parseTimestamp(data['check_in_waktu'])
+          : data['check_in_time'] != null
+              ? _parseTimestamp(data['check_in_time'])
+              : null;
+      double totalJamReal = 0;
+      if (checkInWaktu != null) totalJamReal = now.difference(checkInWaktu).inMinutes / 60.0;
+
+      final updateData = <String, dynamic>{
+        'absensi_status': 'selesai_terlambat_checkout',
+        'check_out_waktu': FieldValue.serverTimestamp(),
+        'check_out_time': FieldValue.serverTimestamp(),
+        'status': 'selesai',
+        'completed_at': FieldValue.serverTimestamp(),
+        'is_checkout_terlambat': true,
+        'checkout_keterlambatan': {
+          'alasan': alasanBersih,
+          'bukti_foto_url': buktiFotoUrl,
+          'dikonfirmasi_pada': FieldValue.serverTimestamp(),
+          'dikonfirmasi_oleh': userId,
+          'dikonfirmasi_nama': userName,
+        },
+        'updated_at': FieldValue.serverTimestamp(),
+        'updated_by': userId,
+      };
+      if (totalJamReal > 0) updateData['total_jam_real'] = totalJamReal;
+      if (buktiFotoUrl != null && buktiFotoUrl.isNotEmpty) updateData['check_out_foto_url'] = buktiFotoUrl;
+      if (latitude != null) updateData['check_out_latitude'] = latitude;
+      if (longitude != null) updateData['check_out_longitude'] = longitude;
+      if (address != null) updateData['check_out_address'] = address;
+
+      try {
+        await ref.update(updateData);
+      } catch (e) {
+        logger.w('⚠️ update failed: $e - Trying setData with merge...');
+        await ref.set(updateData, SetOptions(merge: true));
+      }
+
+      await _firestore.collection(_cAbsensi).add({
+        'lembur_id': lemburId, 'user_id': userId, 'user_name': userName,
+        'foto_url': buktiFotoUrl ?? '', 'absensi_status': 'check_out_terlambat', 'jenis': 'check_out',
+        'waktu': FieldValue.serverTimestamp(), 'created_at': FieldValue.serverTimestamp(),
+        'alasan_terlambat': alasanBersih,
+        if (latitude != null) 'latitude': latitude,
+        if (longitude != null) 'longitude': longitude,
+        if (address != null) 'address': address,
+      });
+
+      final alasanLog = alasanBersih.length > 50 ? '${alasanBersih.substring(0, 50)}...' : alasanBersih;
+      await _log('konfirmasi_keterlambatan_checkout', lemburId, userId, 'Checkout terlambat | Alasan: $alasanLog');
+
+      return {
+        'success': true,
+        'message': '✅ Konfirmasi checkout terlambat berhasil! Lembur selesai.',
+        'absensiStatus': 'selesai_terlambat_checkout',
+        'totalJamReal': totalJamReal,
+      };
+    } catch (e) {
+      logger.e('❌ konfirmasiKeterlambatanCheckOut error: $e');
+
+      if (e.toString().contains('SocketException') || e.toString().contains('network')) {
+        return {'success': false, 'message': 'Koneksi internet terputus. Silakan coba lagi.', 'code': 'NETWORK_ERROR'};
+      }
+
+      return {'success': false, 'message': 'Gagal memproses konfirmasi: ${e.toString()}', 'code': 'SYSTEM_ERROR'};
+    }
+  }
+
+  // ==========================================================================
+  // 3C. 🔥 BARU: CEK STATUS KETERLAMBATAN CHECK-OUT
+  // Versi checkout dari cekStatusKeterlambatan() di bawah (yang khusus check-in).
+  // ==========================================================================
+
+  Future<Map<String, dynamic>> cekStatusKeterlambatanCheckOut(String lemburId) async {
+    try {
+      if (lemburId.isEmpty) {
+        return {'isLateCheckOut': false, 'canConfirmCheckOut': false, 'isInCheckOutRange': false, 'isAlreadyResolved': false, 'isExpired': false, 'isTooEarly': false, 'message': 'ID tidak valid'};
+      }
+
+      final doc = await _findDoc(lemburId);
+      if (doc == null) {
+        return {'isLateCheckOut': false, 'canConfirmCheckOut': false, 'isInCheckOutRange': false, 'isAlreadyResolved': false, 'isExpired': false, 'isTooEarly': false, 'isCancelled': true, 'message': 'Data lembur tidak ditemukan atau telah dibatalkan'};
+      }
+
+      final data = doc.data()!;
+
+      final lemburStatus = (data['status'] as String? ?? '').toLowerCase();
+      if (_isCancelledStatus(lemburStatus)) {
+        return {'isLateCheckOut': false, 'canConfirmCheckOut': false, 'isInCheckOutRange': false, 'isAlreadyResolved': true, 'isExpired': false, 'isTooEarly': false, 'isCancelled': true, 'message': 'Lembur telah dibatalkan'};
+      }
+
+      final absensiStatus = data['absensi_status'] as String? ?? 'belum_absen';
+
+      if (absensiStatus == 'selesai' || absensiStatus == 'selesai_terlambat' || absensiStatus == 'selesai_terlambat_checkout') {
+        return {'isLateCheckOut': false, 'canConfirmCheckOut': false, 'isInCheckOutRange': false, 'isAlreadyResolved': true, 'isExpired': false, 'isTooEarly': false, 'currentStatus': absensiStatus, 'message': 'Anda sudah check-out'};
+      }
+      if (absensiStatus != 'check_in' && absensiStatus != 'sudah_absen') {
+        return {'isLateCheckOut': false, 'canConfirmCheckOut': false, 'isInCheckOutRange': false, 'isAlreadyResolved': false, 'isExpired': false, 'isTooEarly': false, 'message': 'Anda belum check-in'};
+      }
+      if (data['checkout_keterlambatan'] != null) {
+        return {'isLateCheckOut': false, 'canConfirmCheckOut': false, 'isInCheckOutRange': false, 'isAlreadyResolved': true, 'isExpired': false, 'isTooEarly': false, 'currentStatus': 'selesai_terlambat_checkout', 'message': 'Konfirmasi checkout terlambat sudah diproses'};
+      }
+
+      final now = DateTime.now();
+      final tanggal = _parseTimestamp(data['tanggal']);
+      final jamMulai = data['jam_mulai'] as String? ?? '00:00';
+      final jamSelesai = data['jam_selesai'] as String? ?? '00:00';
+
+      final mulaiTime = _parseJam(tanggal, jamMulai);
+      var selesaiTime = _parseJam(tanggal, jamSelesai);
+      if (selesaiTime.isBefore(mulaiTime)) selesaiTime = selesaiTime.add(const Duration(days: 1));
+
+      final checkOutStart = _hitungCheckOutStart(selesaiTime);
+      final checkOutEnd = _hitungCheckOutEnd(selesaiTime);
+      final batasKonfirmasi = _hitungBatasKonfirmasiCheckOut(selesaiTime);
+
+      final isTooEarly = now.isBefore(checkOutStart);
+      final isInCheckOutRange = !isTooEarly && now.isBefore(checkOutEnd);
+      final isLateCheckOut = now.isAfter(checkOutEnd) && now.isBefore(batasKonfirmasi);
+      final isExpired = now.isAfter(batasKonfirmasi);
+      final canConfirmCheckOut = isLateCheckOut && !isExpired;
+
+      String message;
+      if (isTooEarly) {
+        message = '⏰ Checkout dibuka mulai ${DateFormat('HH:mm').format(checkOutStart)} WIB';
+      } else if (isInCheckOutRange) {
+        message = '✅ Masih dalam masa checkout normal (sampai ${DateFormat('HH:mm').format(checkOutEnd)} WIB)';
+      } else if (isExpired) {
+        message = '❌ Batas konfirmasi checkout sudah kadaluarsa (${DateFormat('dd MMM HH:mm').format(batasKonfirmasi)})';
+      } else {
+        message = '⚠️ Anda terlambat checkout! Silakan konfirmasi sebelum ${DateFormat('dd MMM HH:mm').format(batasKonfirmasi)}.';
+      }
+
+      return {
+        'isLateCheckOut': isLateCheckOut, 'isInCheckOutRange': isInCheckOutRange, 'isTooEarly': isTooEarly,
+        'isExpired': isExpired, 'canConfirmCheckOut': canConfirmCheckOut, 'isAlreadyResolved': false,
+        'isCancelled': false, 'checkOutStart': DateFormat('HH:mm').format(checkOutStart),
+        'checkOutEnd': DateFormat('HH:mm').format(checkOutEnd),
+        'batasKonfirmasi': DateFormat('dd MMM HH:mm', 'id_ID').format(batasKonfirmasi),
+        'jamMulai': jamMulai, 'jamSelesai': jamSelesai, 'message': message,
+        'keterlambatanMenit': isLateCheckOut ? now.difference(checkOutEnd).inMinutes : 0,
+        'gracePeriodHari': CHECKOUT_KONFIRMASI_GRACE_PERIOD.inDays,
+      };
+    } catch (e) {
+      logger.e('❌ cekStatusKeterlambatanCheckOut error: $e');
+      return {'isLateCheckOut': false, 'canConfirmCheckOut': false, 'isInCheckOutRange': false, 'isAlreadyResolved': false, 'isExpired': false, 'isTooEarly': false, 'message': 'Gagal cek status: ${e.toString()}'};
     }
   }
 

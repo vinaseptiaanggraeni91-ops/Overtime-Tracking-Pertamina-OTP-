@@ -196,12 +196,26 @@ class LaporanItem {
     final absensiStatus = parseString(data['absensi_status'], 'belum_absen');
 
     // ─── KETERLAMBATAN ───
-    bool isTerlambat = absensiStatus == 'selesai_terlambat';
+    bool isTerlambat = absensiStatus == 'selesai_terlambat' ||
+        absensiStatus == 'selesai_terlambat_checkout';
     String? keterlambatanAlasan;
+
+    // Alasan terlambat CHECK-IN (ditulis oleh konfirmasiKeterlambatan)
     if (data['absensi_keterlambatan'] is Map) {
       final map = data['absensi_keterlambatan'] as Map;
       if (map['melakukan_lembur'] == true) isTerlambat = true;
       keterlambatanAlasan = map['alasan']?.toString();
+    }
+
+    // 🔥 Alasan terlambat CHECKOUT (field terpisah, ditulis oleh
+    // konfirmasiKeterlambatanCheckOut) — prioritaskan jika ada, karena ini
+    // yang relevan untuk status 'selesai_terlambat_checkout'.
+    if (data['checkout_keterlambatan'] is Map) {
+      final map = data['checkout_keterlambatan'] as Map;
+      final checkoutAlasan = map['alasan']?.toString();
+      if (checkoutAlasan != null && checkoutAlasan.isNotEmpty) {
+        keterlambatanAlasan = checkoutAlasan;
+      }
     }
 
     // ─── PEMBAYARAN ───
@@ -290,11 +304,13 @@ class LaporanItem {
     if (isPaid) return false; // Sudah dibayar
     if (status == 'dibatalkan') return false; // Dibatalkan
     if (!['disetujui', 'selesai', 'approved'].contains(status)) return false; // Status tidak valid
-    if (absensiStatus != 'selesai' && absensiStatus != 'selesai_terlambat') return false; // Absensi belum selesai
+    if (!['selesai', 'selesai_terlambat', 'selesai_terlambat_checkout']
+        .contains(absensiStatus)) return false; // Absensi belum selesai
 
-    // 🔥🔥🔥 RELAKSASI UNTUK LEMBUR TERLAMBAT
+    // 🔥🔥🔥 RELAKSASI UNTUK LEMBUR TERLAMBAT (termasuk terlambat checkout)
     // Syarat: dokumentasi/bukti + alasan keterlambatan (TANPA check-in/out)
-    if (absensiStatus == 'selesai_terlambat') {
+    if (absensiStatus == 'selesai_terlambat' ||
+        absensiStatus == 'selesai_terlambat_checkout') {
       final hasDokumentasi = (checkInFotoUrl != null && checkInFotoUrl!.isNotEmpty) ||
                              (checkOutFotoUrl != null && checkOutFotoUrl!.isNotEmpty);
       final hasAlasan = keterlambatanAlasan != null && keterlambatanAlasan!.isNotEmpty;
@@ -316,12 +332,14 @@ class LaporanItem {
     if (!['disetujui', 'selesai', 'approved'].contains(status)) {
       belum.add('Status belum disetujui (${statusLabel})');
     }
-    if (absensiStatus != 'selesai' && absensiStatus != 'selesai_terlambat') {
+    if (!['selesai', 'selesai_terlambat', 'selesai_terlambat_checkout']
+        .contains(absensiStatus)) {
       belum.add('Absensi belum selesai (${absensiLabel})');
     }
 
-    // 🔥🔥🔥 RELAKSASI UNTUK LEMBUR TERLAMBAT
-    if (absensiStatus == 'selesai_terlambat') {
+    // 🔥🔥🔥 RELAKSASI UNTUK LEMBUR TERLAMBAT (termasuk terlambat checkout)
+    if (absensiStatus == 'selesai_terlambat' ||
+        absensiStatus == 'selesai_terlambat_checkout') {
       final hasDokumentasi = (checkInFotoUrl != null && checkInFotoUrl!.isNotEmpty) ||
                              (checkOutFotoUrl != null && checkOutFotoUrl!.isNotEmpty);
       final hasAlasan = keterlambatanAlasan != null && keterlambatanAlasan!.isNotEmpty;
@@ -341,7 +359,8 @@ class LaporanItem {
 
   /// Cek persyaratan per-komponen (untuk tampilan detail)
   Map<String, bool> get cekPersyaratanBayar {
-    final isTerlambat = absensiStatus == 'selesai_terlambat';
+    final isTerlambat = absensiStatus == 'selesai_terlambat' ||
+        absensiStatus == 'selesai_terlambat_checkout';
     final hasDokumentasi = (checkInFotoUrl != null && checkInFotoUrl!.isNotEmpty) ||
                            (checkOutFotoUrl != null && checkOutFotoUrl!.isNotEmpty);
     final hasAlasan = keterlambatanAlasan != null && keterlambatanAlasan!.isNotEmpty;
@@ -349,7 +368,8 @@ class LaporanItem {
     return {
       'status_valid': ['disetujui', 'selesai', 'approved'].contains(status),
       'tidak_dibatalkan': status != 'dibatalkan',
-      'absensi_selesai': absensiStatus == 'selesai' || absensiStatus == 'selesai_terlambat',
+      'absensi_selesai': ['selesai', 'selesai_terlambat', 'selesai_terlambat_checkout']
+          .contains(absensiStatus),
       // 🔥 Untuk terlambat: selalu true (tidak diperlukan check-in/out)
       'sudah_check_in': isTerlambat ? true : checkInTime != null,
       'sudah_check_out': isTerlambat ? true : checkOutTime != null,
@@ -418,6 +438,7 @@ class LaporanItem {
       case 'check_out': return '📤 Check Out';
       case 'selesai': return '✅ Selesai';
       case 'selesai_terlambat': return '⚠️ Terlambat';
+      case 'selesai_terlambat_checkout': return '⚠️ Terlambat Checkout';
       case 'tidak_lembur': return '❌ Tidak Lembur';
       case 'expired': return '⏰ Kadaluarsa';
       default: return absensiStatus;
@@ -461,7 +482,8 @@ class LaporanItem {
       case 'check_in':
       case 'sudah_absen': return Colors.blue;
       case 'selesai': return Colors.green;
-      case 'selesai_terlambat': return Colors.orange;
+      case 'selesai_terlambat':
+      case 'selesai_terlambat_checkout': return Colors.orange;
       case 'tidak_lembur':
       case 'expired': return Colors.red;
       default: return Colors.grey;
@@ -474,7 +496,8 @@ class LaporanItem {
       case 'sudah_absen': return Icons.login_rounded;
       case 'check_out': return Icons.logout_rounded;
       case 'selesai': return Icons.check_circle_rounded;
-      case 'selesai_terlambat': return Icons.warning_amber_rounded;
+      case 'selesai_terlambat':
+      case 'selesai_terlambat_checkout': return Icons.warning_amber_rounded;
       case 'tidak_lembur': return Icons.cancel_rounded;
       case 'expired': return Icons.timer_off_rounded;
       default: return Icons.hourglass_empty_rounded;
@@ -690,7 +713,8 @@ class ReportService {
     final status = data['status']?.toString().toLowerCase() ?? '';
     final absensiStatus = data['absensi_status']?.toString() ?? '';
     final isPaid = data['is_paid'] == true || data['isPaid'] == true;
-    final isTerlambat = absensiStatus == 'selesai_terlambat';
+    final isTerlambat = absensiStatus == 'selesai_terlambat' ||
+        absensiStatus == 'selesai_terlambat_checkout';
 
     // Check-in / Check-out
     final hasCheckIn = data['check_in_time'] != null ||
@@ -718,6 +742,14 @@ class ReportService {
       final map = data['absensi_keterlambatan'] as Map;
       keterlambatanAlasan = map['alasan']?.toString();
     }
+    // 🔥 Alasan terlambat CHECKOUT (field terpisah) — prioritaskan jika ada
+    if (data['checkout_keterlambatan'] is Map) {
+      final map = data['checkout_keterlambatan'] as Map;
+      final checkoutAlasan = map['alasan']?.toString();
+      if (checkoutAlasan != null && checkoutAlasan.isNotEmpty) {
+        keterlambatanAlasan = checkoutAlasan;
+      }
+    }
     final hasAlasan = keterlambatanAlasan != null && keterlambatanAlasan.isNotEmpty;
 
     // 🔥🔥🔥 VALIDASI DENGAN RELAKSASI UNTUK TERLAMBAT
@@ -733,7 +765,8 @@ class ReportService {
     } else if (!['disetujui', 'selesai', 'approved'].contains(status)) {
       isValid = false;
       syaratKurang.add('Status: $status');
-    } else if (absensiStatus != 'selesai' && absensiStatus != 'selesai_terlambat') {
+    } else if (!['selesai', 'selesai_terlambat', 'selesai_terlambat_checkout']
+        .contains(absensiStatus)) {
       isValid = false;
       syaratKurang.add('Absensi: $absensiStatus');
     } else if (isTerlambat) {
@@ -985,7 +1018,8 @@ class ReportService {
 
         switch (item.absensiStatus) {
           case 'selesai': hadir++; break;
-          case 'selesai_terlambat': hadir++; terlambat++; break;
+          case 'selesai_terlambat':
+          case 'selesai_terlambat_checkout': hadir++; terlambat++; break;
           case 'tidak_lembur': tidakHadir++; break;
         }
 
@@ -1088,6 +1122,7 @@ class ReportService {
     required String adminId,
     required String adminName,
     String? note,
+    String basisPembayaran = 'aktual', // 🔥 BARU: 'aktual' atau 'pengajuan'
   }) async {
     try {
       // 🔥🔥🔥 VALIDASI PERSYARATAN DULU (dengan relaksasi terlambat)!
@@ -1114,7 +1149,19 @@ class ReportService {
       final groupId = data['group_id'] as String?;
       final now = FieldValue.serverTimestamp();
 
-      final updateData = <String, dynamic>{
+      // 🔥 Hitung nominal sesuai basis yang dipilih, per-dokumen
+      // (karena tiap mitra dalam satu grup lembur bisa punya jam/rate berbeda)
+      double hitungJumlahBayar(DocumentSnapshot<Map<String, dynamic>> d) {
+        final it = LaporanItem.fromFirestore(d);
+        if (basisPembayaran == 'pengajuan') {
+          return (it.ratePerJam > 0 && it.totalJam > 0)
+              ? it.ratePerJam * it.totalJam
+              : it.biayaAktual; // fallback kalau data pengajuan tidak lengkap
+        }
+        return it.biayaAktual;
+      }
+
+      final baseUpdateData = <String, dynamic>{
         'is_paid': true,
         'isPaid': true,
         'paid_at': now,
@@ -1129,30 +1176,48 @@ class ReportService {
         'status_bayar': 'sudah_dibayar',
         'payment_validated_at': now,
         'payment_validated_by': adminId,
+        'basis_pembayaran': basisPembayaran, // 🔥 audit trail
       };
 
-      await doc.reference.update(updateData);
+      final jumlahUtama = hitungJumlahBayar(doc);
+      await doc.reference.update({
+        ...baseUpdateData,
+        'actual_income': jumlahUtama,
+        'income': jumlahUtama,
+      });
 
-      // Update group
+      // Update group (nominal dihitung ULANG per mitra, bukan disamakan)
       if (groupId != null && groupId.isNotEmpty) {
         final batch = _firestore.batch();
         final mitraDocs = await _firestore.collection(_cLembur)
             .where('group_id', isEqualTo: groupId).get();
         for (var d in mitraDocs.docs) {
-          batch.update(d.reference, updateData);
+          if (d.id == doc.id) continue; // sudah diupdate di atas
+          final jumlah = hitungJumlahBayar(d);
+          batch.update(d.reference, {
+            ...baseUpdateData,
+            'actual_income': jumlah,
+            'income': jumlah,
+          });
         }
         final pengajuanDocs = await _firestore.collection(_cPengajuan)
             .where('group_id', isEqualTo: groupId).get();
         for (var d in pengajuanDocs.docs) {
-          batch.update(d.reference, updateData);
+          final jumlah = hitungJumlahBayar(d);
+          batch.update(d.reference, {
+            ...baseUpdateData,
+            'actual_income': jumlah,
+            'income': jumlah,
+          });
         }
         await batch.commit();
       }
 
       await _log('tandai_dibayar', laporanId, adminId,
-          'Ditandai dibayar oleh $adminName (validated V6)', {
+          'Ditandai dibayar oleh $adminName (basis: $basisPembayaran)', {
         'admin_name': adminName, 'note': note,
-        'amount': data['estimasi_biaya_total'] ?? data['estimasi_biaya'],
+        'amount': jumlahUtama,
+        'basis_pembayaran': basisPembayaran,
         'validation_detail': validasi['detail'],
         'is_terlambat': validasi['detail']?['is_terlambat'] ?? false,
       });
@@ -1162,6 +1227,7 @@ class ReportService {
         'success': true,
         'message': '✅ Berhasil ditandai sudah dibayar',
         'detail': validasi['detail'],
+        'jumlah_dibayar': jumlahUtama,
       };
     } catch (e) {
       return {'success': false, 'message': 'Gagal: ${e.toString()}'};

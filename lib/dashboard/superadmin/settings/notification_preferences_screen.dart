@@ -1,16 +1,8 @@
-// ============================================================
-// FILE : lib/dashboard/superadmin/settings/notification_preferences_screen.dart
-// Ini yang dibuka dari menu "Notifikasi & Alert" di settings_screen.dart
-// route: '/settings/notifications'
-// ============================================================
-
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
-/// Daftar jenis notifikasi — harus sinkron dengan `notificationTypes`
-/// di notification_service.dart
 const Map<String, String> _notificationTypeLabels = {
   'lembur_submitted': 'Pengajuan Lembur Baru',
   'lembur_approved': 'Lembur Disetujui',
@@ -24,6 +16,7 @@ const Map<String, String> _notificationTypeLabels = {
   'lembur_confirmed': 'Lembur Dikonfirmasi',
   'general': 'Notifikasi Umum',
   'hsse_risk_validation': 'Validasi Risiko HSSE',
+  'user_registered': 'Registrasi User Baru',
 };
 
 class NotificationPreferencesScreen extends StatefulWidget {

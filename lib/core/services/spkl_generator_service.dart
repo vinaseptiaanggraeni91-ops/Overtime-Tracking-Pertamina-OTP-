@@ -28,7 +28,7 @@ class SpklGeneratorService {
   // Cache font
   static pw.Font? _regularFont;
   static pw.Font? _boldFont;
-  
+
   // Cache logo Pertamina
   static pw.MemoryImage? _pertaminaLogo;
 
@@ -70,6 +70,75 @@ class SpklGeneratorService {
   }
 
   // =========================================================================
+  // 🔥 EKSTRAK MITRA LIST - FLEKSIBEL DARI BERBAGAI SUMBER
+  // =========================================================================
+
+  /// Mengekstrak data mitra dari berbagai format field yang mungkin
+  List<Map<String, dynamic>> _extractMitraList(Map<String, dynamic> data) {
+    List<Map<String, dynamic>> mitraList = [];
+
+    // 1️⃣ Cek dari mitra_list (FIELD BARU - prioritas utama)
+    if (data['mitra_list'] is List && (data['mitra_list'] as List).isNotEmpty) {
+      mitraList = (data['mitra_list'] as List)
+          .where((m) => m is Map)
+          .map((m) {
+            final map = Map<String, dynamic>.from(m as Map);
+            // Pastikan ada field yang dibutuhkan tabel
+            if (!map.containsKey('nama_mitra') && map.containsKey('nama')) {
+              map['nama_mitra'] = map['nama'];
+            }
+            if (!map.containsKey('fungsi_mitra') && map.containsKey('fungsi')) {
+              map['fungsi_mitra'] = map['fungsi'];
+            }
+            return map;
+          })
+          .toList();
+      debugPrint('✅ Mitra dari mitra_list: ${mitraList.length} orang');
+    }
+
+    // 2️⃣ Cek dari detail_mitra (field lama - backward compatible)
+    if (mitraList.isEmpty && data['detail_mitra'] is List && (data['detail_mitra'] as List).isNotEmpty) {
+      mitraList = (data['detail_mitra'] as List)
+          .where((m) => m is Map)
+          .map((m) {
+            final map = Map<String, dynamic>.from(m as Map);
+            // Normalisasi field name
+            if (!map.containsKey('nama_mitra') && map.containsKey('nama')) {
+              map['nama_mitra'] = map['nama'];
+            }
+            if (!map.containsKey('fungsi_mitra') && map.containsKey('fungsi')) {
+              map['fungsi_mitra'] = map['fungsi'];
+            }
+            return map;
+          })
+          .toList();
+      debugPrint('✅ Mitra dari detail_mitra: ${mitraList.length} orang');
+    }
+
+    // 3️⃣ Cek dari _mitra_list (dikirim dari widget ApprovalDetailBottomSheet)
+    if (mitraList.isEmpty && data['_mitra_list'] is List && (data['_mitra_list'] as List).isNotEmpty) {
+      mitraList = (data['_mitra_list'] as List)
+          .where((m) => m is Map)
+          .map((m) => Map<String, dynamic>.from(m as Map))
+          .toList();
+      debugPrint('✅ Mitra dari _mitra_list: ${mitraList.length} orang');
+    }
+
+    // 4️⃣ Fallback ke single mitra (hanya jika benar-benar tidak ada data)
+    if (mitraList.isEmpty && data['nama_mitra'] != null) {
+      mitraList = [
+        {
+          'nama_mitra': data['nama_mitra']?.toString() ?? '-',
+          'fungsi_mitra': data['fungsi_mitra']?.toString() ?? '-',
+        }
+      ];
+      debugPrint('⚠️ Fallback ke single mitra: ${data['nama_mitra']}');
+    }
+
+    return mitraList;
+  }
+
+  // =========================================================================
   // 🔥 GENERATE SPKL DARI DATA LEMBUR MENTAH (UNTUK PREVIEW / AUTO-GENERATE)
   // =========================================================================
 
@@ -87,8 +156,12 @@ class SpklGeneratorService {
       // Mobile: save file
       final groupId = (data['group_id'] ?? data['id'] ?? 'UNKNOWN').toString();
       final shortId = groupId.length >= 8 ? groupId.substring(0, 8) : groupId;
-      final nomorSpkl = 'SPKL/${DateFormat('yyyyMMdd').format(DateTime.now())}/$shortId';
-      final safeFileName = nomorSpkl.replaceAll('/', '_').replaceAll('\\', '_').replaceAll(':', '_');
+      final nomorSpkl =
+          'SPKL/${DateFormat('yyyyMMdd').format(DateTime.now())}/$shortId';
+      final safeFileName = nomorSpkl
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_')
+          .replaceAll(':', '_');
 
       final dir = await getTemporaryDirectory();
       final filePath = '${dir.path}/SPKL_$safeFileName.pdf';
@@ -105,7 +178,8 @@ class SpklGeneratorService {
   }
 
   /// Generate PDF bytes dari data lembur mentah (untuk preview)
-  Future<Uint8List> generateSpklPdfBytesFromOvertimeData(Map<String, dynamic> data) async {
+  Future<Uint8List> generateSpklPdfBytesFromOvertimeData(
+      Map<String, dynamic> data) async {
     await _loadFonts();
     await _loadPertaminaLogo();
 
@@ -129,6 +203,7 @@ class SpklGeneratorService {
 
     // Fungsi pengawas
     final pengawasFungsi = data['pengawas_fungsi']?.toString() ?? '-';
+    final fungsiLabel = _getFungsiLabel(pengawasFungsi);
 
     // Tanggal lembur
     DateTime tanggalLembur = now;
@@ -136,8 +211,15 @@ class SpklGeneratorService {
       tanggalLembur = (data['tanggal'] as Timestamp).toDate();
     } else if (data['tanggal'] is DateTime) {
       tanggalLembur = data['tanggal'] as DateTime;
-    } else if (data['tanggal'] is String && data['tanggal'].toString().isNotEmpty) {
+    } else if (data['tanggal'] is String &&
+        data['tanggal'].toString().isNotEmpty) {
       tanggalLembur = DateTime.tryParse(data['tanggal'].toString()) ?? now;
+    }
+
+    // Jika ada tanggal_mulai (multi-day), gunakan itu
+    DateTime tanggalMulai = tanggalLembur;
+    if (data['tanggal_mulai'] is Timestamp) {
+      tanggalMulai = (data['tanggal_mulai'] as Timestamp).toDate();
     }
 
     // Jam
@@ -150,7 +232,9 @@ class SpklGeneratorService {
         : double.tryParse(data['total_jam_desimal']?.toString() ?? '0') ?? 0.0);
 
     // Jenis lembur
-    final jenisLembur = data['jenis_lembur']?.toString() == 'hari_libur' ? 'Hari Libur' : 'Hari Kerja';
+    final jenisLembur = data['jenis_lembur']?.toString() == 'hari_libur'
+        ? 'Hari Libur'
+        : 'Hari Kerja';
 
     // Alasan
     final alasan = data['alasan']?.toString() ?? '-';
@@ -177,39 +261,13 @@ class SpklGeneratorService {
       } else if (data['estimasi_biaya_total'] is int) {
         estimasiBiaya = (data['estimasi_biaya_total'] as int).toDouble();
       } else {
-        estimasiBiaya = double.tryParse(data['estimasi_biaya_total'].toString()) ?? 0.0;
+        estimasiBiaya =
+            double.tryParse(data['estimasi_biaya_total'].toString()) ?? 0.0;
       }
     }
 
-    // Mitra list - cek dari berbagai field
-    List<Map<String, dynamic>> mitraList = [];
-
-    // Cek dari mitra_list (field array di Firestore)
-    if (data['mitra_list'] is List) {
-      mitraList = (data['mitra_list'] as List)
-          .where((m) => m is Map)
-          .map((m) => Map<String, dynamic>.from(m as Map))
-          .toList();
-    }
-
-    // Cek dari _mitra_list (dikirim dari widget ApprovalDetailBottomSheet)
-    if (mitraList.isEmpty && data['_mitra_list'] is List) {
-      mitraList = (data['_mitra_list'] as List)
-          .where((m) => m is Map)
-          .map((m) => Map<String, dynamic>.from(m as Map))
-          .toList();
-    }
-
-    // Jika hanya ada 1 mitra (single), buat dummy list
-    if (mitraList.isEmpty && data['nama_mitra'] != null) {
-      mitraList = [
-        {
-          'nama_mitra': data['nama_mitra']?.toString() ?? '-',
-          'fungsi_mitra': data['fungsi_mitra']?.toString() ?? '-',
-          'estimasi_biaya_per_mitra': estimasiBiaya,
-        }
-      ];
-    }
+    // 🔥 GUNAKAN METHOD EKSTRAKSI MITRA YANG SUDAH DIPERBAIKI
+    final mitraList = _extractMitraList(data);
 
     final totalMitra = mitraList.isNotEmpty
         ? mitraList.length
@@ -219,9 +277,13 @@ class SpklGeneratorService {
     final approvedByName = data['approved_by_name']?.toString() ??
         data['approved_by']?.toString() ??
         '-';
+    final approvedAt = data['approved_at'] is Timestamp
+        ? (data['approved_at'] as Timestamp).toDate()
+        : now;
 
     // Safe string untuk header
-    final safeNomorSpkl = nomorSpkl.length > 30 ? '${nomorSpkl.substring(0, 30)}...' : nomorSpkl;
+    final safeNomorSpkl =
+        nomorSpkl.length > 30 ? '${nomorSpkl.substring(0, 30)}...' : nomorSpkl;
 
     // =========================================================================
     // PDF CONTENT
@@ -244,12 +306,14 @@ class SpklGeneratorService {
               children: [
                 pw.Text(
                   'SURAT PERINTAH KERJA LEMBUR',
-                  style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold),
+                  style: pw.TextStyle(
+                      fontSize: 16, fontWeight: pw.FontWeight.bold),
                 ),
                 pw.SizedBox(height: 4),
                 pw.Text(
                   '(SPKL)',
-                  style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold),
+                  style: pw.TextStyle(
+                      fontSize: 14, fontWeight: pw.FontWeight.bold),
                 ),
                 pw.SizedBox(height: 12),
                 pw.Text(
@@ -264,8 +328,10 @@ class SpklGeneratorService {
 
           // INFORMASI LEMBUR
           _buildPdfSection('I. INFORMASI LEMBUR', [
-            _buildPdfRow('Tanggal', DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(tanggalLembur)),
-            _buildPdfRow('Waktu', '$jamMulai - $jamSelesai (${totalJam.toStringAsFixed(1)} jam)'),
+            _buildPdfRow('Tanggal',
+                DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(tanggalMulai)),
+            _buildPdfRow('Waktu',
+                '$jamMulai - $jamSelesai (${totalJam.toStringAsFixed(1)} jam)'),
             _buildPdfRow('Jenis', jenisLembur),
             _buildPdfRow('Lokasi', lokasiStr),
             _buildPdfRow('Urgensi', urgensi),
@@ -276,7 +342,7 @@ class SpklGeneratorService {
           // PENGAWAS
           _buildPdfSection('II. DATA PENGAWAS', [
             _buildPdfRow('Nama', pengawasNama),
-            _buildPdfRow('Fungsi', pengawasFungsi),
+            _buildPdfRow('Fungsi', fungsiLabel),
           ]),
 
           pw.SizedBox(height: 16),
@@ -284,7 +350,8 @@ class SpklGeneratorService {
           // MITRA
           _buildPdfSection('III. DAFTAR MITRA ($totalMitra orang)', [
             if (mitraList.isEmpty)
-              pw.Text('Tidak ada data mitra', style: const pw.TextStyle(fontSize: 10))
+              pw.Text('Tidak ada data mitra',
+                  style: const pw.TextStyle(fontSize: 10))
             else
               _buildMitraTableRaw(mitraList),
           ]),
@@ -300,41 +367,20 @@ class SpklGeneratorService {
 
           // BIAYA
           _buildPdfSection('V. ESTIMASI BIAYA', [
-            _buildPdfRow('Total Biaya', 'Rp ${NumberFormat('#,###', 'id_ID').format(estimasiBiaya)}'),
+            _buildPdfRow('Total Biaya',
+                'Rp ${NumberFormat('#,###', 'id_ID').format(estimasiBiaya)}'),
             _buildPdfRow('Jumlah Mitra', '$totalMitra orang'),
           ]),
 
-          pw.SizedBox(height: 36),
+          pw.SizedBox(height: 40),
 
-          // TTD
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              // APPROVAL
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Text('Disetujui oleh,', style: const pw.TextStyle(fontSize: 10)),
-                  pw.SizedBox(height: 50),
-                  pw.Text(approvedByName, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Manager', style: const pw.TextStyle(fontSize: 9)),
-                  pw.SizedBox(height: 6),
-                  pw.Text(DateFormat('dd MMM yyyy', 'id_ID').format(now), style: const pw.TextStyle(fontSize: 8)),
-                ],
-              ),
-              // PENGAWAS
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Text('Diketahui oleh,', style: const pw.TextStyle(fontSize: 10)),
-                  pw.SizedBox(height: 50),
-                  pw.Text(pengawasNama, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Pengawas $pengawasFungsi', style: const pw.TextStyle(fontSize: 9)),
-                  pw.SizedBox(height: 6),
-                  pw.Text(DateFormat('dd MMM yyyy', 'id_ID').format(tanggalLembur), style: const pw.TextStyle(fontSize: 8)),
-                ],
-              ),
-            ],
+          // 🔥 TANDA TANGAN - DIPERBAIKI
+          _buildTandaTangan(
+            pengawasNama: pengawasNama,
+            fungsiLabel: fungsiLabel,
+            approvedByName: approvedByName,
+            tanggalLembur: tanggalMulai,
+            approvedAt: approvedAt,
           ),
         ],
       ),
@@ -354,24 +400,50 @@ class SpklGeneratorService {
     final pdf = pw.Document();
 
     // Safe data parsing
-    final nomorSpkl = (spklData['nomor_spkl'] ?? 'SPKL/XXX/XXX').toString();
-    final tanggal = (spklData['tanggal_lembur'] as Timestamp?)?.toDate() ?? DateTime.now();
-    final pengawasNama = (spklData['pengawas_nama'] ?? '-').toString();
-    final pengawasFungsi = (spklData['pengawas_fungsi'] ?? '-').toString();
+    final nomorSpkl =
+        (spklData['nomor_spkl'] ?? 'SPKL/XXX/XXX').toString();
+    final tanggal =
+        (spklData['tanggal_lembur'] as Timestamp?)?.toDate() ?? DateTime.now();
+    final pengawasNama =
+        (spklData['pengawas_nama'] ?? spklData['nama_pengawas'] ?? '-')
+            .toString();
+    final pengawasFungsi =
+        (spklData['pengawas_fungsi'] ?? '-').toString();
+    final fungsiLabel = _getFungsiLabel(pengawasFungsi);
     final jamMulai = (spklData['jam_mulai'] ?? '-').toString();
     final jamSelesai = (spklData['jam_selesai'] ?? '-').toString();
-    final totalJam = ((spklData['total_jam'] ?? 0) as num).toDouble();
-    final jenisLembur = spklData['jenis_lembur'] == 'hari_libur' ? 'Hari Libur' : 'Hari Kerja';
+    final totalJam =
+        ((spklData['total_jam'] ?? spklData['total_jam_desimal'] ?? 0) as num)
+            .toDouble();
+    final jenisLembur = spklData['jenis_lembur'] == 'hari_libur'
+        ? 'Hari Libur'
+        : 'Hari Kerja';
     final alasan = (spklData['alasan'] ?? '-').toString();
-    final lokasi = (spklData['lokasi'] as Map<String, dynamic>?) ?? {};
+    final lokasi =
+        (spklData['lokasi'] as Map<String, dynamic>?) ?? {};
     final lokasiStr = (lokasi['alamat'] ?? 'Kantor PGE').toString();
-    final estimasiBiaya = ((spklData['estimasi_biaya_total'] ?? 0) as num).toDouble();
-    final totalMitra = ((spklData['total_mitra'] ?? 1) as num).toInt();
-    final approvedByName = (spklData['approved_by_name'] ?? '-').toString();
-    final approvedAt = (spklData['approved_at'] as Timestamp?)?.toDate() ?? DateTime.now();
-    final mitraList = (spklData['mitra_list'] as List?) ?? [];
+    final estimasiBiaya =
+        ((spklData['estimasi_biaya_total'] ?? 0) as num).toDouble();
+    final totalMitra =
+        ((spklData['total_mitra'] ?? 1) as num).toInt();
+    final approvedByName =
+        (spklData['approved_by_name'] ?? '-').toString();
+    final approvedAt =
+        (spklData['approved_at'] as Timestamp?)?.toDate() ?? DateTime.now();
 
-    final safeNomorSpkl = nomorSpkl.length > 30 ? '${nomorSpkl.substring(0, 30)}...' : nomorSpkl;
+    // 🔥 GUNAKAN METHOD EKSTRAKSI MITRA YANG SUDAH DIPERBAIKI
+    final mitraList = _extractMitraList(spklData);
+
+    // Jika masih kosong, coba dari mitra_list langsung (fallback)
+    if (mitraList.isEmpty && spklData['mitra_list'] is List) {
+      mitraList.addAll((spklData['mitra_list'] as List)
+          .where((m) => m is Map)
+          .map((m) => Map<String, dynamic>.from(m as Map)));
+    }
+
+    final safeNomorSpkl = nomorSpkl.length > 30
+        ? '${nomorSpkl.substring(0, 30)}...'
+        : nomorSpkl;
 
     pdf.addPage(
       pw.MultiPage(
@@ -388,31 +460,39 @@ class SpklGeneratorService {
             child: pw.Column(
               children: [
                 pw.Text('SURAT PERINTAH KERJA LEMBUR',
-                    style: pw.TextStyle(fontSize: 16, fontWeight: pw.FontWeight.bold)),
+                    style: pw.TextStyle(
+                        fontSize: 16, fontWeight: pw.FontWeight.bold)),
                 pw.SizedBox(height: 4),
-                pw.Text('(SPKL)', style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+                pw.Text('(SPKL)',
+                    style: pw.TextStyle(
+                        fontSize: 14, fontWeight: pw.FontWeight.bold)),
                 pw.SizedBox(height: 12),
-                pw.Text('Nomor: $nomorSpkl', style: const pw.TextStyle(fontSize: 11)),
+                pw.Text('Nomor: $nomorSpkl',
+                    style: const pw.TextStyle(fontSize: 11)),
               ],
             ),
           ),
           pw.SizedBox(height: 24),
           _buildPdfSection('I. INFORMASI LEMBUR', [
-            _buildPdfRow('Tanggal', DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(tanggal)),
-            _buildPdfRow('Waktu', '$jamMulai - $jamSelesai (${totalJam.toStringAsFixed(1)} jam)'),
+            _buildPdfRow('Tanggal',
+                DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(tanggal)),
+            _buildPdfRow('Waktu',
+                '$jamMulai - $jamSelesai (${totalJam.toStringAsFixed(1)} jam)'),
             _buildPdfRow('Jenis', jenisLembur),
             _buildPdfRow('Lokasi', lokasiStr),
-            _buildPdfRow('Urgensi', (spklData['urgensi'] ?? 'normal').toString().toUpperCase()),
+            _buildPdfRow('Urgensi',
+                (spklData['urgensi'] ?? 'normal').toString().toUpperCase()),
           ]),
           pw.SizedBox(height: 16),
           _buildPdfSection('II. DATA PENGAWAS', [
             _buildPdfRow('Nama', pengawasNama),
-            _buildPdfRow('Fungsi', pengawasFungsi),
+            _buildPdfRow('Fungsi', fungsiLabel),
           ]),
           pw.SizedBox(height: 16),
           _buildPdfSection('III. DAFTAR MITRA ($totalMitra orang)', [
             if (mitraList.isEmpty)
-              pw.Text('Tidak ada data mitra', style: const pw.TextStyle(fontSize: 10))
+              pw.Text('Tidak ada data mitra',
+                  style: const pw.TextStyle(fontSize: 10))
             else
               _buildMitraTable(mitraList),
           ]),
@@ -422,36 +502,19 @@ class SpklGeneratorService {
           ]),
           pw.SizedBox(height: 16),
           _buildPdfSection('V. ESTIMASI BIAYA', [
-            _buildPdfRow('Total Biaya', 'Rp ${NumberFormat('#,###', 'id_ID').format(estimasiBiaya)}'),
+            _buildPdfRow('Total Biaya',
+                'Rp ${NumberFormat('#,###', 'id_ID').format(estimasiBiaya)}'),
             _buildPdfRow('Jumlah Mitra', '$totalMitra orang'),
           ]),
-          pw.SizedBox(height: 36),
-          pw.Row(
-            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-            children: [
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Text('Disetujui oleh,', style: const pw.TextStyle(fontSize: 10)),
-                  pw.SizedBox(height: 50),
-                  pw.Text(approvedByName, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Manager', style: const pw.TextStyle(fontSize: 9)),
-                  pw.SizedBox(height: 6),
-                  pw.Text(DateFormat('dd MMM yyyy', 'id_ID').format(approvedAt), style: const pw.TextStyle(fontSize: 8)),
-                ],
-              ),
-              pw.Column(
-                crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: [
-                  pw.Text('Diketahui oleh,', style: const pw.TextStyle(fontSize: 10)),
-                  pw.SizedBox(height: 50),
-                  pw.Text(pengawasNama, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                  pw.Text('Pengawas $pengawasFungsi', style: const pw.TextStyle(fontSize: 9)),
-                  pw.SizedBox(height: 6),
-                  pw.Text(DateFormat('dd MMM yyyy', 'id_ID').format(tanggal), style: const pw.TextStyle(fontSize: 8)),
-                ],
-              ),
-            ],
+          pw.SizedBox(height: 40),
+
+          // 🔥 TANDA TANGAN - DIPERBAIKI
+          _buildTandaTangan(
+            pengawasNama: pengawasNama,
+            fungsiLabel: fungsiLabel,
+            approvedByName: approvedByName,
+            tanggalLembur: tanggal,
+            approvedAt: approvedAt,
           ),
         ],
       ),
@@ -474,7 +537,10 @@ class SpklGeneratorService {
       }
 
       final nomorSpkl = (spklData['nomor_spkl'] ?? 'SPKL').toString();
-      final safeFileName = nomorSpkl.replaceAll('/', '_').replaceAll('\\', '_').replaceAll(':', '_');
+      final safeFileName = nomorSpkl
+          .replaceAll('/', '_')
+          .replaceAll('\\', '_')
+          .replaceAll(':', '_');
 
       final dir = await getTemporaryDirectory();
       final filePath = '${dir.path}/SPKL_$safeFileName.pdf';
@@ -524,6 +590,237 @@ class SpklGeneratorService {
   }
 
   // =========================================================================
+  // 🔥 TANDA TANGAN - DIPERBAIKI DENGAN LAYOUT LEBIH RAPIH
+  // =========================================================================
+
+  pw.Widget _buildTandaTangan({
+    required String pengawasNama,
+    required String fungsiLabel,
+    required String approvedByName,
+    required DateTime tanggalLembur,
+    required DateTime approvedAt,
+  }) {
+    return pw.Column(
+      children: [
+        // Garis pembatas
+        pw.Container(
+          margin: const pw.EdgeInsets.only(bottom: 20),
+          child: pw.Row(
+            children: [
+              pw.Expanded(
+                child: pw.Container(
+                  height: 1,
+                  color: PdfColors.grey400,
+                ),
+              ),
+              pw.Padding(
+                padding: const pw.EdgeInsets.symmetric(horizontal: 16),
+                child: pw.Text(
+                  'TANDA TANGAN',
+                  style: pw.TextStyle(
+                    fontSize: 9,
+                    fontWeight: pw.FontWeight.bold,
+                    color: PdfColors.grey600,
+                    letterSpacing: 2,
+                  ),
+                ),
+              ),
+              pw.Expanded(
+                child: pw.Container(
+                  height: 1,
+                  color: PdfColors.grey400,
+                ),
+              ),
+            ],
+          ),
+        ),
+
+        pw.SizedBox(height: 12),
+
+        // Dua kolom tanda tangan
+        pw.Row(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            // KIRI: PIHAK YANG MENYETUJUI
+            pw.Expanded(
+              child: pw.Container(
+                padding: const pw.EdgeInsets.all(12),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey300, width: 0.5),
+                  borderRadius:
+                      const pw.BorderRadius.all(pw.Radius.circular(8)),
+                ),
+                child: pw.Column(
+                  children: [
+                    // Judul
+                    pw.Container(
+                      width: double.infinity,
+                      padding: const pw.EdgeInsets.symmetric(
+                          vertical: 4, horizontal: 8),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.blue50,
+                        borderRadius:
+                            const pw.BorderRadius.all(pw.Radius.circular(4)),
+                      ),
+                      child: pw.Text(
+                        'MENYETUJUI,',
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.blue800,
+                        ),
+                      ),
+                    ),
+
+                    pw.SizedBox(height: 50),
+
+                    // Nama approver
+                    pw.Container(
+                      width: double.infinity,
+                      child: pw.Column(
+                        children: [
+                          pw.Text(
+                            approvedByName,
+                            textAlign: pw.TextAlign.center,
+                            style: pw.TextStyle(
+                              fontSize: 10,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.SizedBox(height: 2),
+                          pw.Text(
+                            'Manager',
+                            textAlign: pw.TextAlign.center,
+                            style: const pw.TextStyle(
+                              fontSize: 8,
+                              color: PdfColors.grey700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    pw.SizedBox(height: 8),
+
+                    // Garis bawah
+                    pw.Container(
+                      width: 100,
+                      height: 1,
+                      color: PdfColors.grey400,
+                    ),
+
+                    pw.SizedBox(height: 6),
+
+                    // Tanggal
+                    pw.Text(
+                      'Tanggal: ${DateFormat('dd MMMM yyyy', 'id_ID').format(approvedAt)}',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        color: PdfColors.grey600,
+                        fontStyle: pw.FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            pw.SizedBox(width: 20),
+
+            // KANAN: PIHAK YANG MENGAJUKAN
+            pw.Expanded(
+              child: pw.Container(
+                padding: const pw.EdgeInsets.all(12),
+                decoration: pw.BoxDecoration(
+                  border: pw.Border.all(color: PdfColors.grey300, width: 0.5),
+                  borderRadius:
+                      const pw.BorderRadius.all(pw.Radius.circular(8)),
+                ),
+                child: pw.Column(
+                  children: [
+                    // Judul
+                    pw.Container(
+                      width: double.infinity,
+                      padding: const pw.EdgeInsets.symmetric(
+                          vertical: 4, horizontal: 8),
+                      decoration: pw.BoxDecoration(
+                        color: PdfColors.green50,
+                        borderRadius:
+                            const pw.BorderRadius.all(pw.Radius.circular(4)),
+                      ),
+                      child: pw.Text(
+                        'MENGETAHUI,',
+                        textAlign: pw.TextAlign.center,
+                        style: pw.TextStyle(
+                          fontSize: 9,
+                          fontWeight: pw.FontWeight.bold,
+                          color: PdfColors.green800,
+                        ),
+                      ),
+                    ),
+
+                    pw.SizedBox(height: 50),
+
+                    // Nama pengawas
+                    pw.Container(
+                      width: double.infinity,
+                      child: pw.Column(
+                        children: [
+                          pw.Text(
+                            pengawasNama,
+                            textAlign: pw.TextAlign.center,
+                            style: pw.TextStyle(
+                              fontSize: 10,
+                              fontWeight: pw.FontWeight.bold,
+                            ),
+                          ),
+                          pw.SizedBox(height: 2),
+                          pw.Text(
+                            'Pengawas $fungsiLabel',
+                            textAlign: pw.TextAlign.center,
+                            style: const pw.TextStyle(
+                              fontSize: 8,
+                              color: PdfColors.grey700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    pw.SizedBox(height: 8),
+
+                    // Garis bawah
+                    pw.Container(
+                      width: 100,
+                      height: 1,
+                      color: PdfColors.grey400,
+                    ),
+
+                    pw.SizedBox(height: 6),
+
+                    // Tanggal
+                    pw.Text(
+                      'Tanggal: ${DateFormat('dd MMMM yyyy', 'id_ID').format(tanggalLembur)}',
+                      textAlign: pw.TextAlign.center,
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        color: PdfColors.grey600,
+                        fontStyle: pw.FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // =========================================================================
   // HELPER WIDGETS
   // =========================================================================
 
@@ -531,7 +828,8 @@ class SpklGeneratorService {
     return pw.Container(
       padding: const pw.EdgeInsets.only(bottom: 8),
       decoration: const pw.BoxDecoration(
-        border: pw.Border(bottom: pw.BorderSide(color: PdfColors.blue, width: 1.5)),
+        border: pw.Border(
+            bottom: pw.BorderSide(color: PdfColors.blue, width: 1.5)),
       ),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
@@ -582,13 +880,18 @@ class SpklGeneratorService {
     return pw.Container(
       padding: const pw.EdgeInsets.only(top: 8),
       decoration: const pw.BoxDecoration(
-        border: pw.Border(top: pw.BorderSide(color: PdfColors.grey, width: 0.5)),
+        border:
+            pw.Border(top: pw.BorderSide(color: PdfColors.grey, width: 0.5)),
       ),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
-          pw.Text('Dicetak otomatis oleh sistem', style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey)),
-          pw.Text(DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()), style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey)),
+          pw.Text('Dicetak otomatis oleh sistem',
+              style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey)),
+          pw.Text(
+              DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now()),
+              style:
+                  const pw.TextStyle(fontSize: 7, color: PdfColors.grey)),
         ],
       ),
     );
@@ -603,11 +906,15 @@ class SpklGeneratorService {
           padding: const pw.EdgeInsets.symmetric(vertical: 5, horizontal: 8),
           decoration: pw.BoxDecoration(
             color: PdfColors.blue50,
-            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+            borderRadius:
+                const pw.BorderRadius.all(pw.Radius.circular(4)),
           ),
           child: pw.Text(
             title,
-            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
+            style: pw.TextStyle(
+                fontSize: 11,
+                fontWeight: pw.FontWeight.bold,
+                color: PdfColors.blue900),
           ),
         ),
         pw.SizedBox(height: 8),
@@ -624,7 +931,9 @@ class SpklGeneratorService {
         children: [
           pw.SizedBox(
             width: 110,
-            child: pw.Text(label, style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700)),
+            child: pw.Text(label,
+                style: const pw.TextStyle(
+                    fontSize: 10, color: PdfColors.grey700)),
           ),
           pw.Expanded(
             child: pw.Text(value, style: const pw.TextStyle(fontSize: 10)),
@@ -658,8 +967,10 @@ class SpklGeneratorService {
           return pw.TableRow(
             children: [
               _tableCell(index.toString()),
-              _tableCell((mitra['nama_mitra'] ?? '-').toString()),
-              _tableCell((mitra['fungsi_mitra'] ?? '-').toString()),
+              _tableCell(
+                  (mitra['nama_mitra'] ?? mitra['nama'] ?? '-').toString()),
+              _tableCell(
+                  (mitra['fungsi_mitra'] ?? mitra['fungsi'] ?? '-').toString()),
             ],
           );
         }),
@@ -691,8 +1002,10 @@ class SpklGeneratorService {
           return pw.TableRow(
             children: [
               _tableCell(index.toString()),
-              _tableCell((mitra['nama_mitra'] ?? mitra['nama'] ?? '-').toString()),
-              _tableCell((mitra['fungsi_mitra'] ?? mitra['fungsi'] ?? '-').toString()),
+              _tableCell(
+                  (mitra['nama_mitra'] ?? mitra['nama'] ?? '-').toString()),
+              _tableCell(
+                  (mitra['fungsi_mitra'] ?? mitra['fungsi'] ?? '-').toString()),
             ],
           );
         }),
@@ -703,7 +1016,8 @@ class SpklGeneratorService {
   pw.Widget _tableHeader(String text) {
     return pw.Padding(
       padding: const pw.EdgeInsets.all(6),
-      child: pw.Text(text, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+      child: pw.Text(text,
+          style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
     );
   }
 
@@ -712,5 +1026,26 @@ class SpklGeneratorService {
       padding: const pw.EdgeInsets.all(6),
       child: pw.Text(text, style: const pw.TextStyle(fontSize: 9)),
     );
+  }
+
+  // =========================================================================
+  // HELPER: LABEL FUNGSI
+  // =========================================================================
+
+  String _getFungsiLabel(String fungsi) {
+    switch (fungsi.toLowerCase()) {
+      case 'operation':
+        return 'Operation';
+      case 'maintenance':
+        return 'Maintenance';
+      case 'hsse':
+        return 'HSSE';
+      case 'gpr':
+        return 'GPR';
+      case 'bs':
+        return 'Business Support';
+      default:
+        return fungsi.toUpperCase();
+    }
   }
 }

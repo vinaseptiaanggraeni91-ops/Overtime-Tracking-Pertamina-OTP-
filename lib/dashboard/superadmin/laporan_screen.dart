@@ -9,7 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '/core/services/report_service.dart';
-import '/widgets/bottom_nav/app_bottom_nav.dart'; // ← TAMBAHKAN INI
+import '/widgets/bottom_nav/app_bottom_nav.dart';
 
 // ============================================================================
 // 🎨 PGE KAMOJANG COLOR SYSTEM - ENHANCED
@@ -42,7 +42,7 @@ class PGEColors {
 }
 
 // ============================================================================
-// 📱 REPORT PAGE - PGE KAMOJANG V7 ULTIMATE MOBILE UI
+// 📱 REPORT PAGE - PGE KAMOJANG V8 PROFESSIONAL
 // ============================================================================
 
 class ReportPage extends StatefulWidget {
@@ -114,7 +114,11 @@ class _ReportPageState extends State<ReportPage>
   bool get _hasBisaDibayar => _bisaDibayarCount > 0;
 
   double get _totalJamSelesai => _items
-      .where((i) => i.status == 'selesai' || i.absensiStatus == 'selesai' || i.absensiStatus == 'selesai_terlambat')
+      .where((i) =>
+          i.status == 'selesai' ||
+          i.absensiStatus == 'selesai' ||
+          i.absensiStatus == 'selesai_terlambat' ||
+          i.absensiStatus == 'selesai_terlambat_checkout')
       .fold<double>(0, (sum, i) => sum + i.totalJam);
 
   double get _totalPendapatanDibayar => _items
@@ -250,18 +254,7 @@ class _ReportPageState extends State<ReportPage>
     }
   }
 
-  // ═══════════════════════════════════════════════════
-  // 🧭 NAVIGATION INDEX
-  // ═══════════════════════════════════════════════════
-  
-  /// Mendapatkan index navigasi untuk bottom nav
   int _getNavIndex() {
-    // Sesuaikan dengan index menu Laporan di AppBottomNav
-    // 0 = Home/Dashboard
-    // 1 = Riwayat Lembur  
-    // 2 = Laporan (halaman ini)
-    // 3 = Approval (jika ada)
-    // 4 = Profile
     return 2;
   }
 
@@ -279,7 +272,9 @@ class _ReportPageState extends State<ReportPage>
       if (!mounted) return;
 
       final isTerlambat = item.absensiStatus == 'selesai_terlambat' ||
-          validasi['detail']?['absensi_status'] == 'selesai_terlambat';
+          item.absensiStatus == 'selesai_terlambat_checkout' ||
+          validasi['detail']?['absensi_status'] == 'selesai_terlambat' ||
+          validasi['detail']?['absensi_status'] == 'selesai_terlambat_checkout';
       final hasAlasanKeterlambatan = (validasi['detail']?['alasan_keterlambatan'] != null &&
               validasi['detail']?['alasan_keterlambatan']?.toString().isNotEmpty == true) ??
           false;
@@ -293,18 +288,20 @@ class _ReportPageState extends State<ReportPage>
       return;
     }
 
-    final isTerlambat = item.absensiStatus == 'selesai_terlambat';
-    final confirm = await showDialog<bool>(
+    final isTerlambat = item.absensiStatus == 'selesai_terlambat' ||
+        item.absensiStatus == 'selesai_terlambat_checkout';
+    final basisPembayaran = await showDialog<String>(
       context: context,
       builder: (ctx) => _buildConfirmPaymentDialog(item, isTerlambat),
     );
 
-    if (confirm != true || !mounted) return;
+    if (basisPembayaran == null || !mounted) return; // user tekan Batal
     setState(() => _isLoading = true);
     final result = await _reportService.tandaiSudahDibayar(
       laporanId: item.id,
       adminId: user.uid,
       adminName: user.displayName ?? 'Superadmin',
+      basisPembayaran: basisPembayaran, // 'aktual' atau 'pengajuan'
     );
     if (mounted) {
       _showSnackBar(
@@ -487,119 +484,163 @@ class _ReportPageState extends State<ReportPage>
   }
 
   Widget _buildConfirmPaymentDialog(LaporanItem item, bool isTerlambat) {
-    return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-      title: Column(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: [PGEColors.success.withOpacity(0.2), PGEColors.success.withOpacity(0.1)],
-              ),
-              shape: BoxShape.circle,
-            ),
-            child: const Icon(Icons.payments_rounded, color: PGEColors.success, size: 32),
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Konfirmasi Pembayaran',
-            style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: PGEColors.textPrimary),
-          ),
-        ],
-      ),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: PGEColors.success.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: PGEColors.success.withOpacity(0.2)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.check_circle, size: 16, color: PGEColors.success),
-                  const SizedBox(width: 6),
-                  Text(
-                    isTerlambat ? 'Syarat terlambat terpenuhi ✅' : 'Semua persyaratan terpenuhi ✅',
-                    style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: PGEColors.success),
+    final biayaAktual = item.biayaAktual;
+    final biayaPengajuan = (item.ratePerJam > 0 && item.totalJam > 0)
+        ? item.ratePerJam * item.totalJam
+        : biayaAktual;
+
+    String basisTerpilih = 'aktual'; // default
+
+    return StatefulBuilder(
+      builder: (context, setDialogState) {
+        return AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+          title: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [PGEColors.success.withOpacity(0.2), PGEColors.success.withOpacity(0.1)],
                   ),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.payments_rounded, color: PGEColors.success, size: 32),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'Konfirmasi Pembayaran',
+                style: GoogleFonts.poppins(fontSize: 16, fontWeight: FontWeight.w700, color: PGEColors.textPrimary),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                item.namaMitra ?? '-',
+                style: GoogleFonts.poppins(fontSize: 12, color: PGEColors.textSecondary),
+              ),
+              if (isTerlambat) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: PGEColors.warning.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: PGEColors.warning.withOpacity(0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.access_time, size: 12, color: PGEColors.warning),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Lembur TERLAMBAT',
+                        style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: PGEColors.warning),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildBasisOption(
+                setDialogState: setDialogState,
+                groupValue: basisTerpilih,
+                value: 'aktual',
+                onChanged: (v) => basisTerpilih = v,
+                label: 'Sesuai Durasi Aktual',
+                subtitle: 'Dari check-in/check-out (${item.durasiRealFormatted})',
+                nominal: biayaAktual,
+              ),
+              const SizedBox(height: 8),
+              _buildBasisOption(
+                setDialogState: setDialogState,
+                groupValue: basisTerpilih,
+                value: 'pengajuan',
+                onChanged: (v) => basisTerpilih = v,
+                label: 'Sesuai Pengajuan',
+                subtitle: 'Dari jam yang diajukan (${item.durasiFormatted})',
+                nominal: biayaPengajuan,
+              ),
+            ],
+          ),
+          actions: [
+            OutlinedButton(
+              onPressed: () => Navigator.pop(context, null),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+              child: Text('Batal', style: GoogleFonts.poppins(fontSize: 13)),
+            ),
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context, basisTerpilih),
+              icon: const Icon(Icons.check_circle, size: 18),
+              label: const Text('✅ Tandai Dibayar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: PGEColors.success,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                textStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
+                elevation: 2,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  // 🔥 Baris opsi radio + preview nominal untuk dialog konfirmasi bayar
+  Widget _buildBasisOption({
+    required StateSetter setDialogState,
+    required String groupValue,
+    required String value,
+    required ValueChanged<String> onChanged,
+    required String label,
+    required String subtitle,
+    required double nominal,
+  }) {
+    final isSelected = groupValue == value;
+    return InkWell(
+      onTap: () => setDialogState(() => onChanged(value)),
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: isSelected ? PGEColors.primaryLight : PGEColors.bg,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+            color: isSelected ? PGEColors.primary : PGEColors.border,
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Row(
+          children: [
+            Radio<String>(
+              value: value,
+              groupValue: groupValue,
+              onChanged: (v) => setDialogState(() => onChanged(v!)),
+              activeColor: PGEColors.primary,
+            ),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: PGEColors.textPrimary)),
+                  Text(subtitle, style: GoogleFonts.poppins(fontSize: 10, color: PGEColors.textSecondary)),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: PGEColors.bg,
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: PGEColors.border),
-              ),
-              child: Column(
-                children: [
-                  _buildConfirmRow('👤 Mitra', item.namaMitra ?? '-'),
-                  _buildConfirmRow('📅 Tanggal', item.tanggalFormatted),
-                  _buildConfirmRow('⏰ Jam Lembur', '${item.jamMulai} - ${item.jamSelesai}'),
-                  _buildConfirmRow('⏱️ Durasi', item.durasiFormatted),
-                  if (isTerlambat) ...[
-                    const SizedBox(height: 8),
-                    Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: PGEColors.warning.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: PGEColors.warning.withOpacity(0.3)),
-                      ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.warning_amber, size: 14, color: PGEColors.warning),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            child: Text(
-                              'Lembur TERLAMBAT - Tanpa check-in/out',
-                              style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: PGEColors.warning),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                  const Divider(height: 20),
-                  _buildConfirmRow('💰 Pendapatan', item.biayaFormatted, isHighlight: true),
-                  _buildConfirmRow('📈 Rate/Jam', item.ratePerJamFormatted),
-                ],
-              ),
+            Text(
+              ReportService.formatRupiah(nominal),
+              style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w800, color: PGEColors.primary),
             ),
           ],
         ),
       ),
-      actions: [
-        OutlinedButton(
-          onPressed: () => Navigator.pop(context, false),
-          style: OutlinedButton.styleFrom(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          ),
-          child: Text('Batal', style: GoogleFonts.poppins(fontSize: 13)),
-        ),
-        ElevatedButton.icon(
-          onPressed: () => Navigator.pop(context, true),
-          icon: const Icon(Icons.check_circle, size: 18),
-          label: const Text('✅ Tandai Dibayar'),
-          style: ElevatedButton.styleFrom(
-            backgroundColor: PGEColors.success,
-            foregroundColor: Colors.white,
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            textStyle: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
-            elevation: 2,
-          ),
-        ),
-      ],
     );
   }
 
@@ -776,7 +817,8 @@ class _ReportPageState extends State<ReportPage>
       final validasi = await _reportService.validasiPembayaran(item.id);
       if (validasi['valid'] == true) {
         memenuhiSyarat++;
-        if (item.absensiStatus == 'selesai_terlambat') terlambatCount++;
+        if (item.absensiStatus == 'selesai_terlambat' ||
+            item.absensiStatus == 'selesai_terlambat_checkout') terlambatCount++;
       } else {
         tidakMemenuhi++;
         if (masalahList.length < 5) {
@@ -1102,7 +1144,7 @@ class _ReportPageState extends State<ReportPage>
   }
 
   // ═══════════════════════════════════════════════════
-  // 📄 EXPORT PDF - ENHANCED
+  // 📄 EXPORT PDF - PROFESSIONAL PERTAMINA STYLE
   // ═══════════════════════════════════════════════════
 
   Future<void> _exportPDF() async {
@@ -1110,6 +1152,8 @@ class _ReportPageState extends State<ReportPage>
     try {
       final pdf = pw.Document();
       final items = _filteredItems;
+
+      // Group by date
       final groupedItems = <String, List<LaporanItem>>{};
       for (final item in items) {
         final dateKey = DateFormat('yyyy-MM-dd').format(item.tanggal);
@@ -1117,33 +1161,58 @@ class _ReportPageState extends State<ReportPage>
       }
       final sortedDates = groupedItems.keys.toList()..sort();
 
-      pdf.addPage(pw.MultiPage(
-        pageFormat: PdfPageFormat.a4,
-        margin: const pw.EdgeInsets.all(25),
-        header: (context) => _buildPdfHeader(context),
-        footer: (context) => _buildPdfFooter(context),
-        build: (context) => [
-          _buildPdfTitleSection(),
-          pw.SizedBox(height: 16),
-          _buildPdfFilterInfo(),
-          pw.SizedBox(height: 12),
-          _buildPdfSummaryBox(items),
-          pw.SizedBox(height: 20),
-          for (final date in sortedDates) ...[
-            _buildPdfDateHeader(date, groupedItems[date]!),
-            _buildPdfDetailTable(groupedItems[date]!),
+      // Calculate totals
+      final totalPendapatan = items.fold<double>(0, (sum, i) => sum + i.biayaAktual);
+      final totalJam = items.fold<double>(0, (sum, i) => sum + i.totalJam);
+      final sudahDibayar = items.where((i) => i.isPaid).length;
+      final belumDibayar = items.where((i) => !i.isPaid).length;
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.all(40),
+          header: (context) => _buildPdfHeader(context),
+          footer: (context) => _buildPdfFooter(context),
+          build: (context) => [
+            // Title Section
+            _buildPdfTitle(),
+            pw.SizedBox(height: 24),
+
+            // Summary Cards
+            _buildPdfSummaryCards(totalPendapatan, totalJam, sudahDibayar, belumDibayar),
+            pw.SizedBox(height: 30),
+
+            // Section: Detail Laporan
+            _buildPdfSectionHeader('DETAIL LAPORAN LEMBUR'),
             pw.SizedBox(height: 12),
+            _buildPdfInfoBar(),
+            pw.SizedBox(height: 16),
+
+            // Table for each date
+            for (final date in sortedDates) ...[
+              _buildPdfDateHeader(date, groupedItems[date]!),
+              _buildPdfTable(groupedItems[date]!),
+              pw.SizedBox(height: 8),
+            ],
+
+            pw.SizedBox(height: 20),
+
+            // Grand Total
+            _buildPdfGrandTotal(items),
+
+            pw.SizedBox(height: 40),
+
+            // Signature Section
+            _buildPdfSignature(),
           ],
-          pw.SizedBox(height: 10),
-          _buildPdfSignatureSection(),
-        ],
-      ));
+        ),
+      );
 
       await Printing.sharePdf(
         bytes: await pdf.save(),
-        filename: 'Laporan_Lembur_PGE_Kamojang_${DateFormat('yyyyMMdd_HHmm').format(DateTime.now())}.pdf',
+        filename: 'Laporan_Lembur_PGE_${DateFormat('yyyyMMdd').format(DateTime.now())}.pdf',
       );
-      if (mounted) _showSnackBar('✅ PDF laporan siap dibagikan');
+      if (mounted) _showSnackBar('✅ PDF laporan berhasil dibuat');
     } catch (e) {
       if (mounted) _showSnackBar('Gagal export: $e', isError: true);
     } finally {
@@ -1151,87 +1220,131 @@ class _ReportPageState extends State<ReportPage>
     }
   }
 
+  // ═══════════════════════════════════════════════════
+  // PDF HEADER - PROFESSIONAL PERTAMINA
+  // ═══════════════════════════════════════════════════
+
   pw.Widget _buildPdfHeader(pw.Context context) {
     return pw.Container(
-      padding: const pw.EdgeInsets.only(bottom: 12),
+      padding: const pw.EdgeInsets.only(bottom: 16),
       decoration: pw.BoxDecoration(
         border: pw.Border(
-          bottom: pw.BorderSide(color: PdfColors.blue900, width: 2),
+          bottom: pw.BorderSide(color: PdfColors.grey300, width: 1),
         ),
       ),
       child: pw.Row(
-        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
         children: [
+          // Logo PERTAMINA PGE
           pw.Container(
-            width: 55,
-            height: 55,
+            width: 120,
+            height: 45,
             decoration: pw.BoxDecoration(
-              gradient: pw.LinearGradient(
-                colors: [PdfColors.blue900, PdfColors.blue700],
-              ),
-              borderRadius: pw.BorderRadius.circular(10),
+              color: PdfColors.blue900,
+              borderRadius: pw.BorderRadius.circular(6),
             ),
-            child: pw.Center(
-              child: pw.Text(
-                'PGE',
-                style: pw.TextStyle(
-                  fontSize: 16,
-                  fontWeight: pw.FontWeight.bold,
-                  color: PdfColors.white,
+            child: pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.center,
+              children: [
+                pw.Container(
+                  width: 24,
+                  height: 24,
+                  decoration: const pw.BoxDecoration(
+                    color: PdfColors.white,
+                    shape: pw.BoxShape.circle,
+                  ),
+                  child: pw.Center(
+                    child: pw.Text(
+                      'P',
+                      style: pw.TextStyle(
+                        fontSize: 14,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.blue900,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+                pw.SizedBox(width: 6),
+                pw.Column(
+                  mainAxisAlignment: pw.MainAxisAlignment.center,
+                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                  children: [
+                    pw.Text(
+                      'PERTAMINA',
+                      style: pw.TextStyle(
+                        fontSize: 7,
+                        fontWeight: pw.FontWeight.bold,
+                        color: PdfColors.white,
+                        letterSpacing: 1.5,
+                      ),
+                    ),
+                    pw.Text(
+                      'GEOTHERMAL ENERGY',
+                      style: pw.TextStyle(
+                        fontSize: 5.5,
+                        color: PdfColors.blue200,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
           ),
-          pw.SizedBox(width: 16),
+          pw.SizedBox(width: 20),
+          // Vertical divider
+          pw.Container(
+            width: 1,
+            height: 35,
+            color: PdfColors.grey400,
+          ),
+          pw.SizedBox(width: 20),
+          // Company info
           pw.Expanded(
             child: pw.Column(
               crossAxisAlignment: pw.CrossAxisAlignment.start,
+              mainAxisAlignment: pw.MainAxisAlignment.center,
               children: [
                 pw.Text(
-                  'PT PERTAMINA GEOTHERMAL ENERGY',
+                  'PT PERTAMINA GEOTHERMAL ENERGY Tbk',
                   style: pw.TextStyle(
-                    fontSize: 13,
+                    fontSize: 9,
                     fontWeight: pw.FontWeight.bold,
                     color: PdfColors.blue900,
                   ),
                 ),
+                pw.SizedBox(height: 2),
                 pw.Text(
-                  'AREA KAMOJANG',
+                  'Area Kamojang - West Java',
                   style: pw.TextStyle(
-                    fontSize: 11,
-                    fontWeight: pw.FontWeight.bold,
-                    color: PdfColors.blue700,
-                  ),
-                ),
-                pw.SizedBox(height: 6),
-                pw.Text(
-                  'LAPORAN LEMBUR & PENDAPATAN MITRA',
-                  style: pw.TextStyle(
-                    fontSize: 15,
-                    fontWeight: pw.FontWeight.bold,
-                    color: PdfColors.blue900,
+                    fontSize: 7,
+                    color: PdfColors.grey700,
                   ),
                 ),
               ],
             ),
           ),
+          // Document info
           pw.Container(
-            padding: const pw.EdgeInsets.all(10),
+            padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: pw.BoxDecoration(
-              color: PdfColors.blue50,
-              borderRadius: pw.BorderRadius.circular(8),
-              border: pw.Border.all(color: PdfColors.blue200),
+              border: pw.Border.all(color: PdfColors.grey300),
+              borderRadius: pw.BorderRadius.circular(4),
             ),
             child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: [
                 pw.Text(
-                  'Kode: FRM-PGE-KMJ-001',
-                  style: pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
+                  'Doc. No: FRM-HRD-001',
+                  style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600),
                 ),
-                pw.SizedBox(height: 2),
                 pw.Text(
-                  'Rev: 01',
-                  style: pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
+                  'Rev: 02',
+                  style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600),
+                ),
+                pw.Text(
+                  'Date: ${DateFormat('dd/MM/yyyy').format(DateTime.now())}',
+                  style: pw.TextStyle(fontSize: 6, color: PdfColors.grey600),
                 ),
               ],
             ),
@@ -1241,64 +1354,86 @@ class _ReportPageState extends State<ReportPage>
     );
   }
 
+  // ═══════════════════════════════════════════════════
+  // PDF FOOTER
+  // ═══════════════════════════════════════════════════
+
   pw.Widget _buildPdfFooter(pw.Context context) {
     return pw.Container(
-      padding: const pw.EdgeInsets.only(top: 10),
+      padding: const pw.EdgeInsets.only(top: 8),
       decoration: pw.BoxDecoration(
-        border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300, width: 1)),
+        border: pw.Border(top: pw.BorderSide(color: PdfColors.grey300, width: 0.5)),
       ),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: [
           pw.Text(
-            'Dicetak: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}',
-            style: pw.TextStyle(fontSize: 7, color: PdfColors.grey500),
+            'Confidential - For Internal Use Only',
+            style: pw.TextStyle(fontSize: 6, color: PdfColors.grey500),
+          ),
+          pw.Row(
+            children: [
+              pw.Text(
+                'Page ',
+                style: pw.TextStyle(fontSize: 6, color: PdfColors.grey500),
+              ),
+              pw.Text(
+                '${context.pageNumber}',
+                style: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
+              ),
+              pw.Text(
+                ' of ${context.pagesCount}',
+                style: pw.TextStyle(fontSize: 6, color: PdfColors.grey500),
+              ),
+            ],
           ),
           pw.Text(
-            'Halaman ${context.pageNumber} dari ${context.pagesCount}',
-            style: pw.TextStyle(fontSize: 7, color: PdfColors.grey500),
-          ),
-          pw.Text(
-            'Confidential - PGE Kamojang',
-            style: pw.TextStyle(fontSize: 7, color: PdfColors.grey500),
+            'Printed: ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}',
+            style: pw.TextStyle(fontSize: 6, color: PdfColors.grey500),
           ),
         ],
       ),
     );
   }
 
-  pw.Widget _buildPdfTitleSection() {
+  // ═══════════════════════════════════════════════════
+  // PDF TITLE
+  // ═══════════════════════════════════════════════════
+
+  pw.Widget _buildPdfTitle() {
     return pw.Container(
-      padding: const pw.EdgeInsets.all(14),
+      padding: const pw.EdgeInsets.all(20),
       decoration: pw.BoxDecoration(
-        gradient: pw.LinearGradient(
-          colors: [PdfColors.blue50, PdfColors.blue100],
-        ),
-        borderRadius: pw.BorderRadius.circular(10),
-        border: pw.Border.all(color: PdfColors.blue200),
+        color: PdfColors.blue50,
+        borderRadius: pw.BorderRadius.circular(4),
+        border: pw.Border.all(color: PdfColors.blue100, width: 0.5),
       ),
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: [
           pw.Text(
-            'RINGKASAN LAPORAN',
+            'LAPORAN LEMBUR & PENDAPATAN MITRA',
             style: pw.TextStyle(
-              fontSize: 12,
+              fontSize: 14,
               fontWeight: pw.FontWeight.bold,
               color: PdfColors.blue900,
+              letterSpacing: 1,
             ),
           ),
-          pw.SizedBox(height: 8),
+          pw.SizedBox(height: 4),
+          pw.Container(
+            width: 60,
+            height: 2,
+            color: PdfColors.orange600,
+          ),
+          pw.SizedBox(height: 10),
           pw.Row(
             children: [
-              pw.Expanded(child: _pdfInfoItem('Periode', ReportService.formatBulanLabel(_selectedBulan))),
-              pw.Expanded(child: _pdfInfoItem('Total Laporan', '${_items.length}')),
-              pw.Expanded(
-                child: _pdfInfoItem(
-                  'Status',
-                  _selectedStatus == 'semua' ? 'Semua' : _selectedStatus,
-                ),
-              ),
+              _pdfLabelValue('Periode', ReportService.formatBulanLabel(_selectedBulan)),
+              pw.SizedBox(width: 40),
+              _pdfLabelValue('Total Laporan', '${_filteredItems.length}'),
+              pw.SizedBox(width: 40),
+              _pdfLabelValue('Dibuat Oleh', widget.userName ?? 'System'),
             ],
           ),
         ],
@@ -1306,16 +1441,19 @@ class _ReportPageState extends State<ReportPage>
     );
   }
 
-  pw.Widget _pdfInfoItem(String label, String value) {
+  pw.Widget _pdfLabelValue(String label, String value) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.start,
       children: [
-        pw.Text(label, style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+        pw.Text(
+          label,
+          style: pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
+        ),
         pw.SizedBox(height: 2),
         pw.Text(
           value,
           style: pw.TextStyle(
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: pw.FontWeight.bold,
             color: PdfColors.blue900,
           ),
@@ -1324,192 +1462,304 @@ class _ReportPageState extends State<ReportPage>
     );
   }
 
-  pw.Widget _buildPdfFilterInfo() {
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(10),
-      decoration: pw.BoxDecoration(
-        border: pw.Border.all(color: PdfColors.grey200),
-        borderRadius: pw.BorderRadius.circular(6),
-      ),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-        children: [
-          pw.Text(
-            'Filter: ${_selectedStatus} | ${_selectedAbsensi}',
-            style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
-          ),
-          pw.Text(
-            'Dibuat oleh: ${widget.userName ?? "System"}',
-            style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
-          ),
-        ],
-      ),
-    );
-  }
+  // ═══════════════════════════════════════════════════
+  // PDF SUMMARY CARDS
+  // ═══════════════════════════════════════════════════
 
-  pw.Widget _buildPdfSummaryBox(List<LaporanItem> items) {
-    final totalPendapatan = items.fold<double>(0, (sum, item) => sum + item.biayaAktual);
-    final totalJam = items.fold<double>(0, (sum, item) => sum + item.totalJam);
-    final sudahDibayar = items.where((i) => i.isPaid).length;
-    final belumDibayar = items.where((i) => !i.isPaid).length;
-
-    return pw.Container(
-      padding: const pw.EdgeInsets.all(14),
-      decoration: pw.BoxDecoration(
-        gradient: pw.LinearGradient(colors: [PdfColors.blue800, PdfColors.blue900]),
-        borderRadius: pw.BorderRadius.circular(10),
-      ),
-      child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-        children: [
-          _pdfSummaryItem('Total Pendapatan', ReportService.formatRupiah(totalPendapatan), PdfColors.orange200),
-          _pdfSummaryItem('Total Jam', totalJam.toStringAsFixed(1), PdfColors.blue100),
-          _pdfSummaryItem('Sudah Dibayar', '$sudahDibayar', PdfColors.green200),
-          _pdfSummaryItem('Belum Dibayar', '$belumDibayar', PdfColors.yellow200),
-        ],
-      ),
-    );
-  }
-
-  pw.Widget _pdfSummaryItem(String label, String value, PdfColor color) {
-    return pw.Column(
+  pw.Widget _buildPdfSummaryCards(double totalPendapatan, double totalJam, int sudahDibayar, int belumDibayar) {
+    return pw.Row(
       children: [
-        pw.Text(
-          value,
-          style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold, color: PdfColors.white),
+        _buildSummaryCard(
+          'Total Pendapatan',
+          ReportService.formatRupiah(totalPendapatan),
+          PdfColors.blue800,
+          PdfColors.blue50,
         ),
-        pw.SizedBox(height: 3),
-        pw.Text(label, style: pw.TextStyle(fontSize: 8, color: color)),
+        pw.SizedBox(width: 10),
+        _buildSummaryCard(
+          'Total Jam Kerja',
+          '${totalJam.toStringAsFixed(1)} Jam',
+          PdfColors.blue700,
+          PdfColors.blue50,
+        ),
+        pw.SizedBox(width: 10),
+        _buildSummaryCard(
+          'Sudah Dibayar',
+          '$sudahDibayar Laporan',
+          PdfColors.green700,
+          PdfColors.green50,
+        ),
+        pw.SizedBox(width: 10),
+        _buildSummaryCard(
+          'Belum Dibayar',
+          '$belumDibayar Laporan',
+          PdfColors.orange700,
+          PdfColors.orange50,
+        ),
       ],
     );
   }
+
+  pw.Widget _buildSummaryCard(String title, String value, PdfColor textColor, PdfColor bgColor) {
+    return pw.Expanded(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.all(14),
+        decoration: pw.BoxDecoration(
+          color: bgColor,
+          borderRadius: pw.BorderRadius.circular(4),
+          border: pw.Border.all(color: textColor, width: 0.5),
+        ),
+        child: pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.start,
+          children: [
+            pw.Text(
+              title,
+              style: pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
+            ),
+            pw.SizedBox(height: 4),
+            pw.Text(
+              value,
+              style: pw.TextStyle(
+                fontSize: 12,
+                fontWeight: pw.FontWeight.bold,
+                color: textColor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════
+  // PDF SECTION HEADER
+  // ═══════════════════════════════════════════════════
+
+  pw.Widget _buildPdfSectionHeader(String title) {
+    return pw.Row(
+      children: [
+        pw.Container(
+          width: 3,
+          height: 16,
+          color: PdfColors.blue800,
+        ),
+        pw.SizedBox(width: 8),
+        pw.Text(
+          title,
+          style: pw.TextStyle(
+            fontSize: 10,
+            fontWeight: pw.FontWeight.bold,
+            color: PdfColors.blue900,
+            letterSpacing: 0.5,
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════
+  // PDF INFO BAR
+  // ═══════════════════════════════════════════════════
+
+  pw.Widget _buildPdfInfoBar() {
+    return pw.Container(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.grey100,
+        borderRadius: pw.BorderRadius.circular(3),
+      ),
+      child: pw.Row(
+        children: [
+          pw.Text(
+            'Filter: ',
+            style: pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
+          ),
+          pw.Text(
+            'Status: ${_selectedStatus == 'semua' ? 'All' : _selectedStatus}',
+            style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
+          ),
+          pw.SizedBox(width: 16),
+          pw.Text(
+            'Absensi: ${_selectedAbsensi == 'semua' ? 'All' : _selectedAbsensi}',
+            style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
+          ),
+          if (_selectedPaidFilter != null) ...[
+            pw.SizedBox(width: 16),
+            pw.Text(
+              'Pembayaran: ${_selectedPaidFilter == 'true' ? 'Sudah Dibayar' : 'Belum Dibayar'}',
+              style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // ═══════════════════════════════════════════════════
+  // PDF DATE HEADER
+  // ═══════════════════════════════════════════════════
 
   pw.Widget _buildPdfDateHeader(String dateKey, List<LaporanItem> items) {
     final date = DateFormat('yyyy-MM-dd').parse(dateKey);
     final formattedDate = DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(date);
+    final subtotal = items.fold<double>(0, (sum, i) => sum + i.biayaAktual);
+
     return pw.Container(
-      padding: const pw.EdgeInsets.symmetric(vertical: 10, horizontal: 10),
+      margin: const pw.EdgeInsets.only(top: 12, bottom: 4),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: pw.BoxDecoration(
-        color: PdfColors.blue100,
-        borderRadius: pw.BorderRadius.circular(6),
+        color: PdfColors.blue50,
+        borderRadius: pw.BorderRadius.circular(3),
       ),
       child: pw.Row(
         children: [
-          pw.Icon(pw.IconData(0xe610), size: 14, color: PdfColors.blue900),
-          pw.SizedBox(width: 8),
           pw.Text(
             formattedDate,
-            style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
+            style: pw.TextStyle(
+              fontSize: 9,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.blue900,
+            ),
+          ),
+          pw.SizedBox(width: 12),
+          pw.Text(
+            '${items.length} laporan',
+            style: pw.TextStyle(fontSize: 8, color: PdfColors.blue700),
           ),
           pw.Spacer(),
           pw.Text(
-            '${items.length} laporan',
-            style: pw.TextStyle(fontSize: 9, color: PdfColors.blue700),
+            'Subtotal: ${ReportService.formatRupiah(subtotal)}',
+            style: pw.TextStyle(
+              fontSize: 8,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.blue800,
+            ),
           ),
         ],
       ),
     );
   }
 
-  pw.Widget _buildPdfDetailTable(List<LaporanItem> items) {
-    return pw.Table(
-      border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-      columnWidths: const {
-        0: pw.FixedColumnWidth(20),
-        1: pw.FixedColumnWidth(60),
-        2: pw.FixedColumnWidth(38),
-        3: pw.FixedColumnWidth(38),
-        4: pw.FixedColumnWidth(48),
-        5: pw.FixedColumnWidth(48),
-        6: pw.FixedColumnWidth(48),
-        7: pw.FixedColumnWidth(24),
-        8: pw.FixedColumnWidth(24),
-        9: pw.FixedColumnWidth(32),
-      },
-      children: [
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.blue200),
-          children: [
-            _pdfTblHdr('No'),
-            _pdfTblHdr('Nama Mitra'),
-            _pdfTblHdr('Jam'),
-            _pdfTblHdr('Durasi'),
-            _pdfTblHdr('Check-In'),
-            _pdfTblHdr('Check-Out'),
-            _pdfTblHdr('Pendapatan'),
-            _pdfTblHdr('Foto'),
-            _pdfTblHdr('Bayar'),
-            _pdfTblHdr('Status'),
-          ],
+  // ═══════════════════════════════════════════════════
+  // PDF TABLE - PROFESSIONAL MINIMALIST
+  // ═══════════════════════════════════════════════════
+
+  pw.Widget _buildPdfTable(List<LaporanItem> items) {
+    return pw.Container(
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.grey300, width: 0.5),
+        borderRadius: pw.BorderRadius.circular(3),
+      ),
+      child: pw.Table(
+        border: pw.TableBorder(
+          horizontalInside: pw.BorderSide(color: PdfColors.grey200, width: 0.3),
         ),
-        ...items.asMap().entries.map((e) {
-          final i = e.value;
-          return pw.TableRow(
-            decoration: pw.BoxDecoration(color: e.key.isEven ? PdfColors.white : PdfColors.grey100),
-            children: [
-              _pdfTblCell('${e.key + 1}', align: pw.TextAlign.center),
-              _pdfTblCell(i.namaMitra ?? '-'),
-              _pdfTblCell('${i.jamMulai}-${i.jamSelesai}', fontSize: 6),
-              _pdfTblCell(i.totalJam.toStringAsFixed(1), align: pw.TextAlign.center),
-              _pdfTblCell(i.checkInFormatted, align: pw.TextAlign.center),
-              _pdfTblCell(i.checkOutFormatted, align: pw.TextAlign.center),
-              _pdfTblCell(i.biayaFormatted),
-              _pdfTblCell(
-                (i.checkInFotoUrl != null && i.checkInFotoUrl!.isNotEmpty) ? '✓' : '-',
-                align: pw.TextAlign.center,
-                color: PdfColors.green700,
-              ),
-              _pdfTblCell(
-                i.isPaid ? '✅' : '❌',
-                align: pw.TextAlign.center,
-                color: i.isPaid ? PdfColors.green700 : PdfColors.red700,
-              ),
-              _pdfTblCell(i.statusLabel, align: pw.TextAlign.center, fontSize: 6),
-            ],
-          );
-        }),
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.blue50),
-          children: [
-            _pdfTblCell('', colSpan: 3),
-            _pdfTblCell('Subtotal', fontWeight: pw.FontWeight.bold),
-            _pdfTblCell('', colSpan: 2),
-            _pdfTblCell(
-              ReportService.formatRupiah(items.fold<double>(0, (sum, item) => sum + item.biayaAktual)),
-              fontWeight: pw.FontWeight.bold,
+        columnWidths: const {
+          0: pw.FixedColumnWidth(25),
+          1: pw.FixedColumnWidth(75),
+          2: pw.FixedColumnWidth(55),
+          3: pw.FixedColumnWidth(40),
+          4: pw.FixedColumnWidth(70),
+          5: pw.FixedColumnWidth(70),
+          6: pw.FixedColumnWidth(80),
+          7: pw.FixedColumnWidth(55),
+        },
+        children: [
+          // Header
+          pw.TableRow(
+            decoration: const pw.BoxDecoration(
+              color: PdfColors.blue800,
             ),
-            _pdfTblCell('', colSpan: 3),
-          ],
-        ),
-      ],
+            children: [
+              _pdfTableHeader('No'),
+              _pdfTableHeader('Nama Mitra'),
+              _pdfTableHeader('Jam Lembur'),
+              _pdfTableHeader('Durasi'),
+              _pdfTableHeader('Check-In'),
+              _pdfTableHeader('Check-Out'),
+              _pdfTableHeader('Pendapatan'),
+              _pdfTableHeader('Status'),
+            ],
+          ),
+          // Data rows
+          ...items.asMap().entries.map((entry) {
+            final i = entry.value;
+            final isEven = entry.key.isEven;
+
+            return pw.TableRow(
+              decoration: pw.BoxDecoration(
+                color: isEven ? PdfColors.white : PdfColors.grey50,
+              ),
+              children: [
+                _pdfTableCell('${entry.key + 1}', align: pw.TextAlign.center, isBold: false),
+                _pdfTableCell(i.namaMitra ?? '-', isBold: true),
+                _pdfTableCell('${i.jamMulai} - ${i.jamSelesai}', fontSize: 8),
+                _pdfTableCell(i.totalJam.toStringAsFixed(1), align: pw.TextAlign.center),
+                _pdfTableCell(
+                  i.checkInTime != null
+                      ? DateFormat('HH:mm').format(i.checkInTime!)
+                      : '-',
+                  align: pw.TextAlign.center,
+                  fontSize: 8,
+                ),
+                _pdfTableCell(
+                  i.checkOutTime != null
+                      ? DateFormat('HH:mm').format(i.checkOutTime!)
+                      : '-',
+                  align: pw.TextAlign.center,
+                  fontSize: 8,
+                ),
+                _pdfTableCell(
+                  i.biayaFormatted,
+                  color: PdfColors.blue900,
+                  isBold: true,
+                  fontSize: 9,
+                ),
+                _pdfTableCell(
+                  i.isPaid ? 'SUDAH DIBAYAR' : 'BELUM',
+                  align: pw.TextAlign.center,
+                  color: i.isPaid ? PdfColors.green700 : PdfColors.orange700,
+                  isBold: true,
+                  fontSize: 7,
+                ),
+              ],
+            );
+          }),
+        ],
+      ),
     );
   }
 
-  pw.Widget _pdfTblHdr(String text) => pw.Padding(
-    padding: const pw.EdgeInsets.all(4),
-    child: pw.Text(
-      text,
-      style: pw.TextStyle(fontSize: 7, fontWeight: pw.FontWeight.bold, color: PdfColors.blue900),
-      textAlign: pw.TextAlign.center,
-      maxLines: 1,
-      overflow: pw.TextOverflow.clip,
-    ),
-  );
+  pw.Widget _pdfTableHeader(String text) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      child: pw.Text(
+        text,
+        style: pw.TextStyle(
+          fontSize: 7,
+          fontWeight: pw.FontWeight.bold,
+          color: PdfColors.white,
+          letterSpacing: 0.5,
+        ),
+        textAlign: pw.TextAlign.center,
+      ),
+    );
+  }
 
-  pw.Widget _pdfTblCell(String text, {
+  pw.Widget _pdfTableCell(
+    String text, {
     pw.TextAlign? align,
-    pw.FontWeight? fontWeight,
-    double fontSize = 7,
+    bool isBold = false,
+    double fontSize = 9,
     PdfColor? color,
-    int colSpan = 1,
   }) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.all(3),
+      padding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 7),
       child: pw.Text(
         text,
         style: pw.TextStyle(
           fontSize: fontSize,
-          fontWeight: fontWeight ?? pw.FontWeight.normal,
+          fontWeight: isBold ? pw.FontWeight.bold : pw.FontWeight.normal,
           color: color ?? PdfColors.black,
         ),
         textAlign: align ?? pw.TextAlign.left,
@@ -1519,41 +1769,127 @@ class _ReportPageState extends State<ReportPage>
     );
   }
 
-  pw.Widget _buildPdfSignatureSection() {
+  // ═══════════════════════════════════════════════════
+  // PDF GRAND TOTAL
+  // ═══════════════════════════════════════════════════
+
+  pw.Widget _buildPdfGrandTotal(List<LaporanItem> items) {
+    final totalPendapatan = items.fold<double>(0, (sum, i) => sum + i.biayaAktual);
+    final totalJam = items.fold<double>(0, (sum, i) => sum + i.totalJam);
+    final sudahDibayar = items.where((i) => i.isPaid).length;
+    final belumDibayar = items.where((i) => !i.isPaid).length;
+
     return pw.Container(
-      padding: const pw.EdgeInsets.only(top: 30),
+      padding: const pw.EdgeInsets.all(16),
+      decoration: pw.BoxDecoration(
+        color: PdfColors.blue800,
+        borderRadius: pw.BorderRadius.circular(4),
+      ),
       child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
         children: [
-          _buildPdfSignatureBox('Disiapkan oleh,', widget.userName ?? 'Superadmin', 'Superadmin / Admin'),
-          _buildPdfSignatureBox('Diperiksa oleh,', '(...........................)', 'Supervisor'),
-          _buildPdfSignatureBox('Disetujui oleh,', '(...........................)', 'Manager'),
+          _grandTotalItem('GRAND TOTAL', ReportService.formatRupiah(totalPendapatan)),
+          pw.Container(width: 1, height: 30, color: PdfColors.grey400),
+          _grandTotalItem('Total Jam', '${totalJam.toStringAsFixed(1)} Jam'),
+          pw.Container(width: 1, height: 30, color: PdfColors.grey400),
+          _grandTotalItem('Dibayar', '$sudahDibayar'),
+          pw.Container(width: 1, height: 30, color: PdfColors.grey400),
+          _grandTotalItem('Belum', '$belumDibayar'),
         ],
       ),
     );
   }
 
-  pw.Widget _buildPdfSignatureBox(String label, String name, String position) {
+  pw.Widget _grandTotalItem(String label, String value) {
+    return pw.Column(
+      children: [
+        pw.Text(
+          value,
+          style: pw.TextStyle(fontSize: 7, color: PdfColors.blue100),
+        ),
+        pw.SizedBox(height: 2),
+        pw.Text(
+          label,
+          style: pw.TextStyle(fontSize: 7, color: PdfColors.blue200),
+        ),
+      ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════
+  // PDF SIGNATURE
+  // ═══════════════════════════════════════════════════
+
+  pw.Widget _buildPdfSignature() {
+    final now = DateFormat('dd MMMM yyyy', 'id_ID').format(DateTime.now());
+
     return pw.Container(
-      width: 150,
+      padding: const pw.EdgeInsets.only(top: 20),
       child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.end,
         children: [
-          pw.Text(label, style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600)),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.end,
+            children: [
+              pw.Text(
+                'Kamojang, $now',
+                style: pw.TextStyle(fontSize: 9, color: PdfColors.black),
+              ),
+            ],
+          ),
+          pw.SizedBox(height: 40),
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              _signatureBox('Disiapkan Oleh,', widget.userName ?? '_________________', 'Admin / PIC'),
+              _signatureBox('Diperiksa Oleh,', '_________________', 'Supervisor'),
+              _signatureBox('Disetujui Oleh,', '_________________', 'Manager'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  pw.Widget _signatureBox(String label, String name, String position) {
+    return pw.Container(
+      width: 140,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        children: [
+          pw.Text(
+            label,
+            style: pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+            textAlign: pw.TextAlign.center,
+          ),
           pw.SizedBox(height: 40),
           pw.Container(
-            width: 120,
+            width: 100,
             child: pw.Divider(color: PdfColors.black, thickness: 0.5),
           ),
-          pw.SizedBox(height: 4),
-          pw.Text(name, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.black)),
-          pw.Text(position, style: pw.TextStyle(fontSize: 7, color: PdfColors.grey600)),
+          pw.SizedBox(height: 6),
+          pw.Text(
+            name,
+            style: pw.TextStyle(
+              fontSize: 9,
+              fontWeight: pw.FontWeight.bold,
+              color: PdfColors.black,
+            ),
+            textAlign: pw.TextAlign.center,
+          ),
+          pw.SizedBox(height: 2),
+          pw.Text(
+            position,
+            style: pw.TextStyle(fontSize: 7, color: PdfColors.grey600),
+            textAlign: pw.TextAlign.center,
+          ),
         ],
       ),
     );
   }
 
   // ═══════════════════════════════════════════════════
-  // 🔥🔥🔥 UI BUILD - V7 ULTIMATE MOBILE UI
+  // 🔥🔥🔥 UI BUILD - V8 PROFESSIONAL
   // ═══════════════════════════════════════════════════
 
   @override
@@ -1562,9 +1898,6 @@ class _ReportPageState extends State<ReportPage>
       key: _scaffoldKey,
       backgroundColor: PGEColors.bg,
       appBar: _buildAppBar(),
-      // ═══════════════════════════════════════════════════
-      // ✅ BOTTOM NAVIGATION BAR DITAMBAHKAN
-      // ═══════════════════════════════════════════════════
       bottomNavigationBar: (widget.userRole.isNotEmpty || _actualUserRole.isNotEmpty)
           ? AppBottomNav(
               userRole: widget.userRole.isNotEmpty ? widget.userRole : _actualUserRole,
@@ -1614,11 +1947,10 @@ class _ReportPageState extends State<ReportPage>
                   ],
                 ),
       floatingActionButton: _buildDynamicFAB(),
-      // ⬇️ HAPUS bottomNavigationBar: _buildBottomBar() yang lama
     );
   }
 
-Widget _buildHeaderSummary() {
+  Widget _buildHeaderSummary() {
     return Container(
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
       decoration: BoxDecoration(
@@ -1690,9 +2022,7 @@ Widget _buildHeaderSummary() {
     );
   }
 
-  // PERBAIKAN: Ganti bagian _buildHeaderStat yang bermasalah
-Widget _buildHeaderStat(String value, String label) {
-    // HAPUS WRAP DAN FLEXIBLE, gunakan Column langsung
+  Widget _buildHeaderStat(String value, String label) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
@@ -1708,8 +2038,8 @@ Widget _buildHeaderStat(String value, String label) {
             child: Text(
               value,
               style: GoogleFonts.poppins(
-                fontSize: 14, 
-                fontWeight: FontWeight.w700, 
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
                 color: Colors.white,
               ),
             ),
@@ -1718,7 +2048,7 @@ Widget _buildHeaderStat(String value, String label) {
           Text(
             label,
             style: GoogleFonts.poppins(
-              fontSize: 9, 
+              fontSize: 9,
               color: Colors.white70,
             ),
           ),
@@ -1775,20 +2105,19 @@ Widget _buildHeaderStat(String value, String label) {
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
-      // PERBAIKAN: Gunakan title dengan Flexible dan hilangkan Row yang terlalu sempit
       title: Text(
         '📊 Laporan Lembur',
         style: GoogleFonts.poppins(
-          fontWeight: FontWeight.w700, 
+          fontWeight: FontWeight.w700,
           fontSize: 15,
           color: Colors.white,
         ),
-        overflow: TextOverflow.ellipsis, // Ini mencegah pemotongan paksa
+        overflow: TextOverflow.ellipsis,
       ),
       backgroundColor: PGEColors.primary,
       foregroundColor: Colors.white,
       elevation: 0,
-      titleSpacing: 0, // Beri ruang lebih untuk title
+      titleSpacing: 0,
       leading: Container(
         margin: const EdgeInsets.all(8),
         padding: const EdgeInsets.all(6),
@@ -1853,65 +2182,6 @@ Widget _buildHeaderStat(String value, String label) {
     );
   }
 
-  Widget _buildBottomBar() {
-    if (!_isSuperadmin || !_hasBisaDibayar) return const SizedBox.shrink();
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: PGEColors.surface,
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.08),
-            blurRadius: 8,
-            offset: const Offset(0, -2),
-          ),
-        ],
-      ),
-      child: SafeArea(
-        child: Row(
-          children: [
-            Expanded(
-              child: Container(
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                decoration: BoxDecoration(
-                  color: PGEColors.warning.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Row(
-                  children: [
-                    const Icon(Icons.pending_actions, size: 16, color: PGEColors.warning),
-                    const SizedBox(width: 6),
-                    Text(
-                      '$_bisaDibayarCount siap dibayar',
-                      style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: PGEColors.warning),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            ElevatedButton.icon(
-              onPressed: _tandaiSemuaDibayar,
-              icon: const Icon(Icons.check_circle, size: 16),
-              label: Text(
-                'Bayar Semua',
-                style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w700),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: PGEColors.success,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                elevation: 2,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget? _buildDynamicFAB() {
     if (!_isSuperadmin || !_hasBisaDibayar) return null;
 
@@ -1933,7 +2203,7 @@ Widget _buildHeaderStat(String value, String label) {
   }
 
   // ═══════════════════════════════════════════════════
-  // FILTER SECTION - ENHANCED
+  // FILTER SECTION
   // ═══════════════════════════════════════════════════
 
   Widget _buildFilterSection() {
@@ -2094,7 +2364,7 @@ Widget _buildHeaderStat(String value, String label) {
 
   void _showAbsensiPicker() => _showPicker(
         'Filter Status Absensi',
-        ['semua', 'selesai', 'selesai_terlambat', 'check_in', 'belum_absen', 'tidak_lembur', 'expired'],
+        ['semua', 'selesai', 'selesai_terlambat', 'selesai_terlambat_checkout', 'check_in', 'belum_absen', 'tidak_lembur', 'expired'],
         _selectedAbsensi,
         onSelected: (v) {
           setState(() => _selectedAbsensi = v!);
@@ -2193,7 +2463,7 @@ Widget _buildHeaderStat(String value, String label) {
   }
 
   // ═══════════════════════════════════════════════════
-  // CONTENT TABS - V7
+  // CONTENT TABS
   // ═══════════════════════════════════════════════════
 
   Widget _buildContent() {
@@ -2304,7 +2574,8 @@ Widget _buildHeaderStat(String value, String label) {
   Widget _buildLemburCard(LaporanItem item) {
     final hasCheckInFoto = item.checkInFotoUrl != null && item.checkInFotoUrl!.isNotEmpty;
     final hasCheckOutFoto = item.checkOutFotoUrl != null && item.checkOutFotoUrl!.isNotEmpty;
-    final isTerlambat = item.absensiStatus == 'selesai_terlambat';
+    final isTerlambat = item.absensiStatus == 'selesai_terlambat' ||
+        item.absensiStatus == 'selesai_terlambat_checkout';
 
     String formatFull(DateTime? dt) {
       if (dt == null) return '-';
@@ -2323,7 +2594,6 @@ Widget _buildHeaderStat(String value, String label) {
           padding: const EdgeInsets.all(14),
           child: Column(
             children: [
-              // Header
               Row(
                 children: [
                   Container(
@@ -2389,8 +2659,6 @@ Widget _buildHeaderStat(String value, String label) {
                 ],
               ),
               const SizedBox(height: 12),
-
-              // Absensi Info
               if (!isTerlambat) ...[
                 Row(
                   children: [
@@ -2502,16 +2770,22 @@ Widget _buildHeaderStat(String value, String label) {
                 ),
               ],
               const SizedBox(height: 10),
-
-              // Footer
               Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  _chip(Icons.timer_rounded, item.durasiFormatted, PGEColors.warning),
-                  const SizedBox(width: 6),
-                  _chip(item.absensiIcon, item.absensiLabel, item.absensiColor),
-                  const SizedBox(width: 6),
-                  _chip(Icons.person, item.fungsiMitra ?? '-', PGEColors.info),
-                  const Spacer(),
+                  Expanded(
+                    child: Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _chip(Icons.timer_rounded, item.durasiFormatted, PGEColors.warning),
+                        _chip(item.absensiIcon, item.absensiLabel, item.absensiColor),
+                        _chip(Icons.person, item.fungsiMitra ?? '-', PGEColors.info),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Text(
                     item.biayaFormatted,
                     style: GoogleFonts.poppins(
@@ -2627,7 +2901,8 @@ Widget _buildHeaderStat(String value, String label) {
               item.namaMitra ?? '',
               style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600),
             ),
-            if (item.absensiStatus == 'selesai_terlambat') ...[
+            if (item.absensiStatus == 'selesai_terlambat' ||
+                item.absensiStatus == 'selesai_terlambat_checkout') ...[
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(10),
@@ -2791,7 +3066,7 @@ Widget _buildHeaderStat(String value, String label) {
     );
   }
 
-  // ─── TAB 2: RINGKASAN ENHANCED ───
+  // ─── TAB 2: RINGKASAN ───
 
   Widget _buildRingkasanTab() {
     final totalPendapatanDibayar = _totalPendapatanDibayar;
@@ -3101,7 +3376,7 @@ Widget _buildHeaderStat(String value, String label) {
     );
   }
 
-  // ─── TAB 3: ANALYTICS TAB (NEW) ───
+  // ─── TAB 3: ANALYTICS ───
 
   Widget _buildAnalyticsTab() {
     final mitraStats = _getMitraStats();
@@ -3271,7 +3546,9 @@ Widget _buildHeaderStat(String value, String label) {
   Widget _buildBayarTab() {
     final sudahDikerjakan = _items.where((i) {
       final statusValid = ['disetujui', 'selesai', 'approved'].contains(i.status);
-      final absensiSelesai = i.absensiStatus == 'selesai' || i.absensiStatus == 'selesai_terlambat';
+      final absensiSelesai = i.absensiStatus == 'selesai' ||
+          i.absensiStatus == 'selesai_terlambat' ||
+          i.absensiStatus == 'selesai_terlambat_checkout';
       return statusValid && absensiSelesai;
     }).toList();
 
@@ -3543,11 +3820,12 @@ Widget _buildHeaderStat(String value, String label) {
   }
 
   // ═══════════════════════════════════════════════════
-  // DETAIL SHEET - ENHANCED
+  // DETAIL SHEET
   // ═══════════════════════════════════════════════════
 
   void _showDetailSheet(LaporanItem item) {
-    final isTerlambat = item.absensiStatus == 'selesai_terlambat';
+    final isTerlambat = item.absensiStatus == 'selesai_terlambat' ||
+        item.absensiStatus == 'selesai_terlambat_checkout';
     final tampilkanPendapatan = item.isPaid || item.memenuhiSyaratBayar;
 
     showModalBottomSheet(
@@ -3577,8 +3855,8 @@ Widget _buildHeaderStat(String value, String label) {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Header with avatar
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
                           width: 48,
@@ -3601,63 +3879,82 @@ Widget _buildHeaderStat(String value, String label) {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  Flexible(
-                                    child: Text(
-                                      item.namaMitra ?? 'Unknown',
-                                      style: GoogleFonts.poppins(
-                                        fontSize: 17,
-                                        fontWeight: FontWeight.w700,
-                                        color: PGEColors.textPrimary,
-                                      ),
-                                    ),
-                                  ),
-                                  if (isTerlambat) ...[
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: PGEColors.warning.withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        'TERLAMBAT',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w700,
-                                          color: PGEColors.warning,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                  if (!tampilkanPendapatan) ...[
-                                    const SizedBox(width: 8),
-                                    Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                      decoration: BoxDecoration(
-                                        color: PGEColors.danger.withOpacity(0.2),
-                                        borderRadius: BorderRadius.circular(8),
-                                      ),
-                                      child: Text(
-                                        'BLM SYARAT',
-                                        style: GoogleFonts.poppins(
-                                          fontSize: 9,
-                                          fontWeight: FontWeight.w700,
-                                          color: PGEColors.danger,
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ],
+                              Text(
+                                item.namaMitra ?? 'Unknown',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 17,
+                                  fontWeight: FontWeight.w700,
+                                  color: PGEColors.textPrimary,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
                               ),
+                              const SizedBox(height: 4),
                               Text(
                                 item.tanggalFormatted,
                                 style: GoogleFonts.poppins(fontSize: 11, color: PGEColors.textHint),
                               ),
+                              if (item.absensiStatus != 'selesai' || !tampilkanPendapatan) ...[
+                                const SizedBox(height: 8),
+                                Wrap(
+                                  spacing: 6,
+                                  runSpacing: 6,
+                                  children: [
+                                    if (item.absensiStatus != 'selesai')
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: item.absensiColor.withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: item.absensiColor.withOpacity(0.4)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(item.absensiIcon, size: 11, color: item.absensiColor),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              item.absensiLabel.replaceAll(RegExp(r'[^\x00-\x7F]'), '').trim(),
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w700,
+                                                color: item.absensiColor,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    if (!tampilkanPendapatan)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        decoration: BoxDecoration(
+                                          color: PGEColors.danger.withOpacity(0.15),
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(color: PGEColors.danger.withOpacity(0.4)),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.error_outline_rounded, size: 11, color: PGEColors.danger),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              'BELUM MEMENUHI SYARAT',
+                                              style: GoogleFonts.poppins(
+                                                fontSize: 9,
+                                                fontWeight: FontWeight.w700,
+                                                color: PGEColors.danger,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
                             ],
                           ),
                         ),
+                        const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
@@ -3675,11 +3972,6 @@ Widget _buildHeaderStat(String value, String label) {
                         ),
                       ],
                     ),
-
-                    // PERBAIKAN: Tambahkan SingleChildScrollView dan batasi teks yang panjang
-                    // Di bagian _showDetailSheet, cari Row dengan "Belum Memenuhi Syarat"
-
-                    // GANTI BAGIAN INI (sekitar line 2800-an):
                     if (!tampilkanPendapatan) ...[
                       const SizedBox(height: 16),
                       Container(
@@ -3708,8 +4000,7 @@ Widget _buildHeaderStat(String value, String label) {
                                   child: const Icon(Icons.warning_amber_rounded, color: PGEColors.danger, size: 20),
                                 ),
                                 const SizedBox(width: 10),
-                                // PERBAIKAN: Bungkus dengan Flexible/Expanded dan batasi overflow
-                                Flexible( // GANTI Expanded JADI Flexible
+                                Flexible(
                                   child: Text(
                                     '⚠️ Belum Memenuhi',
                                     style: GoogleFonts.poppins(
@@ -3717,8 +4008,8 @@ Widget _buildHeaderStat(String value, String label) {
                                       fontWeight: FontWeight.w700,
                                       color: PGEColors.danger,
                                     ),
-                                    maxLines: 2, // TAMBAHKAN maxLines
-                                    overflow: TextOverflow.ellipsis, // TAMBAHKAN overflow
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ],
@@ -3727,8 +4018,8 @@ Widget _buildHeaderStat(String value, String label) {
                             Text(
                               'Pendapatan belum dapat ditampilkan karena persyaratan belum terpenuhi:',
                               style: GoogleFonts.poppins(fontSize: 11, color: PGEColors.textSecondary),
-                              maxLines: 3, // TAMBAHKAN maxLines
-                              overflow: TextOverflow.ellipsis, // TAMBAHKAN overflow
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 10),
                             ...item.syaratBelumTerpenuhi.map((syarat) => Padding(
@@ -3738,16 +4029,16 @@ Widget _buildHeaderStat(String value, String label) {
                                 children: [
                                   const Icon(Icons.cancel, size: 16, color: PGEColors.danger),
                                   const SizedBox(width: 8),
-                                  Flexible( // GANTI Expanded JADI Flexible
+                                  Flexible(
                                     child: Text(
                                       syarat,
                                       style: GoogleFonts.poppins(
-                                        fontSize: 11, 
-                                        fontWeight: FontWeight.w500, 
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w500,
                                         color: PGEColors.danger,
                                       ),
-                                      maxLines: 3, // TAMBAHKAN maxLines
-                                      overflow: TextOverflow.ellipsis, // TAMBAHKAN overflow
+                                      maxLines: 3,
+                                      overflow: TextOverflow.ellipsis,
                                     ),
                                   ),
                                 ],
@@ -3757,10 +4048,7 @@ Widget _buildHeaderStat(String value, String label) {
                         ),
                       ),
                     ],
-
                     const SizedBox(height: 16),
-
-                    // Info Section
                     _buildDetailSection('Informasi Lembur', [
                       _dRow('👤 Mitra', item.namaMitra ?? '-'),
                       _dRow('🏢 Fungsi', item.fungsiMitra ?? '-'),
@@ -3769,11 +4057,46 @@ Widget _buildHeaderStat(String value, String label) {
                       _dRow('📊 Durasi', item.durasiFormatted),
                       _dRow('📋 Absensi', item.absensiLabel),
                     ]),
-
                     const SizedBox(height: 16),
-
-                    // Absensi Detail
-                    if (!isTerlambat) ...[
+                    if (item.absensiStatus == 'tidak_lembur' ||
+                        item.absensiStatus == 'expired' ||
+                        item.absensiStatus == 'belum_absen') ...[
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: item.absensiColor.withOpacity(0.06),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(color: item.absensiColor.withOpacity(0.25)),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: item.absensiColor.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Icon(item.absensiIcon, color: item.absensiColor, size: 20),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                item.absensiStatus == 'tidak_lembur'
+                                    ? 'Mitra tidak melaksanakan lembur pada laporan ini.'
+                                    : item.absensiStatus == 'expired'
+                                        ? 'Waktu absensi telah kedaluwarsa sebelum diselesaikan.'
+                                        : 'Mitra belum melakukan absensi untuk lembur ini.',
+                                style: GoogleFonts.poppins(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w500,
+                                  color: PGEColors.textPrimary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else if (!isTerlambat) ...[
                       _buildDetailSection('Detail Absensi', [
                         _dRow('🟢 Check-In', _formatFullDateTime(item.checkInTime)),
                         _dRow('🔴 Check-Out', _formatFullDateTime(item.checkOutTime)),
@@ -3783,14 +4106,24 @@ Widget _buildHeaderStat(String value, String label) {
                       if (item.checkOutFotoUrl != null && item.checkOutFotoUrl!.isNotEmpty)
                         _buildPhotoPreviewCard('Foto Check-Out', item.checkOutFotoUrl!, PGEColors.danger),
                     ] else ...[
-                      _buildDetailSection('Info Terlambat', [
-                        _dRow('📸 Dokumentasi', (item.checkInFotoUrl != null || item.checkOutFotoUrl != null) ? 'Tersedia' : 'Tidak ada'),
-                        _dRow('📝 Alasan', item.keterlambatanAlasan ?? item.alasan ?? '-'),
-                      ]),
+                      _buildDetailSection(
+                        item.absensiStatus == 'selesai_terlambat_checkout'
+                            ? 'Info Terlambat Checkout'
+                            : 'Info Terlambat',
+                        [
+                          if (item.checkInTime != null)
+                            _dRow('🟢 Check-In', _formatFullDateTime(item.checkInTime)),
+                          if (item.checkOutTime != null)
+                            _dRow('🔴 Check-Out', _formatFullDateTime(item.checkOutTime)),
+                          _dRow('📸 Dokumentasi', (item.checkInFotoUrl != null || item.checkOutFotoUrl != null) ? 'Tersedia' : 'Tidak ada'),
+                          _dRow('📝 Alasan', item.keterlambatanAlasan ?? item.alasan ?? '-'),
+                        ],
+                      ),
                       if (item.checkInFotoUrl != null && item.checkInFotoUrl!.isNotEmpty)
-                        _buildPhotoPreviewCard('Dokumentasi', item.checkInFotoUrl!, PGEColors.warning),
+                        _buildPhotoPreviewCard('Foto Check-In', item.checkInFotoUrl!, PGEColors.warning),
+                      if (item.checkOutFotoUrl != null && item.checkOutFotoUrl!.isNotEmpty)
+                        _buildPhotoPreviewCard('Foto Check-Out', item.checkOutFotoUrl!, PGEColors.warning),
                     ],
-
                     if (tampilkanPendapatan) ...[
                       const SizedBox(height: 16),
                       _buildDetailSection('Pembayaran', [
@@ -3801,14 +4134,11 @@ Widget _buildHeaderStat(String value, String label) {
                         if (item.paidAt != null) _dRow('📅 Tgl Bayar', _formatFullDateTime(item.paidAt)),
                       ]),
                     ],
-
                     _dRow('📝 Catatan', item.alasan),
                   ],
                 ),
               ),
             ),
-
-            // Bottom Actions
             Padding(
               padding: const EdgeInsets.all(16),
               child: SafeArea(

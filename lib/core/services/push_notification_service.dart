@@ -280,9 +280,6 @@ class PushNotificationService {
     }
   }
 
-  // =========================================================
-  // CEK PREFERENSI: apakah jenis notifikasi ini di-enable user
-  // =========================================================
   Future<bool> _isTypeEnabled(String? type) async {
     if (type == null) return true;
     final uid = _auth.currentUser?.uid;

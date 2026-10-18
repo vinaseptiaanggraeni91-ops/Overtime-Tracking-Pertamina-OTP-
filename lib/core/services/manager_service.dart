@@ -90,8 +90,8 @@ class ManagerService {
     if (diff.inDays > 30) return '${(diff.inDays / 30).floor()} bln';
     if (diff.inDays > 0) return '${diff.inDays} hr';
     if (diff.inHours > 0) return '${diff.inHours} jam';
-    if (diff.inMinutes > 0) return '${diff.inMinutes} mnt';
-    return 'br saja';
+    if (diff.inMinutes > 0) return '${diff.inMinutes} menit';
+    return 'baru saja';
   }
 
   Color getStatusColor(String status) {

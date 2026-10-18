@@ -1,4 +1,3 @@
-// lib/dashboard/mitra/jadwal_lembur_screen.dart
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -7,7 +6,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:logger/logger.dart';
 import 'package:table_calendar/table_calendar.dart';
-import '/core/services/overtime_service.dart';
+import '/core/services/overtime_history_service.dart';
+import '/core/services/overtime_rate_service.dart';
 import '/widgets/bottom_nav/app_bottom_nav.dart';
 
 var logger = Logger();
@@ -19,10 +19,15 @@ class JadwalLemburScreen extends StatefulWidget {
   State<JadwalLemburScreen> createState() => _JadwalLemburScreenState();
 }
 
-class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
+class _JadwalLemburScreenState extends State<JadwalLemburScreen> with SingleTickerProviderStateMixin {
   final FirebaseAuth _auth = FirebaseAuth.instance;
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
-  final OvertimeService _overtimeService = OvertimeService();
+  final OvertimeHistoryService _historyService = OvertimeHistoryService();
+  final OvertimeRateService _rateService = OvertimeRateService();
+
+  // ==================== ANIMATION ====================
+  late AnimationController _animationController;
+  late Animation<double> _fadeAnimation;
 
   // ==================== USER DATA ====================
   Map<String, dynamic>? userData;
@@ -46,18 +51,8 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
   // ==================== UI STATE ====================
   bool isLoading = true;
   bool isRefreshing = false;
-  OvertimeHistory? selectedOvertime;
   String searchQuery = '';
-  String filterStatus = 'semua';
   String executionFilter = 'semua';
-  DateTime? filterStartDate;
-  DateTime? filterEndDate;
-
-  // ==================== TIMER ====================
-  Timer? _clockTimer;
-
-  // ==================== RATES ====================
-  Map<String, dynamic>? _rates;
 
   // ==================== STREAM SUBSCRIPTIONS ====================
   StreamSubscription? _overtimeSubscription;
@@ -68,13 +63,7 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
   bool get isManager => userRole == 'manager';
   bool get isSuperAdmin => userRole == 'superadmin';
 
-  bool get canSeeAllOvertime => isPengawas || isManager || isSuperAdmin;
-  bool get canApproveOvertime => isPengawas || isManager || isSuperAdmin;
-  bool get canCreateOvertime => isPengawas || isManager || isSuperAdmin;
-  bool get canCancelOvertime => isSuperAdmin || isPengawas || isManager;
-  bool get canRestoreOvertime => isSuperAdmin;
-
-  // ==================== NAV INDEX DETEKSI ROLE ====================
+  // ==================== NAV INDEX ====================
   int _getNavIndex() {
     if (userFungsi == 'hsse') return 1;
     switch (userRole) {
@@ -89,21 +78,6 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
     }
   }
 
-  // ==================== FILTERED DATA ====================
-  List<OvertimeHistory> get displayedOvertime {
-    List<OvertimeHistory> result = List.from(filteredOvertime);
-    if (searchQuery.isNotEmpty) {
-      result = result.where((item) {
-        final nama = item.namaMitra?.toLowerCase() ?? '';
-        final fungsi = item.fungsiMitra?.toLowerCase() ?? '';
-        final pengawas = item.namaPengawas?.toLowerCase() ?? '';
-        final query = searchQuery.toLowerCase();
-        return nama.contains(query) || fungsi.contains(query) || pengawas.contains(query);
-      }).toList();
-    }
-    return result;
-  }
-
   // ==================== STATISTICS ====================
   int get totalOvertime => allOvertime.length;
   int get pendingOvertime => allOvertime.where((e) => e.status == 'pending').length;
@@ -113,25 +87,25 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
   // ==================== INDONESIAN HOLIDAYS ====================
   final Map<int, List<Map<String, String>>> _indonesianHolidays = {
     2024: [
-      {'date': '2024-01-01', 'name': 'Tahun Baru'},
-      {'date': '2024-02-08', 'name': 'Isra Miraj'},
-      {'date': '2024-04-10', 'name': 'Idul Fitri'},
-      {'date': '2024-05-01', 'name': 'Hari Buruh'},
-      {'date': '2024-08-17', 'name': 'HUT RI'},
-      {'date': '2024-12-25', 'name': 'Natal'},
+      {'date': '2024-01-01', 'name': '🎉 Tahun Baru'},
+      {'date': '2024-02-08', 'name': '✨ Isra Miraj'},
+      {'date': '2024-04-10', 'name': '🌙 Idul Fitri'},
+      {'date': '2024-05-01', 'name': '👷 Hari Buruh'},
+      {'date': '2024-08-17', 'name': '🇮🇩 HUT RI'},
+      {'date': '2024-12-25', 'name': '🎄 Natal'},
     ],
     2025: [
-      {'date': '2025-01-01', 'name': 'Tahun Baru'},
-      {'date': '2025-03-31', 'name': 'Idul Fitri'},
-      {'date': '2025-05-01', 'name': 'Hari Buruh'},
-      {'date': '2025-08-17', 'name': 'HUT RI'},
-      {'date': '2025-12-25', 'name': 'Natal'},
+      {'date': '2025-01-01', 'name': '🎉 Tahun Baru'},
+      {'date': '2025-03-31', 'name': '🌙 Idul Fitri'},
+      {'date': '2025-05-01', 'name': '👷 Hari Buruh'},
+      {'date': '2025-08-17', 'name': '🇮🇩 HUT RI'},
+      {'date': '2025-12-25', 'name': '🎄 Natal'},
     ],
     2026: [
-      {'date': '2026-01-01', 'name': 'Tahun Baru'},
-      {'date': '2026-05-01', 'name': 'Hari Buruh'},
-      {'date': '2026-08-17', 'name': 'HUT RI'},
-      {'date': '2026-12-25', 'name': 'Natal'},
+      {'date': '2026-01-01', 'name': '🎉 Tahun Baru'},
+      {'date': '2026-05-01', 'name': '👷 Hari Buruh'},
+      {'date': '2026-08-17', 'name': '🇮🇩 HUT RI'},
+      {'date': '2026-12-25', 'name': '🎄 Natal'},
     ],
   };
 
@@ -140,31 +114,26 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
   void initState() {
     super.initState();
     _selectedDay = _focusedDay;
+    
+    // Setup animation
+    _animationController = AnimationController(
+      duration: const Duration(milliseconds: 800),
+      vsync: this,
+    );
+    _fadeAnimation = CurvedAnimation(
+      parent: _animationController,
+      curve: Curves.easeOut,
+    );
+    _animationController.forward();
+    
     _loadUserData();
-    _loadRates();
-    _startClockTimer();
   }
 
   @override
   void dispose() {
-    _clockTimer?.cancel();
+    _animationController.dispose();
     _overtimeSubscription?.cancel();
     super.dispose();
-  }
-
-  Future<void> _loadRates() async {
-    try {
-      _rates = await _overtimeService.loadOvertimeRates();
-      if (mounted) setState(() {});
-    } catch (e) {
-      logger.e('Error loading rates: $e');
-    }
-  }
-
-  void _startClockTimer() {
-    _clockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (mounted) setState(() {});
-    });
   }
 
   Future<void> _loadUserData() async {
@@ -180,11 +149,6 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
             userRole = data['role'] ?? 'mitra';
             userName = data['nama_lengkap'] ?? data['email']?.split('@')[0] ?? 'Pengguna';
             userFungsi = data['fungsi'];
-          });
-        } else {
-          setState(() {
-            userRole = 'mitra';
-            userName = 'Mitra';
           });
         }
       } catch (e) {
@@ -205,7 +169,7 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
     if (userId == null || userRole == null) return;
     _overtimeSubscription?.cancel();
     try {
-      _overtimeSubscription = _overtimeService
+      _overtimeSubscription = _historyService
           .getOvertimeHistoryStream(
             userRole: userRole!,
             userFungsi: userFungsi,
@@ -230,7 +194,7 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
       setState(() {
         allOvertime = overtimeList;
         overtimeByDate = byDate;
-        _applyAllFilters();
+        _applyFilters();
         _updateCalendarEvents();
       });
     }
@@ -240,7 +204,7 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
     if (userId == null || userRole == null) return;
     setState(() => isLoading = true);
     try {
-      final overtimeList = await _overtimeService
+      final overtimeList = await _historyService
           .getOvertimeHistoryStream(
             userRole: userRole!,
             userFungsi: userFungsi,
@@ -289,7 +253,7 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
         title: overtime.namaMitra ?? 'Lembur',
         jamMulai: overtime.jamMulai,
         jamSelesai: overtime.jamSelesai,
-        status: _getOvertimeExecutionStatus(overtime),
+        status: _getExecutionStatus(overtime),
       ));
     }
     setState(() => _events = events);
@@ -317,7 +281,7 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
     return null;
   }
 
-  String _getOvertimeExecutionStatus(OvertimeHistory overtime) {
+  String _getExecutionStatus(OvertimeHistory overtime) {
     final status = overtime.status.toLowerCase();
     final now = DateTime.now();
     if (status == 'dibatalkan') return 'dibatalkan';
@@ -333,56 +297,11 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
     return status;
   }
 
-  String _getExecutionStatusText(String executionStatus) {
-    switch (executionStatus) {
-      case 'upcoming': return 'Mendatang';
-      case 'completed': return 'Selesai';
-      case 'late': return 'Terlambat';
-      case 'today_ongoing': return 'Berlangsung';
-      case 'pending': return 'Menunggu';
-      case 'disetujui': return 'Disetujui';
-      case 'ditolak': return 'Ditolak';
-      case 'dibatalkan': return 'Dibatalkan';
-      default: return executionStatus;
-    }
-  }
-
-  Color _getExecutionStatusColor(String executionStatus) {
-    switch (executionStatus) {
-      case 'upcoming': return const Color(0xFF4A90D9);
-      case 'completed': return const Color(0xFF2ECC71);
-      case 'late': return const Color(0xFFE74C3C);
-      case 'today_ongoing': return const Color(0xFF9B59B6);
-      case 'pending': return const Color(0xFFF39C12);
-      case 'disetujui': return const Color(0xFF3498DB);
-      case 'ditolak': return const Color(0xFFE74C3C);
-      case 'dibatalkan': return const Color(0xFF95A5A6);
-      default: return Colors.grey;
-    }
-  }
-
-  IconData _getExecutionStatusIcon(String executionStatus) {
-    switch (executionStatus) {
-      case 'upcoming': return Icons.event_available_rounded;
-      case 'completed': return Icons.check_circle_rounded;
-      case 'late': return Icons.warning_amber_rounded;
-      case 'today_ongoing': return Icons.access_time_rounded;
-      case 'pending': return Icons.pending_rounded;
-      case 'disetujui': return Icons.thumb_up_rounded;
-      case 'ditolak': return Icons.cancel_rounded;
-      case 'dibatalkan': return Icons.block_rounded;
-      default: return Icons.info_rounded;
-    }
-  }
-
-  void _applyAllFilters() {
+  void _applyFilters() {
     List<OvertimeHistory> filtered = List.from(allOvertime);
-    if (filterStatus != 'semua') {
-      filtered = filtered.where((item) => item.status == filterStatus).toList();
-    }
     if (executionFilter != 'semua') {
       filtered = filtered.where((item) {
-        final execStatus = _getOvertimeExecutionStatus(item);
+        final execStatus = _getExecutionStatus(item);
         switch (executionFilter) {
           case 'upcoming': return execStatus == 'upcoming';
           case 'completed': return execStatus == 'completed';
@@ -393,11 +312,13 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
         }
       }).toList();
     }
-    if (filterStartDate != null) {
-      filtered = filtered.where((item) => item.tanggal.isAfter(filterStartDate!.subtract(const Duration(days: 1)))).toList();
-    }
-    if (filterEndDate != null) {
-      filtered = filtered.where((item) => item.tanggal.isBefore(filterEndDate!.add(const Duration(days: 1)))).toList();
+    if (searchQuery.isNotEmpty) {
+      filtered = filtered.where((item) {
+        final nama = item.namaMitra?.toLowerCase() ?? '';
+        final fungsi = item.fungsiMitra?.toLowerCase() ?? '';
+        final query = searchQuery.toLowerCase();
+        return nama.contains(query) || fungsi.contains(query);
+      }).toList();
     }
     setState(() => filteredOvertime = filtered);
   }
@@ -405,334 +326,32 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
   Future<void> _refreshData() async {
     setState(() => isRefreshing = true);
     await _loadOvertimeData();
-    await _loadRates();
     setState(() => isRefreshing = false);
-  }
-
-  Future<void> _approveOvertime(String overtimeId) async {
-    try {
-      await _overtimeService.updateOvertimeStatus(docId: overtimeId, status: 'disetujui');
-      if (mounted) {
-        _showSnackbar('Lembur berhasil disetujui ✅', Colors.green);
-        _refreshData();
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) _showSnackbar('Gagal menyetujui lembur', Colors.red);
-    }
-  }
-
-  Future<void> _rejectOvertime(String overtimeId) async {
-    final controller = TextEditingController();
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        title: Row(
-          children: [
-            Icon(Icons.cancel_rounded, color: Colors.red, size: 28),
-            const SizedBox(width: 8),
-            Text('Tolak Pengajuan', style: GoogleFonts.poppins(fontWeight: FontWeight.bold)),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Berikan alasan penolakan', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[600])),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              maxLines: 3,
-              decoration: InputDecoration(
-                hintText: 'Tulis alasan...',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                filled: true,
-                fillColor: Colors.grey[50],
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              padding: const EdgeInsets.symmetric(horizontal: 24),
-            ),
-            child: Text('Tolak', style: GoogleFonts.poppins()),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await _overtimeService.updateOvertimeStatus(
-        docId: overtimeId,
-        status: 'ditolak',
-        note: controller.text.isNotEmpty ? controller.text : null,
-      );
-      if (mounted) {
-        _showSnackbar('Lembur berhasil ditolak', Colors.orange);
-        _refreshData();
-        Navigator.pop(context);
-      }
-    } catch (e) {
-      if (mounted) _showSnackbar('Gagal menolak lembur', Colors.red);
-    }
-  }
-
-  void _showOvertimeDetail(OvertimeHistory overtime) {
-    final executionStatus = _getOvertimeExecutionStatus(overtime);
-    final isHoliday = _isHoliday(overtime.tanggal);
-    final holidayName = _getHolidayName(overtime.tanggal);
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-      ),
-      backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.7,
-        minChildSize: 0.4,
-        maxChildSize: 0.95,
-        builder: (context, scrollController) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
-          ),
-          child: Column(
-            children: [
-              const _DragHandle(),
-              Expanded(
-                child: ListView(
-                  controller: scrollController,
-                  padding: const EdgeInsets.all(24),
-                  children: [
-                    _buildDetailHeader(overtime, executionStatus),
-                    const SizedBox(height: 24),
-                    _buildDetailInfo(overtime, isHoliday, holidayName),
-                    const SizedBox(height: 20),
-                    if (canApproveOvertime && overtime.status == 'pending')
-                      _buildApprovalActions(overtime.id),
-                    const SizedBox(height: 16),
-                    _buildCloseButton(),
-                    const SizedBox(height: 30),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildDetailHeader(OvertimeHistory overtime, String executionStatus) {
-    final color = _getExecutionStatusColor(executionStatus);
-    return Row(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(14),
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [color.withValues(alpha: 0.15), color.withValues(alpha: 0.05)],
-            ),
-            borderRadius: BorderRadius.circular(18),
-          ),
-          child: Icon(_getExecutionStatusIcon(executionStatus), color: color, size: 30),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                'Detail Lembur',
-                style: GoogleFonts.poppins(
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                  color: const Color(0xFF1A2B4C),
-                ),
-              ),
-              Text(
-                overtime.namaMitra ?? 'Mitra',
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-          ),
-        ),
-        // FIX 1: Menggunakan Flexible untuk mencegah overflow di detail header
-        Flexible(
-          child: _buildStatusBadge(executionStatus),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDetailInfo(OvertimeHistory overtime, bool isHoliday, String? holidayName) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        children: [
-          _detailRow(Icons.calendar_today_rounded, 'Tanggal', _overtimeService.formatTanggal(overtime.tanggal)),
-          if (isHoliday) _detailRow(Icons.celebration_rounded, 'Hari Libur', holidayName ?? '', color: Colors.red),
-          _detailRow(Icons.access_time_rounded, 'Waktu', '${overtime.jamMulai} - ${overtime.jamSelesai} WIB'),
-          _detailRow(Icons.timer_rounded, 'Total Jam', '${overtime.totalJam.toStringAsFixed(1)} Jam'),
-          _detailRow(Icons.monetization_on_rounded, 'Estimasi Biaya', _overtimeService.formatRupiah(overtime.estimasiBiayaPerMitra)),
-          if (overtime.namaPengawas != null && overtime.namaPengawas!.isNotEmpty)
-            _detailRow(Icons.person_rounded, 'Pengawas', overtime.namaPengawas!),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildApprovalActions(String overtimeId) {
-    return Row(
-      children: [
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () => _approveOvertime(overtimeId),
-            icon: const Icon(Icons.check_circle_rounded, size: 20),
-            label: Text('Setujui', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: ElevatedButton.icon(
-            onPressed: () => _rejectOvertime(overtimeId),
-            icon: const Icon(Icons.cancel_rounded, size: 20),
-            label: Text('Tolak', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildCloseButton() {
-    return OutlinedButton.icon(
-      onPressed: () => Navigator.pop(context),
-      icon: const Icon(Icons.close_rounded, size: 18),
-      label: Text('Tutup', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: Colors.grey,
-        side: BorderSide(color: Colors.grey.withValues(alpha: 0.3)),
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-      ),
-    );
-  }
-
-  Widget _detailRow(IconData icon, String label, String value, {Color? color}) {
-    final c = color ?? const Color(0xFF1A2B4C);
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: c.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Icon(icon, size: 18, color: c),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(label, style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey[500])),
-                Text(
-                  value,
-                  style: GoogleFonts.poppins(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: c,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildStatusBadge(String status) {
-    final color = _getExecutionStatusColor(status);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(_getExecutionStatusIcon(status), size: 12, color: color),
-          const SizedBox(width: 4),
-          Text(
-            _getExecutionStatusText(status),
-            style: GoogleFonts.poppins(
-              fontSize: 9,
-              fontWeight: FontWeight.w600,
-              color: color,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   void _showSnackbar(String message, Color color) {
     if (!mounted) return;
+    ScaffoldMessenger.of(context).clearSnackBars();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
+        content: Row(
+          children: [
+            Icon(color == Colors.green ? Icons.check_circle : Icons.info_outline,
+                color: Colors.white, size: 20),
+            const SizedBox(width: 12),
+            Expanded(child: Text(message, style: GoogleFonts.poppins(fontSize: 13))),
+          ],
+        ),
         backgroundColor: color,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         duration: const Duration(seconds: 2),
       ),
     );
   }
 
-  bool isSameDay(DateTime? a, DateTime? b) {
-    if (a == null || b == null) return false;
-    return a.year == b.year && a.month == b.month && a.day == b.day;
-  }
-
-  String _getCurrentTime() => DateFormat('HH:mm:ss').format(DateTime.now());
   String _getCurrentDate() => DateFormat('EEEE, dd MMMM yyyy', 'id_ID').format(DateTime.now());
 
   // ==================== MAIN BUILD ====================
@@ -749,61 +368,49 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
           : RefreshIndicator(
               onRefresh: _refreshData,
               color: const Color(0xFF1A2B4C),
-              child: SingleChildScrollView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildRoleInfoCard(),
-                    const SizedBox(height: 16),
-                    _buildStatsCard(),
-                    const SizedBox(height: 16),
-                    _buildCalendar(),
-                    const SizedBox(height: 16),
-                    _buildSearchBar(),
-                    const SizedBox(height: 12),
-                    _buildFilterChips(),
-                    const SizedBox(height: 16),
-                    _buildSectionHeader(),
-                    const SizedBox(height: 12),
-                    displayedOvertime.isEmpty
-                        ? _buildEmptyState()
-                        : ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            itemCount: displayedOvertime.length,
-                            itemBuilder: (context, index) =>
-                                _buildOvertimeCard(displayedOvertime[index]),
-                          ),
-                    const SizedBox(height: 30),
-                  ],
+              child: FadeTransition(
+                opacity: _fadeAnimation,
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildWelcomeCard(),
+                      const SizedBox(height: 16),
+                      _buildStatsGrid(),
+                      const SizedBox(height: 20),
+                      _buildCalendarCard(),
+                      const SizedBox(height: 20),
+                      _buildSearchAndFilter(),
+                      const SizedBox(height: 16),
+                      _buildSectionHeader(),
+                      const SizedBox(height: 12),
+                      filteredOvertime.isEmpty
+                          ? _buildEmptyState()
+                          : _buildOvertimeList(),
+                      const SizedBox(height: 30),
+                    ],
+                  ),
                 ),
               ),
             ),
     );
   }
 
+  // ==================== APP BAR ====================
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
       title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Jadwal Lembur',
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.w700,
-              fontSize: 15,
-              letterSpacing: 0.5,
-            ),
+            '📅 Jadwal Lembur',
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16),
           ),
           Text(
             _getCurrentDate(),
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              fontWeight: FontWeight.w400,
-              color: Colors.white70,
-            ),
+            style: GoogleFonts.poppins(fontSize: 11, color: Colors.white70),
           ),
         ],
       ),
@@ -811,67 +418,59 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
       foregroundColor: Colors.white,
       elevation: 0,
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
       ),
       actions: [
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-          margin: const EdgeInsets.only(right: 16),
-          decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.15),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
-          ),
-          child: Row(
-            children: [
-              const Icon(Icons.access_time_rounded, size: 16),
-              const SizedBox(width: 6),
-              Text(
-                _getCurrentTime(),
-                style: GoogleFonts.poppins(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            ],
-          ),
+        IconButton(
+          icon: const Icon(Icons.refresh_rounded),
+          onPressed: _refreshData,
+          tooltip: 'Refresh',
         ),
+        const SizedBox(width: 4),
       ],
     );
   }
 
-  Widget _buildRoleInfoCard() {
-    String roleText = userRole ?? 'Mitra';
-    IconData roleIcon = Icons.person_rounded;
-    Color gradientColor1 = const Color(0xFF1A2B4C);
-    Color gradientColor2 = const Color(0xFF2C3E6B);
+  // ==================== WELCOME CARD ====================
+  Widget _buildWelcomeCard() {
+    String greeting = 'Selamat Datang';
+    String subtitle = 'Pantau jadwal lembur Anda';
+    IconData icon = Icons.waving_hand_rounded;
+    Color color1 = const Color(0xFF6366F1);
+    Color color2 = const Color(0xFF8B5CF6);
 
     if (isPengawas) {
-      roleIcon = Icons.visibility_rounded;
-      gradientColor1 = const Color(0xFF0D47A1);
-      gradientColor2 = const Color(0xFF1976D2);
+      greeting = 'Halo, Pengawas';
+      subtitle = 'Kelola jadwal lembur tim Anda';
+      icon = Icons.visibility_rounded;
+      color1 = const Color(0xFF0D47A1);
+      color2 = const Color(0xFF1976D2);
     } else if (isManager) {
-      roleIcon = Icons.manage_accounts_rounded;
-      gradientColor1 = const Color(0xFF1B5E20);
-      gradientColor2 = const Color(0xFF388E3C);
+      greeting = 'Halo, Manager';
+      subtitle = 'Monitor & setujui pengajuan lembur';
+      icon = Icons.manage_accounts_rounded;
+      color1 = const Color(0xFF1B5E20);
+      color2 = const Color(0xFF388E3C);
     } else if (isSuperAdmin) {
-      roleIcon = Icons.admin_panel_settings_rounded;
-      gradientColor1 = const Color(0xFF4A148C);
-      gradientColor2 = const Color(0xFF7B1FA2);
+      greeting = 'Halo, Admin';
+      subtitle = 'Kontrol penuh sistem lembur';
+      icon = Icons.admin_panel_settings_rounded;
+      color1 = const Color(0xFF4A148C);
+      color2 = const Color(0xFF7B1FA2);
     }
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [gradientColor1, gradientColor2],
+          colors: [color1, color2],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: gradientColor1.withValues(alpha: 0.3),
+            color: color1.withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -880,12 +479,12 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(16),
+              borderRadius: BorderRadius.circular(18),
             ),
-            child: Icon(roleIcon, color: Colors.white, size: 28),
+            child: Icon(icon, color: Colors.white, size: 32),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -893,95 +492,82 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  roleText,
+                  greeting,
                   style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w400,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.poppins(
+                    fontSize: 13,
                     color: Colors.white70,
                   ),
                 ),
               ],
             ),
           ),
-          const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white54, size: 16),
         ],
       ),
     );
   }
 
-  Widget _buildStatsCard() {
+  // ==================== STATS GRID ====================
+  Widget _buildStatsGrid() {
+    return Row(
+      children: [
+        Expanded(child: _buildStatCard('📋 Total', totalOvertime, const Color(0xFF6366F1))),
+        const SizedBox(width: 10),
+        Expanded(child: _buildStatCard('⏳ Pending', pendingOvertime, const Color(0xFFF59E0B))),
+        const SizedBox(width: 10),
+        Expanded(child: _buildStatCard('✅ Selesai', completedOvertime, const Color(0xFF10B981))),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(String label, int count, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.08),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
+            color: color.withValues(alpha: 0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+        border: Border.all(color: color.withValues(alpha: 0.1)),
+      ),
+      child: Column(
+        children: [
+          Text(
+            count.toString(),
+            style: GoogleFonts.poppins(
+              fontSize: 28,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 11,
+              color: Colors.grey[600],
+            ),
           ),
         ],
       ),
-      child: Row(
-        children: [
-          _statItem('Total', totalOvertime, const Color(0xFF1A2B4C), Icons.event_rounded),
-          _statDivider(),
-          _statItem('Pending', pendingOvertime, const Color(0xFFF39C12), Icons.pending_rounded),
-          _statDivider(),
-          _statItem('Disetujui', approvedOvertime, const Color(0xFF3498DB), Icons.thumb_up_rounded),
-          _statDivider(),
-          _statItem('Selesai', completedOvertime, const Color(0xFF2ECC71), Icons.check_circle_rounded),
-        ],
-      ),
     );
   }
 
-  Widget _statItem(String label, int count, Color color, IconData icon) {
-    return Expanded(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, size: 20, color: color),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              count.toString(),
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 10,
-                color: Colors.grey[500],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _statDivider() {
-    return Container(
-      height: 40,
-      width: 1,
-      color: Colors.grey[200],
-    );
-  }
-
-  Widget _buildCalendar() {
+  // ==================== CALENDAR CARD ====================
+  Widget _buildCalendarCard() {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
@@ -1001,7 +587,7 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
             firstDay: DateTime(2024),
             lastDay: DateTime(2030),
             focusedDay: _focusedDay,
-            selectedDayPredicate: (day) => isSameDay(_selectedDay, day),
+            selectedDayPredicate: (day) => _isSameDay(_selectedDay, day),
             calendarFormat: _calendarFormat,
             onFormatChanged: (format) => setState(() => _calendarFormat = format),
             onDaySelected: (selectedDay, focusedDay) {
@@ -1016,9 +602,9 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
               defaultBuilder: (context, date, _) {
                 final isHoliday = _isHoliday(date);
                 final hasEvent = (_events[date] ?? []).isNotEmpty;
-                final isSelected = isSameDay(date, _selectedDay);
-                final isToday = isSameDay(date, DateTime.now());
-                
+                final isSelected = _isSameDay(date, _selectedDay);
+                final isToday = _isSameDay(date, DateTime.now());
+
                 return Container(
                   margin: const EdgeInsets.all(3),
                   decoration: BoxDecoration(
@@ -1031,17 +617,12 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
                         ? null
                         : isHoliday
                             ? Colors.red.shade50
-                            : hasEvent
-                                ? const Color(0xFFFF6B35).withValues(alpha: 0.08)
-                                : isToday
-                                    ? const Color(0xFF1A2B4C).withValues(alpha: 0.06)
-                                    : null,
-                    borderRadius: BorderRadius.circular(12),
+                            : isToday
+                                ? const Color(0xFF6366F1).withValues(alpha: 0.08)
+                                : null,
+                    borderRadius: BorderRadius.circular(14),
                     border: isToday && !isSelected
-                        ? Border.all(
-                            color: const Color(0xFF1A2B4C).withValues(alpha: 0.3),
-                            width: 1.5,
-                          )
+                        ? Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.3), width: 2)
                         : null,
                   ),
                   child: Stack(
@@ -1056,59 +637,33 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
                                 ? Colors.white
                                 : isHoliday
                                     ? Colors.red
-                                    : hasEvent
-                                        ? const Color(0xFFFF6B35)
-                                        : Colors.grey[800],
+                                    : Colors.grey[700],
                           ),
                         ),
                       ),
                       if (hasEvent && !isSelected)
                         Positioned(
-                          bottom: 3,
-                          right: 3,
-                          child: Container(
-                            width: 7,
-                            height: 7,
-                            decoration: const BoxDecoration(
-                              color: Color(0xFFFF6B35),
-                              shape: BoxShape.circle,
+                          bottom: 4,
+                          left: 0,
+                          right: 0,
+                          child: Center(
+                            child: Container(
+                              width: 6,
+                              height: 6,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFF6B35),
+                                shape: BoxShape.circle,
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: const Color(0xFFFF6B35).withValues(alpha: 0.5),
+                                    blurRadius: 4,
+                                  ),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                     ],
-                  ),
-                );
-              },
-              todayBuilder: (context, date, _) {
-                final isSelected = isSameDay(date, _selectedDay);
-                return Container(
-                  margin: const EdgeInsets.all(3),
-                  decoration: BoxDecoration(
-                    gradient: isSelected
-                        ? const LinearGradient(
-                            colors: [Color(0xFFFF6B35), Color(0xFFFF8C5A)],
-                          )
-                        : null,
-                    color: isSelected
-                        ? null
-                        : const Color(0xFF1A2B4C).withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(12),
-                    border: isSelected
-                        ? null
-                        : Border.all(
-                            color: const Color(0xFF1A2B4C).withValues(alpha: 0.3),
-                            width: 1.5,
-                          ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      '${date.day}',
-                      style: GoogleFonts.poppins(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: isSelected ? Colors.white : const Color(0xFF1A2B4C),
-                      ),
-                    ),
                   ),
                 );
               },
@@ -1120,15 +675,20 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
               titleTextStyle: GoogleFonts.poppins(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: const Color(0xFF1A2B4C),
+                color: const Color(0xFF1E293B),
               ),
-              leftChevronIcon: const Icon(Icons.chevron_left_rounded, color: Color(0xFF1A2B4C)),
-              rightChevronIcon: const Icon(Icons.chevron_right_rounded, color: Color(0xFF1A2B4C)),
-              formatButtonTextStyle: GoogleFonts.poppins(fontSize: 12),
+              leftChevronIcon: const Icon(Icons.chevron_left_rounded, color: Color(0xFF6366F1), size: 28),
+              rightChevronIcon: const Icon(Icons.chevron_right_rounded, color: Color(0xFF6366F1), size: 28),
+              formatButtonTextStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600),
               formatButtonDecoration: BoxDecoration(
-                color: const Color(0xFF1A2B4C).withValues(alpha: 0.08),
+                color: const Color(0xFF6366F1).withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: 0.2)),
               ),
+            ),
+            daysOfWeekStyle: DaysOfWeekStyle(
+              weekdayStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey[500]),
+              weekendStyle: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.red[300]),
             ),
           ),
           const SizedBox(height: 14),
@@ -1137,9 +697,9 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
             runSpacing: 8,
             children: [
               _legendItem(const Color(0xFFFF6B35), 'Ada Lembur'),
-              _legendItem(Colors.red, 'Hari Libur'),
-              _legendItem(const Color(0xFF1A2B4C), 'Hari Ini'),
-              _legendItem(Colors.green, 'Selesai'),
+              _legendItem(Colors.red.shade400, 'Hari Libur'),
+              _legendItem(const Color(0xFF6366F1), 'Hari Ini'),
+              _legendItem(const Color(0xFF10B981), 'Selesai'),
             ],
           ),
         ],
@@ -1152,139 +712,138 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
       mainAxisSize: MainAxisSize.min,
       children: [
         Container(
-          width: 12,
-          height: 12,
+          width: 10,
+          height: 10,
           decoration: BoxDecoration(
             color: color,
             shape: BoxShape.circle,
-            boxShadow: [
-              BoxShadow(
-                color: color.withValues(alpha: 0.3),
-                blurRadius: 4,
-              ),
-            ],
+            boxShadow: [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 4)],
           ),
         ),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: GoogleFonts.poppins(
-            fontSize: 11,
-            color: Colors.grey[600],
+        const SizedBox(width: 6),
+        Text(label, style: GoogleFonts.poppins(fontSize: 11, color: Colors.grey[600])),
+      ],
+    );
+  }
+
+  // ==================== SEARCH & FILTER ====================
+  Widget _buildSearchAndFilter() {
+    return Column(
+      children: [
+        // Search bar
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: [
+              BoxShadow(color: Colors.grey.withValues(alpha: 0.06), blurRadius: 10, offset: const Offset(0, 3)),
+            ],
+          ),
+          child: TextField(
+            onChanged: (value) {
+              setState(() => searchQuery = value);
+              _applyFilters();
+            },
+            decoration: InputDecoration(
+              hintText: '🔍 Cari mitra atau fungsi...',
+              hintStyle: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[400]),
+              prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF6366F1)),
+              suffixIcon: searchQuery.isNotEmpty
+                  ? IconButton(
+                      icon: const Icon(Icons.clear_rounded, size: 20, color: Colors.grey),
+                      onPressed: () {
+                        setState(() => searchQuery = '');
+                        _applyFilters();
+                      },
+                    )
+                  : null,
+              border: InputBorder.none,
+            ),
+            style: GoogleFonts.poppins(fontSize: 14),
+          ),
+        ),
+        const SizedBox(height: 10),
+        // Filter chips
+        SizedBox(
+          height: 40,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: [
+              _buildFilterChip('📋 Semua', 'semua'),
+              _buildFilterChip('📅 Mendatang', 'upcoming'),
+              _buildFilterChip('✅ Selesai', 'completed'),
+              _buildFilterChip('⚠️ Terlambat', 'late'),
+              _buildFilterChip('🔄 Berlangsung', 'ongoing'),
+              _buildFilterChip('🚫 Dibatalkan', 'cancelled'),
+            ],
           ),
         ),
       ],
     );
   }
 
-  Widget _buildSearchBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, 3),
-          ),
-        ],
-      ),
-      child: TextField(
-        onChanged: (value) => setState(() => searchQuery = value),
-        decoration: InputDecoration(
-          hintText: 'Cari mitra, fungsi, atau pengawas...',
-          hintStyle: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[400]),
-          prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF1A2B4C)),
-          suffixIcon: searchQuery.isNotEmpty
-              ? IconButton(
-                  icon: const Icon(Icons.clear_rounded, size: 20),
-                  onPressed: () => setState(() => searchQuery = ''),
-                )
-              : null,
-          border: InputBorder.none,
-        ),
-        style: GoogleFonts.poppins(fontSize: 14),
-      ),
-    );
-  }
-
-  Widget _buildFilterChips() {
-    final filters = [
-      {'label': '📋 Semua', 'value': 'semua'},
-      {'label': '📅 Mendatang', 'value': 'upcoming'},
-      {'label': '✅ Selesai', 'value': 'completed'},
-      {'label': '⚠️ Terlambat', 'value': 'late'},
-      {'label': '🔄 Berlangsung', 'value': 'ongoing'},
-      {'label': '🚫 Dibatalkan', 'value': 'cancelled'},
-    ];
-
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: filters.map((filter) {
-          final value = filter['value']!;
-          final selected = executionFilter == value;
-          return Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: FilterChip(
-              label: Text(
-                filter['label']!,
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                  fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-                  color: selected ? Colors.white : Colors.grey[700],
-                ),
-              ),
-              selected: selected,
-              onSelected: (s) => setState(() {
-                executionFilter = s ? value : 'semua';
-                _applyAllFilters();
-              }),
-              backgroundColor: Colors.white,
-              selectedColor: const Color(0xFF1A2B4C),
-              checkmarkColor: Colors.white,
-              side: BorderSide(
-                color: selected ? const Color(0xFF1A2B4C) : Colors.grey.shade300,
-              ),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+  Widget _buildFilterChip(String label, String value) {
+    final selected = executionFilter == value;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: GestureDetector(
+        onTap: () {
+          setState(() {
+            executionFilter = selected ? 'semua' : value;
+            _applyFilters();
+          });
+        },
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          decoration: BoxDecoration(
+            color: selected ? const Color(0xFF6366F1) : Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(
+              color: selected ? const Color(0xFF6366F1) : Colors.grey.shade200,
             ),
-          );
-        }).toList(),
+            boxShadow: selected
+                ? [BoxShadow(color: const Color(0xFF6366F1).withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 2))]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w500,
+              color: selected ? Colors.white : Colors.grey[600],
+            ),
+          ),
+        ),
       ),
     );
   }
 
+  // ==================== SECTION HEADER ====================
   Widget _buildSectionHeader() {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Row(
-          children: [
-            Text(
-              '📋 Daftar Lembur',
-              style: GoogleFonts.poppins(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-                color: const Color(0xFF1A2B4C),
-              ),
-            ),
-          ],
+        Text(
+          '📋 Daftar Lembur',
+          style: GoogleFonts.poppins(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+            color: const Color(0xFF1E293B),
+          ),
         ),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
           decoration: BoxDecoration(
-            color: const Color(0xFF1A2B4C).withValues(alpha: 0.08),
+            color: const Color(0xFF6366F1).withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(20),
           ),
           child: Text(
-            '${displayedOvertime.length} Data',
+            '${filteredOvertime.length} Data',
             style: GoogleFonts.poppins(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFF1A2B4C),
+              color: const Color(0xFF6366F1),
             ),
           ),
         ),
@@ -1292,47 +851,68 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
     );
   }
 
-  Widget _buildOvertimeCard(OvertimeHistory overtime) {
-    final executionStatus = _getOvertimeExecutionStatus(overtime);
-    final color = _getExecutionStatusColor(executionStatus);
-    
-    return GestureDetector(
-      onTap: () => _showOvertimeDetail(overtime),
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(20),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.grey.withValues(alpha: 0.06),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Padding(
+  // ==================== OVERTIME LIST ====================
+  Widget _buildOvertimeList() {
+    return ListView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: filteredOvertime.length,
+      itemBuilder: (context, index) {
+        final overtime = filteredOvertime[index];
+        return _buildOvertimeCard(overtime, index);
+      },
+    );
+  }
+
+  Widget _buildOvertimeCard(OvertimeHistory overtime, int index) {
+    final execStatus = _getExecutionStatus(overtime);
+    final color = _getStatusColor(execStatus);
+    final icon = _getStatusIcon(execStatus);
+    final label = _getStatusLabel(execStatus);
+
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0.0, end: 1.0),
+      duration: Duration(milliseconds: 400 + (index * 100)),
+      curve: Curves.easeOutCubic,
+      builder: (context, value, child) {
+        return Transform.translate(
+          offset: Offset(0, 20 * (1 - value)),
+          child: Opacity(opacity: value, child: child),
+        );
+      },
+      child: GestureDetector(
+        onTap: () => _showOvertimeDetail(overtime),
+        child: Container(
+          margin: const EdgeInsets.only(bottom: 12),
           padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: color.withValues(alpha: 0.06),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+            border: Border.all(color: color.withValues(alpha: 0.1)),
+          ),
           child: Row(
             children: [
+              // Status indicator
               Container(
-                width: 54,
-                height: 54,
+                width: 52,
+                height: 52,
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [color.withValues(alpha: 0.2), color.withValues(alpha: 0.05)],
                   ),
                   borderRadius: BorderRadius.circular(16),
                 ),
-                child: Center(
-                  child: Icon(
-                    _getExecutionStatusIcon(executionStatus),
-                    color: color,
-                    size: 28,
-                  ),
-                ),
+                child: Center(child: Icon(icon, color: color, size: 26)),
               ),
               const SizedBox(width: 14),
+              // Info
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -1345,45 +925,51 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
                             style: GoogleFonts.poppins(
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
-                              color: const Color(0xFF1A2B4C),
+                              color: const Color(0xFF1E293B),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        // FIX 2: Menggunakan Flexible untuk mencegah overflow di card
-                        Flexible(
-                          child: _buildStatusBadge(executionStatus),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            label,
+                            style: GoogleFonts.poppins(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: color,
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 6),
                     Row(
                       children: [
-                        const Icon(Icons.calendar_today_rounded, size: 12, color: Colors.grey),
+                        Icon(Icons.calendar_today_rounded, size: 13, color: Colors.grey[400]),
                         const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            _overtimeService.formatTanggal(overtime.tanggal),
-                            style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                        Text(
+                          DateFormat('dd MMM yyyy', 'id_ID').format(overtime.tanggal),
+                          style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
                         ),
                         const SizedBox(width: 12),
-                        const Icon(Icons.access_time_rounded, size: 12, color: Colors.grey),
+                        Icon(Icons.access_time_rounded, size: 13, color: Colors.grey[400]),
                         const SizedBox(width: 4),
-                        Flexible(
-                          child: Text(
-                            '${overtime.jamMulai} - ${overtime.jamSelesai}',
-                            style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                        Text(
+                          '${overtime.jamMulai} - ${overtime.jamSelesai}',
+                          style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[600]),
                         ),
                       ],
                     ),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.grey),
+              const SizedBox(width: 8),
+              Icon(Icons.chevron_right_rounded, color: Colors.grey[300]),
             ],
           ),
         ),
@@ -1391,18 +977,15 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
     );
   }
 
+  // ==================== EMPTY STATE ====================
   Widget _buildEmptyState() {
     return Container(
-      padding: const EdgeInsets.all(50),
+      padding: const EdgeInsets.all(40),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withValues(alpha: 0.06),
-            blurRadius: 15,
-            offset: const Offset(0, 5),
-          ),
+          BoxShadow(color: Colors.grey.withValues(alpha: 0.06), blurRadius: 15, offset: const Offset(0, 5)),
         ],
       ),
       child: Column(
@@ -1410,85 +993,256 @@ class _JadwalLemburScreenState extends State<JadwalLemburScreen> {
           Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: Colors.grey.shade100,
+              color: Colors.grey[100],
               shape: BoxShape.circle,
             ),
-            child: Icon(Icons.event_busy_rounded, size: 64, color: Colors.grey[400]),
+            child: Icon(Icons.event_busy_rounded, size: 56, color: Colors.grey[400]),
           ),
           const SizedBox(height: 20),
           Text(
-            'Tidak Ada Jadwal Lembur',
-            style: GoogleFonts.poppins(
-              fontSize: 17,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF1A2B4C),
-            ),
+            '📭 Tidak Ada Jadwal Lembur',
+            style: GoogleFonts.poppins(fontSize: 17, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B)),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 8),
           Text(
-            'Belum ada jadwal lembur yang tersedia',
-            style: GoogleFonts.poppins(
-              fontSize: 13,
-              color: Colors.grey[500],
-            ),
+            'Belum ada jadwal lembur yang tersedia\nuntuk tanggal yang dipilih',
+            style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[500], height: 1.5),
+            textAlign: TextAlign.center,
           ),
         ],
       ),
     );
   }
 
+  // ==================== LOADING SCREEN ====================
   Widget _buildLoadingScreen() {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          const CircularProgressIndicator(
-            color: Color(0xFF1A2B4C),
-            strokeWidth: 3,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Memuat data jadwal lembur...',
-            style: GoogleFonts.poppins(
-              fontSize: 14,
-              color: Colors.grey[600],
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6366F1).withValues(alpha: 0.08),
+              shape: BoxShape.circle,
             ),
+            child: const CircularProgressIndicator(
+              color: Color(0xFF6366F1),
+              strokeWidth: 3,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Memuat jadwal lembur...',
+            style: GoogleFonts.poppins(fontSize: 14, color: Colors.grey[600]),
           ),
         ],
       ),
     );
   }
-}
 
-// ==================== DRAG HANDLE WIDGET ====================
-class _DragHandle extends StatelessWidget {
-  const _DragHandle();
+  // ==================== OVERTIME DETAIL BOTTOM SHEET ====================
+  void _showOvertimeDetail(OvertimeHistory overtime) {
+    final execStatus = _getExecutionStatus(overtime);
+    final color = _getStatusColor(execStatus);
+    final isHoliday = _isHoliday(overtime.tanggal);
+    final holidayName = _getHolidayName(overtime.tanggal);
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 12, bottom: 8),
-      child: Center(
-        child: Container(
-          width: 40,
-          height: 4,
-          decoration: BoxDecoration(
-            color: Colors.grey[300],
-            borderRadius: BorderRadius.circular(2),
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => DraggableScrollableSheet(
+        initialChildSize: 0.65,
+        minChildSize: 0.35,
+        maxChildSize: 0.9,
+        builder: (context, scrollController) => Container(
+          decoration: const BoxDecoration(
+            color: Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
+          ),
+          child: Column(
+            children: [
+              // Drag handle
+              Padding(
+                padding: const EdgeInsets.only(top: 12, bottom: 8),
+                child: Container(
+                  width: 40, height: 5,
+                  decoration: BoxDecoration(color: Colors.grey[300], borderRadius: BorderRadius.circular(3)),
+                ),
+              ),
+              Expanded(
+                child: ListView(
+                  controller: scrollController,
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    // Header
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              colors: [color.withValues(alpha: 0.2), color.withValues(alpha: 0.05)],
+                            ),
+                            borderRadius: BorderRadius.circular(18),
+                          ),
+                          child: Icon(_getStatusIcon(execStatus), color: color, size: 30),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Detail Lembur',
+                                  style: GoogleFonts.poppins(fontSize: 20, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B))),
+                              Text(overtime.namaMitra ?? '-',
+                                  style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey[600])),
+                            ],
+                          ),
+                        ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: color.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          child: Text(_getStatusLabel(execStatus),
+                              style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.w600, color: color)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    // Info cards
+                    _buildDetailCard([
+                      _detailItem('📅 Tanggal', DateFormat('EEEE, dd MMM yyyy', 'id_ID').format(overtime.tanggal)),
+                      if (isHoliday) _detailItem('🎉 Hari Libur', holidayName ?? ''),
+                      _detailItem('⏰ Waktu', '${overtime.jamMulai} - ${overtime.jamSelesai} WIB'),
+                      _detailItem('⏱️ Durasi', '${overtime.totalJam.toStringAsFixed(1)} Jam'),
+                    ]),
+                    const SizedBox(height: 12),
+                    _buildDetailCard([
+                      _detailItem('💰 Biaya', _rateService.formatRupiah(overtime.estimasiBiayaPerMitra)),
+                      if (overtime.namaPengawas != null)
+                        _detailItem('👤 Pengawas', overtime.namaPengawas!),
+                      if (overtime.fungsiMitra != null)
+                        _detailItem('🏢 Fungsi', overtime.fungsiMitra!),
+                    ]),
+                    const SizedBox(height: 20),
+                    // Close button
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () => Navigator.pop(context),
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        label: Text('Tutup', style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.grey[600],
+                          side: BorderSide(color: Colors.grey[300]!),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
     );
   }
+
+  Widget _buildDetailCard(List<Widget> items) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: Column(children: items),
+    );
+  }
+
+  Widget _detailItem(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 100,
+            child: Text(label, style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey[500])),
+          ),
+          Expanded(
+            child: Text(value, style: GoogleFonts.poppins(fontSize: 13, fontWeight: FontWeight.w600, color: const Color(0xFF1E293B))),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==================== HELPERS ====================
+  bool _isSameDay(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return false;
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status) {
+      case 'upcoming': return const Color(0xFF6366F1);
+      case 'completed': return const Color(0xFF10B981);
+      case 'late': return const Color(0xFFEF4444);
+      case 'today_ongoing': return const Color(0xFF8B5CF6);
+      case 'pending': return const Color(0xFFF59E0B);
+      case 'disetujui': return const Color(0xFF3B82F6);
+      case 'ditolak': return const Color(0xFFEF4444);
+      case 'dibatalkan': return const Color(0xFF94A3B8);
+      default: return Colors.grey;
+    }
+  }
+
+  IconData _getStatusIcon(String status) {
+    switch (status) {
+      case 'upcoming': return Icons.event_available_rounded;
+      case 'completed': return Icons.check_circle_rounded;
+      case 'late': return Icons.warning_amber_rounded;
+      case 'today_ongoing': return Icons.access_time_rounded;
+      case 'pending': return Icons.pending_rounded;
+      case 'disetujui': return Icons.thumb_up_rounded;
+      case 'ditolak': return Icons.cancel_rounded;
+      case 'dibatalkan': return Icons.block_rounded;
+      default: return Icons.info_rounded;
+    }
+  }
+
+  String _getStatusLabel(String status) {
+    switch (status) {
+      case 'upcoming': return 'Mendatang';
+      case 'completed': return 'Selesai';
+      case 'late': return 'Terlambat';
+      case 'today_ongoing': return 'Berlangsung';
+      case 'pending': return 'Menunggu';
+      case 'disetujui': return 'Disetujui';
+      case 'ditolak': return 'Ditolak';
+      case 'dibatalkan': return 'Dibatalkan';
+      default: return status;
+    }
+  }
 }
 
+// ==================== OVERTIME EVENT CLASS ====================
 class OvertimeEvent {
   final String id;
   final String title;
   final String jamMulai;
   final String jamSelesai;
   final String status;
-  
+
   OvertimeEvent({
     required this.id,
     required this.title,

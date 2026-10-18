@@ -1,9 +1,3 @@
-// ============================================================
-// FILE : lib/dashboard/superadmin/settings/settings_screen.dart
-// ENHANCED VERSION - PROFESSIONAL SETTINGS UI + GO ROUTER + BOTTOM NAV
-// MOBILE PERFECTED LAYOUT - 2026
-// ============================================================
-
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -63,13 +57,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         color: const Color(0xFFF97316),
         route: '/system-logs',
       ),
-      SettingMenu(
-        title: 'Notifikasi & Alert',
-        subtitle: 'Konfigurasi push, email, dan pengingat approval',
-        icon: Icons.notifications_active_rounded,
-        color: const Color(0xFFEF4444),
-        route: '/settings/notifications',
-      ),
+
     ];
 
     // Menu Akun & Profil

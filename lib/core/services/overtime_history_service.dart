@@ -19,7 +19,7 @@ class OvertimeHistory {
   // ─── PENGAJU INFO ───
   final String? pengawasId;
   final String? namaPengawas;
-  final String? pengawasFungsi;
+  final String? fungsiPengawas;
   final String? diajukanOlehId;
   final String? diajukanOlehNama;
 
@@ -137,7 +137,7 @@ class OvertimeHistory {
     this.tipeDokumen = 'lembur_mitra',
     this.pengawasId,
     this.namaPengawas,
-    this.pengawasFungsi,
+    this.fungsiPengawas,
     this.diajukanOlehId,
     this.diajukanOlehNama,
     this.mitraId,
@@ -306,7 +306,7 @@ class OvertimeHistory {
       tipeDokumen: data['tipe_dokumen'] ?? 'lembur_mitra',
       pengawasId: data['pengawas_id'] ?? data['diajukan_oleh_id'],
       namaPengawas: data['nama_pengawas'] ?? data['diajukan_oleh_nama'],
-      pengawasFungsi: data['pengawas_fungsi'],
+      fungsiPengawas: data['fungsi_Pengawas'],
       diajukanOlehId: data['diajukan_oleh_id'] ?? data['pengawas_id'],
       diajukanOlehNama: data['diajukan_oleh_nama'] ?? data['nama_pengawas'],
       mitraId: data['mitra_id'],
@@ -712,7 +712,7 @@ class OvertimeHistory {
       tipeDokumen: data['tipe_dokumen'] ?? 'lembur_mitra',
       pengawasId: data['pengawas_id'] ?? data['diajukan_oleh_id'],
       namaPengawas: data['nama_pengawas'] ?? data['diajukan_oleh_nama'],
-      pengawasFungsi: data['pengawas_fungsi'],
+      fungsiPengawas: data['fungsi_pengawas'],
       diajukanOlehId: data['diajukan_oleh_id'] ?? data['pengawas_id'],
       diajukanOlehNama: data['diajukan_oleh_nama'] ?? data['nama_pengawas'],
       mitraId: data['mitra_id'],
@@ -1274,7 +1274,7 @@ class OvertimeHistoryService {
         final biaya = overtime.estimasiBiayaTotal > 0 ? overtime.estimasiBiayaTotal : overtime.estimasiBiayaPerMitra;
         totalBiaya += biaya;
         if (overtime.status == 'selesai' || overtime.status == 'completed') completedTotalBiaya += biaya;
-        final fungsi = overtime.pengawasFungsi ?? overtime.fungsiMitra;
+        final fungsi = overtime.fungsiPengawas ?? overtime.fungsiMitra;
         if (fungsi != null) fungsiSet.add(fungsi);
       }
       return {
@@ -1537,7 +1537,7 @@ class OvertimeHistoryService {
           completedTotalBiaya += biaya;
         }
         
-        final fungsi = overtime.pengawasFungsi ?? overtime.fungsiMitra;
+        final fungsi = overtime.fungsiPengawas ?? overtime.fungsiMitra;
         if (fungsi != null && fungsi.isNotEmpty) {
           fungsiSet.add(fungsi);
         }
@@ -1789,7 +1789,7 @@ class OvertimeHistoryService {
           '"${item.namaMitra ?? '-'}"', item.jamMulai, item.jamSelesai,
           item.totalJam.toStringAsFixed(1), item.statusLabel,
           (item.estimasiBiayaTotal > 0 ? item.estimasiBiayaTotal : item.estimasiBiayaPerMitra).toStringAsFixed(0),
-          item.pengawasFungsi ?? '-', item.jenisLembur, item.urgensi,
+          item.fungsiPengawas ?? '-', item.jenisLembur, item.urgensi,
         ];
         if (includeHSSE) {
           row.addAll([item.hsseStatusLabel, item.risikoLevel ?? '-', item.risikoKategori ?? '-', item.hsseApprovedByName ?? item.hsseRejectedByName ?? '-', '"${item.hsseCatatan ?? '-'}"']);

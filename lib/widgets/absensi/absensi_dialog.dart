@@ -7,7 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:intl/intl.dart';  // ← TAMBAHKAN
+import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
 
 // Service imports
@@ -22,18 +22,21 @@ import '/widgets/absensi/location_validator.dart';
 
 class AbsensiDialog extends StatefulWidget {
   final OvertimeHistory overtimeItem;
+  final bool isCheckOut;
 
   const AbsensiDialog({
     super.key,
     required this.overtimeItem,
+    this.isCheckOut = false,
   });
 
   /// Show absensi dialog as modal bottom sheet
   /// Returns true if absensi berhasil, false if gagal, null if dibatalkan
   static Future<bool?> show(
     BuildContext context,
-    OvertimeHistory overtimeItem,
-  ) {
+    OvertimeHistory overtimeItem, {
+    bool isCheckOut = false,
+  }) {
     if (!context.mounted) {
       debugPrint('AbsensiDialog: Context not mounted');
       return Future.value(null);
@@ -47,7 +50,10 @@ class AbsensiDialog extends StatefulWidget {
       isDismissible: false,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black54,
-      builder: (_) => AbsensiDialog(overtimeItem: overtimeItem),
+      builder: (_) => AbsensiDialog(
+        overtimeItem: overtimeItem,
+        isCheckOut: isCheckOut,
+      ),
     );
   }
 
@@ -95,6 +101,11 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
   final TextEditingController _alasanController = TextEditingController();
   File? _buktiFotoTerlambat;
 
+  // ═══════════════════════════════════════════════════════
+  // 🔥 FIX: Tambah flag untuk cegah double-init
+  // ═══════════════════════════════════════════════════════
+  bool _hasInitialized = false;
+
   // ===========================================================================
   // LIFECYCLE
   // ===========================================================================
@@ -103,14 +114,17 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _initCheck();  // ← GANTI: cek dulu status keterlambatan
+      if (mounted && !_hasInitialized) {
+        _hasInitialized = true;
+        _initCheck();
+      }
     });
   }
 
   @override
   void dispose() {
     _cleanupPreviewFile();
-    _alasanController.dispose();  // ← TAMBAHKAN
+    _alasanController.dispose();
     super.dispose();
   }
 
@@ -174,35 +188,136 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
   }
 
   // ===========================================================================
-  // INIT CHECK (NEW)
+  // ═══════════════════════════════════════════════════════════════════
+  // 🔥🔥🔥 INIT CHECK - SUDAH DIFIX! 🔥🔥🔥
+  // ═══════════════════════════════════════════════════════════════════
   // ===========================================================================
 
   Future<void> _initCheck() async {
-    setState(() { 
-      _isCheckingStatus = true; 
-      _statusMessage = 'Mengecek status absensi...'; 
+    setState(() {
+      _isCheckingStatus = true;
+      _statusMessage = 'Mengecek status absensi...';
     });
+
     try {
-      final status = await _absensiService.cekStatusKeterlambatan(widget.overtimeItem.id);
+      // ═══════════════════════════════════════════════════
+      // 🔥 FIX: Cek waktu SECARA LOKAL dulu
+      // ═══════════════════════════════════════════════════
+      final now = DateTime.now();
+      final overtimeItem = widget.overtimeItem;
+
+      // Parse jam selesai dari overtime
+      final tanggal = overtimeItem.tanggal;
+      final jamSelesaiStr = overtimeItem.jamSelesai;
+      final selesaiParts = jamSelesaiStr.split(':');
+      final selesaiJam = int.tryParse(selesaiParts[0]) ?? 0;
+      final selesaiMenit =
+          selesaiParts.length > 1 ? (int.tryParse(selesaiParts[1]) ?? 0) : 0;
+      var selesaiTime = DateTime(
+        tanggal.year,
+        tanggal.month,
+        tanggal.day,
+        selesaiJam,
+        selesaiMenit,
+      );
+
+      // Parse jam mulai untuk adjust (lembur lintas hari)
+      final jamMulaiStr = overtimeItem.jamMulai;
+      final mulaiParts = jamMulaiStr.split(':');
+      final mulaiJam = int.tryParse(mulaiParts[0]) ?? 0;
+      final mulaiMenit =
+          mulaiParts.length > 1 ? (int.tryParse(mulaiParts[1]) ?? 0) : 0;
+      final mulaiTime = DateTime(
+        tanggal.year,
+        tanggal.month,
+        tanggal.day,
+        mulaiJam,
+        mulaiMenit,
+      );
+
+      // Adjust jika jam selesai < jam mulai (lembur lintas hari)
+      if (selesaiTime.isBefore(mulaiTime)) {
+        selesaiTime = selesaiTime.add(const Duration(days: 1));
+      }
+
+      // ✅ Batas normal absensi: jam selesai + 30 menit
+      final batasNormal =
+          selesaiTime.add(const Duration(minutes: 30));
+
+      // ✅ Cek: apakah sekarang sudah lewat batas normal?
+      final isActuallyLate = now.isAfter(batasNormal);
+
+      // 🔥 DEBUG LOGGING
+      debugPrint('═══════════════════════════════════');
+      debugPrint('🔍 _initCheck - LOCAL TIME CHECK:');
+      debugPrint('  - Lembur ID: ${overtimeItem.id}');
+      debugPrint(
+          '  - Tanggal: ${DateFormat('dd MMM yyyy').format(tanggal)}');
+      debugPrint('  - Jam Mulai: $jamMulaiStr');
+      debugPrint('  - Jam Selesai: $jamSelesaiStr');
+      debugPrint(
+          '  - Selesai Time: ${DateFormat('dd/MM HH:mm').format(selesaiTime)}');
+      debugPrint(
+          '  - Batas Normal: ${DateFormat('dd/MM HH:mm').format(batasNormal)}');
+      debugPrint(
+          '  - Now: ${DateFormat('dd/MM HH:mm').format(now)}');
+      debugPrint('  - isActuallyLate: $isActuallyLate');
+      debugPrint('═══════════════════════════════════');
+
+      // ═══════════════════════════════════════════════════
+      // ✅ MASIH NORMAL — Langsung verifikasi lokasi
+      // ═══════════════════════════════════════════════════
+      if (!isActuallyLate) {
+        if (mounted) {
+          setState(() {
+            _isCheckingStatus = false;
+            _canConfirm = false;
+            _isLate = false;
+            _statusMessage = 'Memverifikasi lokasi Anda...';
+            _errorDetail = null;
+          });
+          _startLocationVerification();
+        }
+        return;
+      }
+
+      // ═══════════════════════════════════════════════════
+      // ✅ SUDAH TERLAMBAT — Cek ke service
+      // ═══════════════════════════════════════════════════
+      final status = await _absensiService
+          .cekStatusKeterlambatan(overtimeItem.id)
+          .timeout(const Duration(seconds: 10));
+
       if (mounted) {
         setState(() {
           _isCheckingStatus = false;
-          _isLate = status['isLate'] == true;
-          _canConfirm = status['canConfirm'] == true;
+          _isLate = status['isLate'] == true || isActuallyLate;
+          _canConfirm = status['canConfirm'] == true || isActuallyLate;
+
           if (_canConfirm) {
             _statusMessage = '⚠️ Sudah lewat batas absensi normal';
-            _errorDetail = 'Anda dapat mengkonfirmasi keterlambatan';
+            _errorDetail =
+                'Anda dapat mengkonfirmasi keterlambatan\n'
+                'Batas normal: ${DateFormat('HH:mm').format(batasNormal)} WIB';
           } else {
             _statusMessage = 'Memverifikasi lokasi Anda...';
+            _startLocationVerification();
           }
         });
-        if (!_canConfirm) _startLocationVerification();
       }
     } catch (e) {
-      if (mounted) setState(() { 
-        _isCheckingStatus = false; 
-        _statusMessage = 'Gagal cek status'; 
-      });
+      debugPrint('❌ _initCheck error: $e');
+      // Fallback: anggap normal, langsung verifikasi lokasi
+      if (mounted) {
+        setState(() {
+          _isCheckingStatus = false;
+          _canConfirm = false;
+          _isLate = false;
+          _statusMessage = 'Memverifikasi lokasi Anda...';
+          _errorDetail = null;
+        });
+        _startLocationVerification();
+      }
     }
   }
 
@@ -278,27 +393,32 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
 
       // Get current location
       _updateStatus('Mendapatkan lokasi...');
-      final position = await _locationValidator.getCurrentLocation().timeout(
-        const Duration(seconds: 25),
-        onTimeout: () => throw TimeoutException('Waktu mendapatkan lokasi habis'),
-      );
+      final position =
+          await _locationValidator.getCurrentLocation().timeout(
+                const Duration(seconds: 25),
+                onTimeout: () =>
+                    throw TimeoutException('Waktu mendapatkan lokasi habis'),
+              );
 
       if (position == null) {
         _updateStatus(
           'Gagal mendapatkan lokasi',
-          errorDetail: 'Pastikan Anda berada di area dengan sinyal GPS yang baik',
+          errorDetail:
+              'Pastikan Anda berada di area dengan sinyal GPS yang baik',
         );
         return;
       }
 
       _currentPosition = position;
-      debugPrint('Absensi: Location obtained - ${position.latitude}, ${position.longitude}');
+      debugPrint(
+          'Absensi: Location obtained - ${position.latitude}, ${position.longitude}');
 
       // Get address (optional, non-blocking)
       _updateStatus('Mendapatkan alamat...');
       try {
         _currentAddress = await _locationValidator
-            .getAddressFromCoordinates(position.latitude, position.longitude)
+            .getAddressFromCoordinates(
+                position.latitude, position.longitude)
             .timeout(const Duration(seconds: 10));
       } catch (e) {
         debugPrint('Absensi: Address lookup failed: $e');
@@ -334,7 +454,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
                 'Jarak Anda ${_distanceInMeters!.toStringAsFixed(0)}m '
                 'dari lokasi. Maksimal ${_maxRadius!.toStringAsFixed(0)}m.';
           } else {
-            _errorDetail = 'Pastikan Anda berada di lokasi yang ditentukan.';
+            _errorDetail =
+                'Pastikan Anda berada di lokasi yang ditentukan.';
           }
         }
       });
@@ -372,7 +493,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
     }
 
     if (!_locationValid) {
-      _showSnackBar('Lokasi tidak valid. Silakan verifikasi ulang.', Colors.red);
+      _showSnackBar(
+          'Lokasi tidak valid. Silakan verifikasi ulang.', Colors.red);
       return;
     }
 
@@ -429,8 +551,9 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
       if (photo == null) {
         setState(() {
           _isTakingPhoto = false;
-          _statusMessage =
-              _locationValid ? '✅ Lokasi valid! Silakan ambil selfie.' : _statusMessage;
+          _statusMessage = _locationValid
+              ? '✅ Lokasi valid! Silakan ambil selfie.'
+              : _statusMessage;
         });
         _showSnackBar('Pengambilan foto dibatalkan.', Colors.grey);
         return;
@@ -478,7 +601,7 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
   }
 
   // ===========================================================================
-  // PICK BUKTI FOTO (NEW)
+  // PICK BUKTI FOTO (KONFIRMASI KETERLAMBATAN)
   // ===========================================================================
 
   Future<void> _pickBuktiFoto() async {
@@ -514,7 +637,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
       return;
     }
     if (_currentPosition == null) {
-      _showSnackBar('Lokasi tidak tersedia. Silakan verifikasi ulang.', Colors.red);
+      _showSnackBar(
+          'Lokasi tidak tersedia. Silakan verifikasi ulang.', Colors.red);
       return;
     }
 
@@ -604,7 +728,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
             throw Exception(result['message'] ?? 'Upload gagal');
           }
         } on TimeoutException {
-          debugPrint('Absensi: Upload timeout on attempt $uploadAttempt');
+          debugPrint(
+              'Absensi: Upload timeout on attempt $uploadAttempt');
           if (uploadAttempt > _maxRetries) {
             throw TimeoutException(
               'Upload gagal setelah $_maxRetries kali percobaan',
@@ -613,7 +738,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
           _updateStatus('⏳ Upload lambat, mencoba lagi...');
           await Future.delayed(Duration(seconds: uploadAttempt * 2));
         } catch (e) {
-          debugPrint('Absensi: Upload error on attempt $uploadAttempt: $e');
+          debugPrint(
+              'Absensi: Upload error on attempt $uploadAttempt: $e');
           if (uploadAttempt > _maxRetries) rethrow;
           _updateStatus('⏳ Error, mencoba lagi...');
           await Future.delayed(Duration(seconds: uploadAttempt * 2));
@@ -645,7 +771,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
         Navigator.pop(context, true);
         Future.delayed(const Duration(milliseconds: 400), () {
           if (mounted) {
-            _showSnackBar('✅ Absensi berhasil disimpan!', Colors.green);
+            _showSnackBar(
+                '✅ Absensi berhasil disimpan!', Colors.green);
           }
         });
       } else {
@@ -653,7 +780,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
         if (result['publicId'] != null) {
           await _cloudinaryService.deleteFoto(result['publicId']);
         }
-        throw Exception(result['message'] ?? 'Gagal menyimpan data absensi');
+        throw Exception(
+            result['message'] ?? 'Gagal menyimpan data absensi');
       }
     } on TimeoutException catch (e) {
       debugPrint('Absensi: Submit timeout: $e');
@@ -663,7 +791,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
         'Koneksi timeout',
         errorDetail: 'Periksa koneksi internet Anda dan coba lagi',
       );
-      _showSnackBar('Upload timeout. Periksa koneksi internet Anda.', Colors.red);
+      _showSnackBar(
+          'Upload timeout. Periksa koneksi internet Anda.', Colors.red);
     } catch (e) {
       debugPrint('Absensi: Submit error: $e');
       if (!mounted) return;
@@ -687,12 +816,13 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
   }
 
   // ===========================================================================
-  // SUBMIT KONFIRMASI KETERLAMBATAN (NEW)
+  // SUBMIT KONFIRMASI KETERLAMBATAN
   // ===========================================================================
 
   Future<void> _submitKonfirmasi() async {
     if (_melakukanLembur == null) {
-      _showSnackBar('Pilih apakah Anda melakukan lembur atau tidak', Colors.orange);
+      _showSnackBar(
+          'Pilih apakah Anda melakukan lembur atau tidak', Colors.orange);
       return;
     }
     if (_alasanController.text.trim().isEmpty) {
@@ -700,7 +830,9 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
       return;
     }
     if (_melakukanLembur == true && _buktiFotoTerlambat == null) {
-      _showSnackBar('Upload foto bukti wajib jika menyatakan tetap lembur', Colors.orange);
+      _showSnackBar(
+          'Upload foto bukti wajib jika menyatakan tetap lembur',
+          Colors.orange);
       return;
     }
 
@@ -733,7 +865,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
       if (result['success'] == true) {
         Navigator.pop(context, true);
         Future.delayed(const Duration(milliseconds: 400), () {
-          if (mounted) _showSnackBar('✅ ${result['message']}', Colors.green);
+          if (mounted)
+            _showSnackBar('✅ ${result['message']}', Colors.green);
         });
       } else {
         _showSnackBar(result['message'] ?? 'Gagal', Colors.red);
@@ -755,9 +888,12 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(title, style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
-        content: Text(message, style: GoogleFonts.poppins(fontSize: 13)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(title,
+            style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
+        content:
+            Text(message, style: GoogleFonts.poppins(fontSize: 13)),
         actions: [
           TextButton(
             onPressed: () {
@@ -773,9 +909,11 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF1976D2),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
-            child: Text('Coba Lagi', style: GoogleFonts.poppins(color: Colors.white)),
+            child: Text('Coba Lagi',
+                style: GoogleFonts.poppins(color: Colors.white)),
           ),
         ],
       ),
@@ -787,7 +925,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text('Izin Lokasi Diperlukan',
             style: GoogleFonts.poppins(fontWeight: FontWeight.w600)),
         content: Text(
@@ -813,9 +952,11 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF1976D2),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8)),
             ),
-            child: Text('Buka Pengaturan', style: GoogleFonts.poppins(color: Colors.white)),
+            child: Text('Buka Pengaturan',
+                style: GoogleFonts.poppins(color: Colors.white)),
           ),
         ],
       ),
@@ -831,18 +972,33 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
     final mediaQuery = MediaQuery.of(context);
     final bottomPadding = mediaQuery.padding.bottom;
 
-   
-    // LOADING STATE (NEW)
-   
+    // LOADING STATE
     if (_isCheckingStatus) {
       return SafeArea(
         child: Container(
           height: MediaQuery.of(context).size.height * 0.92,
           decoration: const BoxDecoration(
             color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            borderRadius:
+                BorderRadius.vertical(top: Radius.circular(28)),
           ),
-          child: const Center(child: CircularProgressIndicator()),
+          child: Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const CircularProgressIndicator(
+                    color: Color(0xFF1A237E)),
+                const SizedBox(height: 20),
+                Text(
+                  _statusMessage,
+                  style: GoogleFonts.poppins(
+                    fontSize: 14,
+                    color: Colors.grey.shade700,
+                  ),
+                ),
+              ],
+            ),
+          ),
         ),
       );
     }
@@ -852,7 +1008,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
         height: mediaQuery.size.height * 0.92,
         decoration: const BoxDecoration(
           color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(28)),
         ),
         child: IgnorePointer(
           ignoring: _isSubmitting,
@@ -889,14 +1046,16 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
                     ),
                     if (!_isSubmitting)
                       IconButton(
-                        onPressed: () => Navigator.pop(context, false),
+                        onPressed: () =>
+                            Navigator.pop(context, false),
                         icon: Container(
                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
                             color: Colors.grey.shade100,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.close, size: 20),
+                          child:
+                              const Icon(Icons.close, size: 20),
                         ),
                       ),
                   ],
@@ -907,18 +1066,16 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
               Expanded(
                 child: SingleChildScrollView(
                   physics: const BouncingScrollPhysics(),
-                  padding: EdgeInsets.fromLTRB(20, 8, 20, bottomPadding + 20),
+                  padding: EdgeInsets.fromLTRB(
+                      20, 8, 20, bottomPadding + 20),
                   child: Column(
                     children: [
-                     
-                      // INFO CARD + BANNER (NEW)
-                     
+                      // INFO CARD + BANNER
                       _buildInfoCard(),
-                      if (_canConfirm && !_showKonfirmasiForm) _buildLateBanner(),
-                      
-                     
+                      if (_canConfirm && !_showKonfirmasiForm)
+                        _buildLateBanner(),
+
                       // KONFIRMASI FORM ATAU ABSENSI NORMAL
-                     
                       if (_showKonfirmasiForm)
                         _buildKonfirmasiForm()
                       else ...[
@@ -926,16 +1083,19 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
                         const SizedBox(height: 24),
                         _buildStatusCard(),
                         const SizedBox(height: 20),
-                        if (_capturedImage != null) _buildPhotoPreview(),
-                        if (_capturedImage != null) const SizedBox(height: 20),
+                        if (_capturedImage != null)
+                          _buildPhotoPreview(),
+                        if (_capturedImage != null)
+                          const SizedBox(height: 20),
                         if (_isLoadingLocation)
                           const Padding(
                             padding: EdgeInsets.all(24),
                             child: CircularProgressIndicator(),
                           ),
-                        if (!_isLoadingLocation) _buildActionButtons(),
+                        if (!_isLoadingLocation)
+                          _buildActionButtons(),
                       ],
-                      
+
                       const SizedBox(height: 30),
                     ],
                   ),
@@ -949,7 +1109,7 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
   }
 
   // ===========================================================================
-  // INFO LEMBUR CARD (NEW)
+  // INFO LEMBUR CARD
   // ===========================================================================
 
   Widget _buildInfoCard() {
@@ -960,27 +1120,42 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
       decoration: BoxDecoration(
         color: const Color(0xFF1A237E).withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFF1A237E).withValues(alpha: 0.1)),
+        border: Border.all(
+            color: const Color(0xFF1A237E).withValues(alpha: 0.1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            const Icon(Icons.info_outline, size: 18, color: Color(0xFF1A237E)),
+            const Icon(Icons.info_outline,
+                size: 18, color: Color(0xFF1A237E)),
             const SizedBox(width: 8),
-            Text('Detail Lembur Hari Ini', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 13, color: const Color(0xFF1A237E))),
+            Text('Detail Lembur Hari Ini',
+                style: GoogleFonts.poppins(
+                    fontWeight: FontWeight.w600,
+                    fontSize: 13,
+                    color: const Color(0xFF1A237E))),
           ]),
           const SizedBox(height: 10),
-          _infoRow(Icons.calendar_today, DateFormat('EEEE, dd MMM yyyy', 'id_ID').format(l.tanggal)),
-          _infoRow(Icons.access_time, '${l.jamMulai} - ${l.jamSelesai} (${l.totalJam.toStringAsFixed(1)} jam)'),
-          _infoRow(Icons.location_on, l.lokasi['alamat'] ?? l.lokasi['nama_lokasi'] ?? 'Kantor'),
+          _infoRow(
+              Icons.calendar_today,
+              DateFormat('EEEE, dd MMM yyyy', 'id_ID')
+                  .format(l.tanggal)),
+          _infoRow(
+              Icons.access_time,
+              '${l.jamMulai} - ${l.jamSelesai} (${l.totalJam.toStringAsFixed(1)} jam)'),
+          _infoRow(
+              Icons.location_on,
+              l.lokasi['alamat'] ??
+                  l.lokasi['nama_lokasi'] ??
+                  'Kantor'),
         ],
       ),
     );
   }
 
   // ===========================================================================
-  // LATE BANNER (NEW)
+  // LATE BANNER
   // ===========================================================================
 
   Widget _buildLateBanner() {
@@ -995,19 +1170,32 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
       child: Column(
         children: [
           Row(children: [
-            const Icon(Icons.warning_amber, color: Colors.orange, size: 24),
+            const Icon(Icons.warning_amber,
+                color: Colors.orange, size: 24),
             const SizedBox(width: 10),
-            Expanded(child: Text('Anda belum melakukan absensi!', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 13, color: Colors.orange.shade800))),
+            Expanded(
+                child: Text('Anda belum melakukan absensi!',
+                    style: GoogleFonts.poppins(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                        color: Colors.orange.shade800))),
           ]),
           const SizedBox(height: 4),
-          Text('Sudah melewati batas waktu absensi normal.', style: GoogleFonts.poppins(fontSize: 11, color: Colors.orange.shade600)),
+          Text('Sudah melewati batas waktu absensi normal.',
+              style: GoogleFonts.poppins(
+                  fontSize: 11, color: Colors.orange.shade600)),
           const SizedBox(height: 10),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: () => setState(() => _showKonfirmasiForm = true),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-              child: const Text('Konfirmasi Keterlambatan', style: TextStyle(color: Colors.white)),
+              onPressed: () =>
+                  setState(() => _showKonfirmasiForm = true),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10))),
+              child: const Text('Konfirmasi Keterlambatan',
+                  style: TextStyle(color: Colors.white)),
             ),
           ),
         ],
@@ -1016,54 +1204,98 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
   }
 
   // ===========================================================================
-  // KONFIRMASI FORM (NEW)
+  // KONFIRMASI FORM
   // ===========================================================================
 
   Widget _buildKonfirmasiForm() {
     return Container(
       padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: Colors.grey.shade200)),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.grey.shade200)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Konfirmasi Keterlambatan', style: GoogleFonts.poppins(fontWeight: FontWeight.w700, fontSize: 16)),
+          Text('Konfirmasi Keterlambatan',
+              style: GoogleFonts.poppins(
+                  fontWeight: FontWeight.w700, fontSize: 16)),
           const SizedBox(height: 4),
-          Text('Apakah Anda melakukan lembur?', style: GoogleFonts.poppins(fontSize: 13, color: Colors.grey.shade600)),
+          Text('Apakah Anda melakukan lembur?',
+              style: GoogleFonts.poppins(
+                  fontSize: 13, color: Colors.grey.shade600)),
           const SizedBox(height: 14),
           Row(children: [
-            Expanded(child: _optionCard('✅ Ya, saya lembur', Icons.check_circle, Colors.green, _melakukanLembur == true, () => setState(() => _melakukanLembur = true))),
+            Expanded(
+                child: _optionCard(
+                    '✅ Ya, saya lembur',
+                    Icons.check_circle,
+                    Colors.green,
+                    _melakukanLembur == true,
+                    () => setState(() => _melakukanLembur = true))),
             const SizedBox(width: 10),
-            Expanded(child: _optionCard('❌ Tidak lembur', Icons.cancel, Colors.red, _melakukanLembur == false, () => setState(() => _melakukanLembur = false))),
+            Expanded(
+                child: _optionCard(
+                    '❌ Tidak lembur',
+                    Icons.cancel,
+                    Colors.red,
+                    _melakukanLembur == false,
+                    () =>
+                        setState(() => _melakukanLembur = false))),
           ]),
           const SizedBox(height: 14),
           TextField(
             controller: _alasanController,
-            maxLines: 2,
+            maxLines: 3,
             decoration: InputDecoration(
               hintText: 'Tulis alasan keterlambatan...',
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10)),
               contentPadding: const EdgeInsets.all(12),
+              filled: true,
+              fillColor: Colors.grey.shade50,
             ),
           ),
           if (_melakukanLembur == true) ...[
             const SizedBox(height: 12),
             if (_buktiFotoTerlambat != null)
-              ClipRRect(borderRadius: BorderRadius.circular(10), child: Image.file(_buktiFotoTerlambat!, height: 120, width: double.infinity, fit: BoxFit.cover)),
+              ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Image.file(_buktiFotoTerlambat!,
+                      height: 120,
+                      width: double.infinity,
+                      fit: BoxFit.cover)),
             const SizedBox(height: 8),
             OutlinedButton.icon(
               onPressed: _pickBuktiFoto,
               icon: const Icon(Icons.camera_alt, size: 18),
-              label: Text(_buktiFotoTerlambat != null ? 'Ganti Foto' : 'Ambil Foto Bukti'),
-              style: OutlinedButton.styleFrom(shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
+              label: Text(_buktiFotoTerlambat != null
+                  ? 'Ganti Foto'
+                  : 'Ambil Foto Bukti'),
+              style: OutlinedButton.styleFrom(
+                  shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(10))),
             ),
           ],
           const SizedBox(height: 14),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _isSubmitting ? null : _submitKonfirmasi,
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1A237E), padding: const EdgeInsets.symmetric(vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
-              child: Text(_isSubmitting ? 'Mengirim...' : 'Kirim Konfirmasi', style: GoogleFonts.poppins(fontWeight: FontWeight.w600, color: Colors.white)),
+              onPressed:
+                  _isSubmitting ? null : _submitKonfirmasi,
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1A237E),
+                  padding:
+                      const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(12))),
+              child: Text(
+                  _isSubmitting ? 'Mengirim...' : 'Kirim Konfirmasi',
+                  style: GoogleFonts.poppins(
+                      fontWeight: FontWeight.w600,
+                      color: Colors.white)),
             ),
           ),
           const SizedBox(height: 8),
@@ -1083,20 +1315,33 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
     );
   }
 
-  Widget _optionCard(String title, IconData icon, Color color, bool selected, VoidCallback onTap) {
+  Widget _optionCard(String title, IconData icon, Color color,
+      bool selected, VoidCallback onTap) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: selected ? color.withValues(alpha: 0.1) : Colors.grey.shade50,
+          color: selected
+              ? color.withValues(alpha: 0.1)
+              : Colors.grey.shade50,
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: selected ? color : Colors.grey.shade300, width: selected ? 2 : 1),
+          border: Border.all(
+              color: selected ? color : Colors.grey.shade300,
+              width: selected ? 2 : 1),
         ),
         child: Column(children: [
-          Icon(icon, color: selected ? color : Colors.grey, size: 28),
+          Icon(icon,
+              color: selected ? color : Colors.grey, size: 28),
           const SizedBox(height: 4),
-          Text(title, textAlign: TextAlign.center, style: GoogleFonts.poppins(fontSize: 10, fontWeight: FontWeight.w600, color: selected ? color : Colors.grey.shade600)),
+          Text(title,
+              textAlign: TextAlign.center,
+              style: GoogleFonts.poppins(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w600,
+                  color: selected
+                      ? color
+                      : Colors.grey.shade600)),
         ]),
       ),
     );
@@ -1172,7 +1417,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
           radius: 18,
           backgroundColor: bgColor,
           child: isComplete
-              ? const Icon(Icons.check, color: Colors.white, size: 18)
+              ? const Icon(Icons.check,
+                  color: Colors.white, size: 18)
               : Text(
                   number,
                   style: const TextStyle(
@@ -1188,7 +1434,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
           style: GoogleFonts.poppins(
             fontSize: 11,
             color: textColor,
-            fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
+            fontWeight:
+                isActive ? FontWeight.w600 : FontWeight.normal,
           ),
         ),
       ],
@@ -1238,7 +1485,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
               ? const SizedBox(
                   width: 42,
                   height: 42,
-                  child: CircularProgressIndicator(strokeWidth: 3),
+                  child:
+                      CircularProgressIndicator(strokeWidth: 3),
                 )
               : Icon(statusIcon, size: 42, color: iconColor),
           const SizedBox(height: 14),
@@ -1251,7 +1499,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
               color: Colors.black87,
             ),
           ),
-          if (_errorDetail != null && _errorDetail!.isNotEmpty) ...[
+          if (_errorDetail != null &&
+              _errorDetail!.isNotEmpty) ...[
             const SizedBox(height: 8),
             Container(
               padding: const EdgeInsets.all(10),
@@ -1285,7 +1534,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
               Icons.circle_outlined,
               'Radius maksimal: ${_maxRadius!.toStringAsFixed(0)} meter',
             ),
-          if (_currentAddress != null && _currentAddress!.isNotEmpty)
+          if (_currentAddress != null &&
+              _currentAddress!.isNotEmpty)
             _infoRow(Icons.location_city, _currentAddress!),
         ],
       ),
@@ -1318,11 +1568,13 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.broken_image, size: 50, color: Colors.grey),
+                      const Icon(Icons.broken_image,
+                          size: 50, color: Colors.grey),
                       const SizedBox(height: 8),
                       Text(
                         'Gagal memuat foto',
-                        style: GoogleFonts.poppins(fontSize: 12, color: Colors.grey),
+                        style: GoogleFonts.poppins(
+                            fontSize: 12, color: Colors.grey),
                       ),
                     ],
                   ),
@@ -1340,7 +1592,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
                     color: Colors.black.withValues(alpha: 0.6),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.refresh, color: Colors.white, size: 20),
+                  child: const Icon(Icons.refresh,
+                      color: Colors.white, size: 20),
                 ),
               ),
             ),
@@ -1360,7 +1613,9 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
       return Column(
         children: [
           _buildButton(
-            text: _hasAttemptedRetry ? 'Coba Verifikasi Lagi' : 'Verifikasi Lokasi',
+            text: _hasAttemptedRetry
+                ? 'Coba Verifikasi Lagi'
+                : 'Verifikasi Lokasi',
             icon: Icons.refresh,
             color: Colors.orange,
             loading: _isLoadingLocation,
@@ -1371,8 +1626,11 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
           ),
           const SizedBox(height: 12),
           TextButton(
-            onPressed: _isLoadingLocation ? null : () => Navigator.pop(context, false),
-            child: Text('Batal', style: GoogleFonts.poppins(color: Colors.grey)),
+            onPressed: _isLoadingLocation
+                ? null
+                : () => Navigator.pop(context, false),
+            child: Text('Batal',
+                style: GoogleFonts.poppins(color: Colors.grey)),
           ),
         ],
       );
@@ -1439,12 +1697,14 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
             ? const SizedBox(
                 width: 18,
                 height: 18,
-                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                child: CircularProgressIndicator(
+                    strokeWidth: 2, color: Colors.white),
               )
             : Icon(icon, size: 20),
         label: Text(
           loading ? 'Memproses...' : text,
-          style: GoogleFonts.poppins(fontWeight: FontWeight.w600, fontSize: 14),
+          style: GoogleFonts.poppins(
+              fontWeight: FontWeight.w600, fontSize: 14),
         ),
         style: ElevatedButton.styleFrom(
           backgroundColor: color,
@@ -1452,7 +1712,8 @@ class _AbsensiDialogState extends State<AbsensiDialog> {
           disabledBackgroundColor: Colors.grey.shade300,
           disabledForegroundColor: Colors.grey.shade500,
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16)),
         ),
       ),
     );

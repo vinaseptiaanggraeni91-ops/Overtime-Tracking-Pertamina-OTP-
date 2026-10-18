@@ -10,10 +10,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  
   flutter_localizations:
     sdk: flutter
 
   cupertino_icons: ^1.0.8
+  
+ 
 
   # 🔥 FIREBASE
   firebase_core: ^4.6.0
@@ -84,7 +87,7 @@ dependencies:
   mailer: ^7.1.0
 
   # 📱 DEVICE
-  permission_handler: ^12.0.1
+  permission_handler: ^11.3.1
 
   # ⚡ PERFORMANCE
   collection: ^1.19.0

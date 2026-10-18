@@ -1,4 +1,7 @@
 // lib/core/services/notification_service.dart
+// 🔥 FINAL VERSION - COMPLETE WITH SOUND CONFIGURATION
+// ✅ Semua kode asli TETAP ADA, hanya ditambahkan konfigurasi suara
+
 import 'dart:convert';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -34,6 +37,7 @@ const Map<String, String> notificationTypes = {
   'lembur_confirmed': 'Lembur Dikonfirmasi',
   'general': 'Notifikasi Umum',
   'hsse_risk_validation': 'Validasi Risiko HSSE',
+  'user_registered': 'Registrasi User Baru',
 };
 
 /// Priority level
@@ -70,6 +74,10 @@ class NotificationService {
   // ==================== KONSTANTA ====================
   static const String collectionNotifications = 'notifications';
   static const String collectionUsers = 'users';
+  
+  // 🔥 CHANNEL ID UNTUK NOTIFIKASI (DITAMBAHKAN)
+  static const String _channelId = 'overtime_notifications_v2';
+  static const String _channelName = 'Notifikasi Lembur';
   
   // Fonnte WhatsApp API Config
   static const String _fonnteApiKey = 'Eo4VfZvp2mv9Fg6A3DRE6Uq7ydVrbRs';
@@ -362,6 +370,16 @@ class NotificationService {
       });
 
       debugPrint('✅ HSSE validation request sent to $hsseName ($hsseEmail)');
+
+      // 🔔 Kabari Superadmin juga ada validasi risiko HSSE yang perlu ditindaklanjuti
+      notifySuperAdmins(
+        type: 'hsse_risk_validation',
+        title: '$riskEmoji Validasi Risiko HSSE Diperlukan',
+        message: 'Pengajuan lembur dari $pengawasNama ($tanggal) butuh validasi risiko '
+            '(level: ${riskLevel.toUpperCase()}).',
+        data: {'groupId': groupId, 'pengawasNama': pengawasNama, 'riskLevel': riskLevel},
+        priority: 3,
+      );
     } catch (e) {
       debugPrint('❌ Error sendHsseApprovalRequest - $e');
     }
@@ -916,6 +934,15 @@ class NotificationService {
       }
 
       debugPrint('✅ SPKL ready sent to all parties');
+
+      // 🔔 Kabari Superadmin milestone SPKL sudah terbit
+      notifySuperAdmins(
+        type: 'spkl_ready',
+        title: '📄 SPKL Terbit',
+        message: 'SPKL $spklNomor untuk pengajuan $pengawasNama ($tanggal) sudah digenerate.',
+        data: {'groupId': groupId, 'spklNomor': spklNomor, 'pengawasNama': pengawasNama},
+        priority: 4,
+      );
     } catch (e) {
       debugPrint('❌ Error sendSpklReady - $e');
     }
@@ -992,6 +1019,15 @@ class NotificationService {
       priority: 3,
     );
     debugPrint('✅ Rejection notification sent to mitra $mitraId');
+
+    // 🔔 Kabari Superadmin ada mitra yang menolak jadwal — mungkin perlu reassign
+    notifySuperAdmins(
+      type: 'lembur_rejected',
+      title: '⚠️ Mitra Menolak Jadwal Lembur',
+      message: 'Seorang mitra menolak jadwal lembur.${reason != null ? " Alasan: $reason" : ""}',
+      data: {'lemburId': overtimeId, 'mitraId': mitraId, 'reason': reason ?? ''},
+      priority: 3,
+    );
   }
 
   /// Notifikasi mitra konfirmasi lembur
@@ -1101,6 +1137,83 @@ class NotificationService {
     }
   }
 
+
+  // ==================== SECTION 8: SUPERADMIN NOTIFICATION ====================
+
+
+  /// Ambil semua user dengan role superadmin yang aktif
+  Future<List<Map<String, dynamic>>> _getActiveSuperAdmins() async {
+    try {
+      final snapshot = await _firestore
+          .collection(collectionUsers)
+          .where('role', isEqualTo: 'superadmin')
+          .where('status_akun', isEqualTo: 'active')
+          .get();
+
+      return snapshot.docs.map((doc) {
+        final data = doc.data();
+        return {
+          'id': doc.id,
+          'email': data['email'] ?? '',
+          'nama_lengkap': data['nama_lengkap'] ?? 'Superadmin',
+        };
+      }).toList();
+    } catch (e) {
+      debugPrint('❌ Error get superadmins - $e');
+      return [];
+    }
+  }
+
+  /// Kirim notifikasi ke SEMUA Superadmin aktif.
+  Future<void> notifySuperAdmins({
+    required String type,
+    required String title,
+    required String message,
+    Map<String, dynamic>? data,
+    int priority = 4,
+  }) async {
+    try {
+      final superadmins = await _getActiveSuperAdmins();
+      if (superadmins.isEmpty) {
+        debugPrint('⚠️ Tidak ada Superadmin aktif untuk dikirimi notifikasi');
+        return;
+      }
+
+      for (final sa in superadmins) {
+        await _createFirestoreNotification(
+          userId: sa['id'],
+          type: type,
+          title: title,
+          body: message,
+          data: data ?? {},
+          priority: priority,
+        );
+      }
+      debugPrint('✅ Notified ${superadmins.length} superadmin(s) - type: $type');
+    } catch (e) {
+      debugPrint('❌ Error notifySuperAdmins - $e');
+    }
+  }
+
+  /// Notifikasi ke Superadmin ketika ada user baru berhasil registrasi
+  Future<void> sendUserRegisteredNotification({
+    required String userName,
+    required String userEmail,
+    String? userPhone,
+  }) async {
+    await notifySuperAdmins(
+      type: 'user_registered',
+      title: '👤 Registrasi Mitra Baru',
+      message: '$userName ($userEmail) baru saja mendaftar sebagai Mitra.',
+      data: {
+        'userName': userName,
+        'userEmail': userEmail,
+        if (userPhone != null) 'userPhone': userPhone,
+      },
+      priority: 4,
+    );
+  }
+
   
   // ==================== PRIVATE HELPERS ====================
   
@@ -1148,7 +1261,7 @@ class NotificationService {
     );
   }
 
-  /// Kirim push notification via Cloudflare Worker → FCM
+  // 🔥🔥🔥 KIRIM PUSH NOTIFICATION DENGAN KONFIGURASI SUARA 🔥🔥🔥
   Future<void> _sendPushNotification({
     required String userId,
     required String type,
@@ -1177,7 +1290,10 @@ class NotificationService {
       // 4) Tentukan apakah ini notifikasi prioritas
       final isPriority = isPriorityType(type);
 
-      // 5) Kirim ke Cloudflare Worker
+      // 🔔 5) Tentukan suara berdasarkan tipe notifikasi
+      final soundName = isPriority ? 'otp_notification_sound' : 'default';
+
+      // 🔥 6) Kirim ke Cloudflare Worker DENGAN KONFIGURASI SUARA LENGKAP
       final payload = {
         'token': token,
         'title': title,
@@ -1187,9 +1303,36 @@ class NotificationService {
           ...stringData,
         },
         'is_priority': isPriority,
+        
+        // 🔔 KONFIGURASI SUARA - DITAMBAHKAN
+        'sound': soundName,
+        'channel_id': _channelId,
+        'android_channel_id': _channelId,
+        
+        // 📱 Android-specific config
+        'android': {
+          'priority': 'high',
+          'notification': {
+            'channel_id': _channelId,
+            'sound': soundName,
+            'priority': 'max',
+            'visibility': 'public',
+          },
+        },
+        
+        // 🍎 iOS-specific config
+        'apns': {
+          'payload': {
+            'aps': {
+              'sound': '$soundName.caf',
+              'content_available': 1,
+              'mutable_content': 1,
+            },
+          },
+        },
       };
 
-      debugPrint('📤 Sending push to Worker - type: $type, priority: $isPriority');
+      debugPrint('📤 Sending push to Worker - type: $type, priority: $isPriority, sound: $soundName');
 
       final response = await http.post(
         Uri.parse(_pushWorkerUrl),

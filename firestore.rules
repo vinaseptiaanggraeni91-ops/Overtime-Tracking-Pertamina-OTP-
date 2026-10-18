@@ -57,7 +57,6 @@ service cloud.firestore {
       return isManagerHSSE() || isHSSEManagerFromFungsi();
     }
 
-    // 🔥 Helper: Apakah user adalah manager (semua jenis)
     function isAnyManager() {
       return isManager() || isManagerHSSE() || isHSSEManagerFromFungsi();
     }
@@ -139,37 +138,25 @@ service cloud.firestore {
       return level in ['none', 'low', 'medium', 'high', 'critical'];
     }
 
-    // ═══════════════════════════════════════════════════════
-    // HELPER: Cek status bisa dibatalkan
-    // ═══════════════════════════════════════════════════════
     function canCancelStatus() {
       let status = resource.data.status;
       return status == 'pending' || status == 'disetujui';
     }
 
-    // ═══════════════════════════════════════════════════════
-    // 🔥 HELPER: Field absensi yang diizinkan untuk mitra
-    // ═══════════════════════════════════════════════════════
     function isMitraAbsensiUpdate() {
       let allowedFields = [
-        // Absensi core
         'absensi_status', 'absensi_waktu', 'absensi_checkout_waktu',
         'absensi_oleh', 'absensi_nama', 'absensi_foto_url',
-        // 🔥 KETERLAMBATAN (DUA FIELD)
         'absensi_keterlambatan', 'konfirmasi_keterlambatan',
-        // Check-in (DUA VERSI: waktu & time)
         'check_in_foto_url', 'check_in_waktu', 'check_in_time',
         'check_in_latitude', 'check_in_longitude', 'check_in_address',
-        // Check-out (DUA VERSI: waktu & time)
         'check_out_foto_url', 'check_out_waktu', 'check_out_time',
         'check_out_latitude', 'check_out_longitude', 'check_out_address',
-        // Status
         'status', 'is_terlambat', 'keterlambatan_status',
+        'is_checkout_terlambat', 'checkout_keterlambatan',
         'completed_at', 'updated_at', 'updated_by',
         'expired_at', 'expired_reason',
-        // Jam real
         'actual_total_jam', 'total_jam_real',
-        // Metadata
         'last_modified_at', 'last_modified_by', 'last_modified_by_name'
       ];
       
@@ -177,9 +164,6 @@ service cloud.firestore {
           .hasOnly(allowedFields);
     }
 
-    // ═══════════════════════════════════════════════════════
-    // HELPER: Field yang diizinkan untuk pengawas update
-    // ═══════════════════════════════════════════════════════
     function isPengawasUpdate() {
       let allowedFields = [
         'status', 'absensi_status', 'absensi_waktu', 'absensi_checkout_waktu',
@@ -192,6 +176,7 @@ service cloud.firestore {
         'check_out_latitude', 'check_out_longitude', 'check_out_address',
         'actual_total_jam', 'total_jam_real',
         'actual_income', 'income_amount', 'is_income_calculated',
+        'is_checkout_terlambat', 'checkout_keterlambatan',
         'completed_at', 'updated_at', 'updated_by',
         'expired_at', 'expired_reason', 'requires_hsse_approval',
         'is_paid', 'paid_at', 'paid_by', 'paid_by_name', 'paid_note',
@@ -204,7 +189,6 @@ service cloud.firestore {
           .hasOnly(allowedFields);
     }
 
-    // 🔥 HELPER: Cek mitra dalam dokumen
     function isMitraInDocument() {
       return isMitra() && (
         resource.data.mitra_id == request.auth.uid ||
@@ -212,13 +196,11 @@ service cloud.firestore {
       );
     }
 
-    // 🔥 HELPER: Cek status lembur valid untuk absen
     function canMitraAbsen() {
       let status = resource.data.status;
       return status == 'disetujui' || status == 'approved' || status == 'selesai';
     }
 
-    // 🔥 HELPER: Cek absensi belum final
     function canUpdateAbsensi() {
       let absensiStatus = resource.data.absensi_status;
       return absensiStatus == null || 
@@ -228,16 +210,31 @@ service cloud.firestore {
              absensiStatus == 'sudah_absen';
     }
 
+    // 🔓 HELPER (BARU): Izinkan penambahan SATU entry audit_trail terkait
+    // reset password, tanpa perlu login — dipakai forgot-password flow
+    // (sendResetPasswordEmail & confirmResetPassword di auth_service.dart).
+    // Hanya field `audit_trail` yang boleh berubah, dan entry barunya
+    // dibatasi ke dua action yang valid untuk reset password saja.
+    function isValidResetAuditAppend() {
+      let oldTrail = ('audit_trail' in resource.data) ? resource.data.audit_trail : [];
+      let newTrail = request.resource.data.audit_trail;
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(['audit_trail'])
+          && newTrail is list
+          && newTrail.size() == oldTrail.size() + 1
+          && newTrail[newTrail.size() - 1].action in
+             ['reset_password_request', 'reset_password_complete'];
+    }
+
     // =========================================================
-    // 🔥 PUBLIC READ - PEKERJA
+    // PEKERJA
     // =========================================================
     match /pekerja/{id} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow write: if isSuperAdmin();
     }
 
     match /master_pekerja/{id} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow write: if isSuperAdmin();
     }
 
@@ -245,7 +242,7 @@ service cloud.firestore {
     // MASTER WORKERS
     // =========================================================
     match /master_workers/{workerId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create, update, delete: if isSuperAdmin();
     }
 
@@ -308,7 +305,8 @@ service cloud.firestore {
     // PHONE MAPPINGS
     // =========================================================
     match /phone_mappings/{phone} {
-      allow read: if true;
+      allow get: if true;
+      allow list: if isSuperAdmin();
       allow create: if isAuthenticated() && (
         request.resource.data.user_id == request.auth.uid || isSuperAdmin() || isManager()
       );
@@ -331,9 +329,10 @@ service cloud.firestore {
     }
 
     // =========================================================
-    // USERS
+    // 🔥 USERS (DIPERBAIKI - ALLOW LIST)
     // =========================================================
     match /users/{userId} {
+      // CREATE
       allow create: if isAuthenticated() && (
         (request.auth.uid == userId &&
          request.resource.data.role == 'mitra' &&
@@ -348,31 +347,43 @@ service cloud.firestore {
             isValidStatusAkun(request.resource.data.status_akun))
       );
 
+      // 🔥 READ: Allow GET & LIST untuk authenticated users
+      // Ini yang bikin query where email == ... bisa jalan
       allow read: if isAuthenticated();
 
-      allow update: if isAuthenticated() && (
-        isSuperAdmin()
-        || (isManager() && 
-            getTargetUserRole(userId) != 'superadmin' &&
-            getTargetUserRole(userId) != 'officer_safety' &&
-            getTargetUserRole(userId) != 'manager_hsse')
-        || (isOfficerSafety() && request.auth.uid == userId)
-        || (request.auth.uid == userId && 
-            request.resource.data.diff(resource.data).affectedKeys()
-                .hasOnly([
-                  'nama_lengkap', 'phone', 'phone_hash', 'email', 'email_hash',
-                  'fungsi', 'fungsi_label', 'isOnline', 'is_online',
-                  'last_seen', 'last_login', 'last_active',
-                  'login_attempts', 'last_failed_login', 'account_locked',
-                  'is_verified', 'terms_accepted', 'terms_accepted_at', 'terms_version',
-                  'updated_at', 'audit_trail', 'security', 'photo_url', 'avatar',
-                  'officer_safety_level', 'officer_safety_department',
-                  'officer_safety_authority', 'officer_safety_certification',
-                  'officer_safety_license_number', 'officer_safety_joined_date',
-                  'fcmToken', 'fcmTokenUpdatedAt'
-                ]))
-      );
+      // UPDATE
+      allow update: if (
+        isAuthenticated() && (
+          isSuperAdmin()
+          || (isManager() &&
+              getTargetUserRole(userId) in ['pengawas', 'mitra'] &&
+              !request.resource.data.diff(resource.data).affectedKeys()
+                  .hasAny(['role', 'status_akun', 'security']))
+          || (isOfficerSafety() && request.auth.uid == userId)
+          || (request.auth.uid == userId && 
+              request.resource.data.diff(resource.data).affectedKeys()
+                  .hasOnly([
+                    'nama_lengkap', 'phone', 'phone_hash', 'email', 'email_hash',
+                    'fungsi', 'fungsi_label', 'isOnline', 'is_online',
+                    'last_seen', 'last_login', 'last_active',
+                    'login_attempts', 'last_failed_login', 'account_locked',
+                    'is_verified', 'terms_accepted', 'terms_accepted_at', 'terms_version',
+                    'updated_at', 'audit_trail', 'security', 'photo_url', 'avatar',
+                    'officer_safety_level', 'officer_safety_department',
+                    'officer_safety_authority', 'officer_safety_certification',
+                    'officer_safety_license_number', 'officer_safety_joined_date',
+                    'fcmToken', 'fcmTokenUpdatedAt'
+                  ]))
+        )
+      )
+      // 🔓 FORGOT-PASSWORD FLOW: user belum login sama sekali di titik ini.
+      // Izinkan HANYA menambah satu entry audit_trail (reset_password_request /
+      // reset_password_complete) ke dokumen SIAPA PUN. Tidak ada field lain
+      // yang bisa diubah lewat jalur ini, jadi tidak bisa dipakai untuk
+      // privilege escalation atau mengubah data akun.
+      || isValidResetAuditAppend();
 
+      // DELETE
       allow delete: if isSuperAdmin() && userId != request.auth.uid;
     }
 
@@ -426,10 +437,9 @@ service cloud.firestore {
     }
 
     // =========================================================
-    // 🔥 PENGAJUAN LEMBUR
+    // PENGAJUAN LEMBUR
     // =========================================================
     match /pengajuan_lembur/{pengajuanId} {
-      // READ: Semua yang punya akses
       allow read: if isAuthenticated() && (
         isSuperAdmin()
         || isAnyManager()
@@ -438,14 +448,12 @@ service cloud.firestore {
         || (isMitra() && request.auth.uid in resource.data.mitra_ids)
       );
 
-      // CREATE: Pengawas
       allow create: if isAuthenticated() && (
         isPengawas() &&
         request.resource.data.pengawas_id == request.auth.uid &&
         isValidPengajuanData()
       );
 
-      // UPDATE: Admin, Manager, Officer Safety, Pengawas
       allow update: if isAuthenticated() && (
         isSuperAdmin()
         || isAnyManager()
@@ -462,54 +470,40 @@ service cloud.firestore {
     }
 
     // =========================================================
-    // 🔥🔥🔥 LEMBUR MITRA - AKSES PENUH MANAGER + MITRA ABSENSI 🔥🔥🔥
+    // LEMBUR MITRA
     // =========================================================
     match /lembur_mitra/{lemburId} {
-      
-      // ✅ READ: Semua role yang punya akses
       allow read: if isAuthenticated() && (
         isSuperAdmin()
-        || isAnyManager()          // 🔥 Manager: akses baca semua
+        || isAnyManager()
         || isOfficerSafety()
         || isPengawas()
         || isMitra()
       );
 
-      // ✅ CREATE: Pengawas
       allow create: if isAuthenticated() && (
         isPengawas() &&
         request.resource.data.diajukan_oleh_id == request.auth.uid &&
         isValidLemburData()
       );
 
-      // 🔥🔥🔥 UPDATE: PERBAIKAN UTAMA 🔥🔥🔥
       allow update: if isAuthenticated() && (
-        // 1. Superadmin: update apa saja
         isSuperAdmin()
-        
-        // 🔥 2. MANAGER: AKSES PENUH - bisa update SEMUA field
         || isAnyManager()
-        
-        // 3. Officer Safety: update dokumen yang perlu HSSE
         || (isOfficerSafety() && resource.data.requires_hsse_approval == true)
-        
-        // 4. Pengawas: update pengajuan sendiri (pending atau cancel)
         || (isPengawas() && 
             resource.data.diajukan_oleh_id == request.auth.uid && 
             (resource.data.status == 'pending' || canCancelStatus()) &&
             isPengawasUpdate()
         )
-        
-        // 🔥🔥🔥 5. MITRA: Absensi & Keterlambatan 🔥🔥🔥
         || (isMitra() && 
-            isMitraInDocument() &&       // Mitra ada di dokumen
-            canMitraAbsen() &&           // Status lembur valid
-            canUpdateAbsensi() &&        // Absensi belum final
-            isMitraAbsensiUpdate()       // Hanya field yang diizinkan
+            isMitraInDocument() &&
+            canMitraAbsen() &&
+            canUpdateAbsensi() &&
+            isMitraAbsensiUpdate()
         )
       );
 
-      // ❌ DELETE: Hanya superadmin
       allow delete: if isSuperAdmin();
     }
 
@@ -700,7 +694,7 @@ service cloud.firestore {
     }
 
     // =========================================================
-    // NOTIFICATION PREFERENCES (toggle jenis, suara, channel)
+    // NOTIFICATION PREFERENCES
     // =========================================================
     match /notification_preferences/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || isSuperAdmin());
@@ -717,6 +711,21 @@ service cloud.firestore {
         request.resource.data.user_id == request.auth.uid || isSuperAdmin()
       );
       allow delete: if isSuperAdmin() || resource.data.user_id == request.auth.uid;
+    }
+
+    // =========================================================
+    // 🔥 EMAIL MAPPINGS (BARU - Untuk verify email/password reset)
+    // =========================================================
+    match /email_mappings/{email} {
+      // GET: Public buat verify email saat password reset
+      allow get: if true;
+      // LIST: Hanya superadmin
+      allow list: if isSuperAdmin();
+      // WRITE: Hanya superadmin atau user yang bersangkutan
+      allow create: if isAuthenticated() && (
+        request.resource.data.user_id == request.auth.uid || isSuperAdmin()
+      );
+      allow update, delete: if isSuperAdmin();
     }
 
     // =========================================================

@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/app_colors.dart';
 import '../core/services/auth_service.dart';
+import '../core/services/push_notification_service.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -125,7 +126,16 @@ class _LoginScreenState extends State<LoginScreen>
 
     if (result != null && result.success) {
       _showSuccess("Selamat datang kembali, ${result.nama}!");
-      
+
+      // 🔔 PENTING: sama seperti login manual, auto-login juga wajib
+      // refresh token FCM — ini yang selama ini KELEWAT, makanya token
+      // di Firestore bisa basi walau user rutin buka app via auto-login.
+      unawaited(
+        PushNotificationService().refreshToken().catchError((e) {
+          debugPrint('⚠️ Gagal refresh FCM token setelah auto-login: $e');
+        }),
+      );
+
       // 🔥 Delay sebentar agar animasi sempat terlihat
       await Future.delayed(const Duration(milliseconds: 500));
       
@@ -224,6 +234,19 @@ class _LoginScreenState extends State<LoginScreen>
 
         _showSuccess(
           "Selamat datang, ${result.nama}!",
+        );
+
+        // 🔔 PENTING: simpan/refresh token FCM device ini ke Firestore
+        // setelah login berhasil. Tanpa ini, token FCM bisa jadi basi
+        // (UNREGISTERED) walau user rutin login, karena token baru
+        // dari device tidak pernah diberitahu ke server.
+        // Tidak di-await biar navigasi ke dashboard tidak ketunda,
+        // dan dibungkus try-catch biar gagal refresh token tidak
+        // menggagalkan proses login itu sendiri.
+        unawaited(
+          PushNotificationService().refreshToken().catchError((e) {
+            debugPrint('⚠️ Gagal refresh FCM token setelah login: $e');
+          }),
         );
 
         _navigateToDashboard(result.role);
@@ -1064,7 +1087,7 @@ class _LoginScreenState extends State<LoginScreen>
             
             _shouldAutoLogin = false;
             final email = _identityController.text.trim();
-            context.push('/reset-password?email=$email');
+            context.push('/reset-password-request?email=$email');
           },
           child: Text(
             "Lupa Password?",

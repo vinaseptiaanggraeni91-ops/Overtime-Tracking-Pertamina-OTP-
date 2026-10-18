@@ -7,6 +7,15 @@ plugins {
     id 'dev.flutter.flutter-gradle-plugin'
 }
 
+// 🔒 FIX: baca keystore produksi dari key.properties (TIDAK di-commit ke
+// git — tambahkan ke .gitignore). File ini hanya berisi PATH & PASSWORD,
+// bukan keystore itu sendiri.
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('key.properties')
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace 'com.pertamina.kmj.project_otp_kmj'
     compileSdk flutter.compileSdkVersion
@@ -31,9 +40,41 @@ android {
         multiDexEnabled true
     }
 
+    signingConfigs {
+        release {
+            // 🔒 FIX: sebelumnya release pakai signingConfigs.debug (debug
+            // keystore Android yang IDENTIK di semua mesin developer).
+            // Artinya: (a) APK ini ditolak Play Store, (b) siapa pun bisa
+            // membuat build yang secara kriptografis terlihat sah/resmi.
+            //
+            // Kalau key.properties belum ada (mis. di CI sebelum secret
+            // di-setup), fallback ke debug config supaya `flutter build`
+            // tidak langsung gagal — TAPI build hasil fallback ini TIDAK
+            // BOLEH didistribusikan, hanya untuk local testing.
+            if (keystorePropertiesFile.exists()) {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
+
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            signingConfig keystorePropertiesFile.exists()
+                ? signingConfigs.release
+                : signingConfigs.debug
+
+            // 🔒 FIX: sebelumnya tidak ada minify/shrink sama sekali, jadi
+            // secret & string apa pun di source (termasuk yang sudah
+            // diperbaiki di notification_service.dart) tetap mudah dibaca
+            // mentah-mentah lewat `strings app-release.apk`. Obfuscation
+            // bukan proteksi mutlak, tapi menaikkan biaya ekstraksi secara
+            // signifikan dan wajib untuk aplikasi korporat.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
     }
     

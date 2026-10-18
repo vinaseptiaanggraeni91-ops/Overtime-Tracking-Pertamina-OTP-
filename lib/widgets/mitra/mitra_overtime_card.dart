@@ -1,10 +1,10 @@
 // lib/widgets/mitra/mitra_overtime_card.dart
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
-import '../../core/services/mitra_service.dart';              // ✅ TAMBAHKAN IMPORT INI
-import '../../core/services/overtime_history_service.dart';
+import '../../core/services/mitra_service.dart';
 import '../../core/services/live_location_service.dart';
-import '/widgets/absensi/absensi_dialog.dart';
+import '../absensi/absensi_dialog.dart';
+import '../../core/services/overtime_history_service.dart';
 
 class MitraOvertimeCard extends StatefulWidget {
   final Map<String, dynamic> overtime;
@@ -35,28 +35,32 @@ class MitraOvertimeCard extends StatefulWidget {
 }
 
 class _MitraOvertimeCardState extends State<MitraOvertimeCard> {
-  final _service = MitraService();  // ✅ Sekarang MitraService dikenal karena sudah di-import
+  final _service = MitraService();
   bool _isLoadingAction = false;
 
+  // ═══════════════════════════════════════════════════════
+  // 🔥 HANDLE CHECK-OUT (FIXED - NO OvertimeHistory)
+  // ═══════════════════════════════════════════════════════
   Future<void> _handleCheckOut() async {
     setState(() => _isLoadingAction = true);
+    
     try {
-      final overtimeItem = await OvertimeHistoryService()
-          .getOvertimeById(widget.overtime['id']);
+      // ✅ Kirim Map langsung, bukan OvertimeHistory
+      final absensiSuccess = await AbsensiDialog.show(
+        context,
+        OvertimeHistory.fromMap(widget.overtime, widget.overtime['id']), // ✅ diubah dari Map ke OvertimeHistory
+        isCheckOut: true,
+      );
       
-      if (overtimeItem == null) {
-        if (mounted) _showSnackBar('Data lembur tidak ditemukan', false);
-        return;
-      }
-      
-      final absensiSuccess = await AbsensiDialog.show(context, overtimeItem);
       if (absensiSuccess == true && mounted) {
         await LiveLocationService().stopTracking();
+        
         final income = await _service.checkOutLembur(
           widget.overtime['id'],
           widget.userName,
           widget.overtimeSettings,
         );
+        
         if (mounted) {
           widget.onCheckOut();
           _showSnackBar(
@@ -76,20 +80,35 @@ class _MitraOvertimeCardState extends State<MitraOvertimeCard> {
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
-      ..showSnackBar(SnackBar(
-        content: Row(children: [
-          Icon(success ? Icons.check_circle_outline : Icons.error_outline,
-              color: Colors.white, size: 16),
-          const SizedBox(width: 8),
-          Expanded(child: Text(message, style: const TextStyle(fontSize: 11))),
-        ]),
-        backgroundColor: success ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        margin: EdgeInsets.only(
-            left: 12, right: 12, bottom: MediaQuery.of(context).size.height * 0.12),
-        duration: const Duration(seconds: 3),
-      ));
+      ..showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(
+                success ? Icons.check_circle_outline : Icons.error_outline,
+                color: Colors.white,
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  message,
+                  style: const TextStyle(fontSize: 11),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: success ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: EdgeInsets.only(
+            left: 12,
+            right: 12,
+            bottom: MediaQuery.of(context).size.height * 0.12,
+          ),
+          duration: const Duration(seconds: 3),
+        ),
+      );
   }
 
   @override
@@ -147,10 +166,13 @@ class _MitraOvertimeCardState extends State<MitraOvertimeCard> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.white.withAlpha(60),  // ✅ FIX: Colors.white24 -> Colors.white.withAlpha(60)
+                  color: Colors.white.withAlpha(60),
                   shape: BoxShape.circle,
                   boxShadow: [
-                    BoxShadow(color: Colors.white.withAlpha(60), blurRadius: 8),
+                    BoxShadow(
+                      color: Colors.white.withAlpha(60),
+                      blurRadius: 8,
+                    ),
                   ],
                 ),
                 child: Icon(statusIcon, color: Colors.white, size: 22),
@@ -183,9 +205,9 @@ class _MitraOvertimeCardState extends State<MitraOvertimeCard> {
               ),
             ],
           ),
-          
+
           const SizedBox(height: 12),
-          
+
           // Detail waktu & lokasi
           Container(
             padding: const EdgeInsets.all(12),
@@ -211,7 +233,7 @@ class _MitraOvertimeCardState extends State<MitraOvertimeCard> {
                     ),
                   ],
                 ),
-                
+
                 // Action Button
                 if (!widget.isCheckedOut) ...[
                   if (widget.isCheckedIn)
@@ -253,7 +275,7 @@ class _MitraOvertimeCardState extends State<MitraOvertimeCard> {
               ],
             ),
           ),
-          
+
           // Lokasi
           if (lokasi.isNotEmpty) ...[
             const SizedBox(height: 8),

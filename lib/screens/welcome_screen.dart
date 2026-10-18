@@ -108,28 +108,6 @@ Image.asset(
                         ),
                       ),
 
-                      // ⬇️⬇️⬇️ TOMBOL TEST NOTIFIKASI ⬇️⬇️⬇️
-                      const SizedBox(height: 16),
-                      ElevatedButton.icon(
-                        onPressed: () {
-                          PushNotificationService().testLocalNotification();
-                        },
-                        icon: const Icon(Icons.notifications_active),
-                        label: const Text('🔔 TEST NOTIFIKASI'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.orange,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 20,
-                            vertical: 10,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                        ),
-                      ),
-                      // ⬆️⬆️⬆️ TOMBOL TEST NOTIFIKASI ⬆️⬆️⬆️
-
                       const SizedBox(height: 20),
 
                       /// 🔥 CARD BIRU (WRAPPER)

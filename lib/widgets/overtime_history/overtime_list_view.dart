@@ -69,6 +69,57 @@ class OvertimeListView extends StatelessWidget {
     return 'default';
   }
 
+  // ═══════════════════════════════════════════════════════════
+  // 🔥🔥🔥 HELPER: Format nama mitra untuk multiple
+  // ═══════════════════════════════════════════════════════════
+  String _formatMitraNames(OvertimeHistory item) {
+    // Jika bukan multiple, tampilkan nama mitra tunggal
+    if (item.isMultiple != true || item.mitraIds == null || item.mitraIds!.isEmpty) {
+      return item.namaMitra ?? 'Tidak diketahui';
+    }
+
+    // Untuk multiple mitra, tampilkan format: "Mitra 1, Mitra 2 +1 lainnya"
+    final totalMitra = item.totalMitra;
+    final mitraIds = item.mitraIds!;
+
+    // Ambil nama dari list mitra_ids (untuk sementara pakai ID, nanti bisa di-resolve)
+    if (mitraIds.length == 1) {
+      return item.namaMitra ?? 'Mitra ${mitraIds.first}';
+    }
+
+    final firstTwo = mitraIds.take(2).map((id) {
+      // Coba ambil nama dari item jika ada
+      if (id == item.mitraId) return item.namaMitra ?? id;
+      return id.length > 8 ? '${id.substring(0, 8)}...' : id;
+    }).join(', ');
+
+    if (totalMitra > 2) {
+      return '$firstTwo +${totalMitra - 2} lainnya';
+    }
+
+    return firstTwo;
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🔥🔥🔥 HELPER: Get fungsi mitra label
+  // ═══════════════════════════════════════════════════════════
+  String _getFungsiLabel(String? fungsi) {
+    switch (fungsi?.toLowerCase()) {
+      case 'operation':
+        return 'Operational';
+      case 'maintenance':
+        return 'Maintenance';
+      case 'hsse':
+        return 'HSSE';
+      case 'gpr':
+        return 'GPR';
+      case 'bs':
+        return 'Business Support';
+      default:
+        return fungsi ?? 'Unknown';
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isHSSE = userFungsi == 'hsse';
@@ -267,7 +318,7 @@ class OvertimeListView extends StatelessWidget {
   }
 
   // ═══════════════════════════════════════════════════════════
-  // 🔥 CARD NORMAL — DENGAN TAMPILAN BERBEDA PER STATUS ABSENSI
+  // 🔥 CARD NORMAL — DENGAN TAMPILAN MULTIPLE MITRA
   // ═══════════════════════════════════════════════════════════
   Widget _buildNormalCard(BuildContext context, OvertimeHistory item) {
     final canCancel = _canCancelPengajuan(item);
@@ -276,7 +327,7 @@ class OvertimeListView extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        // 🔥🔥🔥 CARD UTAMA DENGAN TAMPILAN DINAMIS
+        // 🔥🔥🔥 CARD UTAMA
         OvertimeCard(
           item: item,
           rateService: rateService,
@@ -286,10 +337,145 @@ class OvertimeListView extends StatelessWidget {
           showHSSEInfo: showHSSEStatus,
           useAccurateCost: true,
         ),
+        
+        // 🔥🔥🔥 MULTIPLE MITRA INFO SECTION
+        if (item.isMultiple == true && item.totalMitra > 1)
+          _buildMultipleMitraFooter(item),
+        
         // 🔥 Tombol batal hanya untuk pengawas
         if (canCancel && userRole == 'pengawas')
           _buildCancelButton(context, item, isExpired),
       ],
+    );
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // 🔥🔥🔥 MULTIPLE MITRA FOOTER
+  // ═══════════════════════════════════════════════════════════
+  Widget _buildMultipleMitraFooter(OvertimeHistory item) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF8B5CF6).withValues(alpha: 0.05),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(10)),
+        border: Border.all(
+          color: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
+          width: 0.5,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Header: Jumlah mitra
+          Row(
+            children: [
+              Container(
+                width: 24,
+                height: 24,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Icon(
+                  Icons.groups_rounded,
+                  color: Color(0xFF8B5CF6),
+                  size: 14,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                '${item.totalMitra} Mitra',
+                style: GoogleFonts.poppins(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF8B5CF6),
+                ),
+              ),
+              const Spacer(),
+              // Badge: Multiple
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF8B5CF6).withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  'KOLEKTIF',
+                  style: GoogleFonts.poppins(
+                    fontSize: 8,
+                    fontWeight: FontWeight.w700,
+                    color: const Color(0xFF8B5CF6),
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Nama mitra utama
+          Row(
+            children: [
+              Icon(Icons.person_rounded, size: 12, color: Colors.grey[500]),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  item.namaMitra ?? '-',
+                  style: GoogleFonts.poppins(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: Colors.grey[700],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              if (item.fungsiMitra != null) ...[
+                Container(
+                  margin: const EdgeInsets.only(left: 6),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[100],
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    _getFungsiLabel(item.fungsiMitra),
+                    style: GoogleFonts.poppins(
+                      fontSize: 9,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+          // Info tambahan mitra
+          if (item.totalMitra > 1) ...[
+            const SizedBox(height: 4),
+            Row(
+              children: [
+                Icon(Icons.info_outline_rounded, size: 11, color: Colors.grey[400]),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    item.totalMitra > 2
+                        ? '+${item.totalMitra - 1} mitra lainnya dalam pengajuan ini'
+                        : '+1 mitra lainnya dalam pengajuan ini',
+                    style: GoogleFonts.poppins(
+                      fontSize: 10,
+                      color: Colors.grey[400],
+                      fontStyle: FontStyle.italic,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -310,6 +496,9 @@ class OvertimeListView extends StatelessWidget {
           showHSSEInfo: true,
           useAccurateCost: true,
         ),
+        // 🔥 Multiple mitra footer untuk HSSE juga
+        if (item.isMultiple == true && item.totalMitra > 1)
+          _buildMultipleMitraFooter(item),
         _buildHSSEInfoFooter(item),
       ],
     );

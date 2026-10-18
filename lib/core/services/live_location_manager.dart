@@ -1,6 +1,3 @@
-// lib/core/services/live_location_manager.dart
-// 🔥 FINAL VERSION - DILENGKAPI NETWORK MONITORING
-
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -11,23 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '/core/services/live_location_service.dart';
 import '/core/services/network_service.dart'; // 🔥 NETWORK SERVICE
 
-/// LiveLocationManager - Singleton Manager untuk Live Location Tracking
-/// 
-/// Fitur:
-/// ✅ Tetap berjalan meskipun user pindah halaman
-/// ✅ Survive app restart (restore dari SharedPreferences)
-/// ✅ Background tracking (timer tetap jalan)
-/// ✅ Real-time duration tracking
-/// ✅ Auto-stop saat melewati jam selesai
-/// ✅ Retry mechanism saat gagal kirim lokasi
-/// ✅ Battery-aware tracking interval
-/// ✅ Listener pattern untuk update UI
-/// ✅ Lifecycle-aware (pause/resume sesuai app state)
-/// 🔥 Real-time monitor status lembur (auto-detect pembatalan)
-/// 🔥 Force stop + reset saat lembur dibatalkan pengawas
-/// 🔥 Validasi lembur sebelum restore tracking
-/// 🔥 System log terintegrasi dengan collection system_logs
-/// 🔥 Network monitoring - pause/resume saat koneksi berubah
 class LiveLocationManager extends ChangeNotifier with WidgetsBindingObserver {
   // ═══════════════════════════════════════════════════════
   // SINGLETON PATTERN
@@ -74,6 +54,7 @@ class LiveLocationManager extends ChangeNotifier with WidgetsBindingObserver {
   // ═══════════════════════════════════════════════════════
   bool _isActive = false;
   bool _isPaused = false;
+  bool _isStopping = false; // 🔥 FIX: guard supaya stopTracking tidak dobel jalan
   DateTime? _startedAt;
   DateTime? _pausedAt;
   String? _userId;
@@ -464,7 +445,16 @@ class LiveLocationManager extends ChangeNotifier with WidgetsBindingObserver {
   // ═══════════════════════════════════════════════════════
 
   Future<void> stopTracking({bool skipLog = false}) async {
-    if (!_isActive) return;
+    // 🔥 FIX: guard reentrancy. Tanpa ini, dua pemanggil stopTracking() yang
+    // hampir bersamaan (mis. force-stop dari Firestore monitor + auto-stop
+    // timer) bisa lolos cek `_isActive` sebelum salah satunya sempat
+    // meng-set `_isActive = false`, sehingga stopLiveTracking() terpanggil
+    // dua kali dan salah satunya "kehilangan" _userId/_lemburId di tengah jalan.
+    if (!_isActive || _isStopping) {
+      debugPrint('🔴 LiveLocationManager: stopTracking diabaikan (sudah stop / sedang stop)');
+      return;
+    }
+    _isStopping = true;
 
     final durationBeforeStop = getDurationString();
     final lemburIdSnapshot = _lemburId;
@@ -508,6 +498,7 @@ class LiveLocationManager extends ChangeNotifier with WidgetsBindingObserver {
     }
 
     _resetState();
+    _isStopping = false;
     await _clearState();
     notifyListeners();
     
@@ -700,7 +691,18 @@ class LiveLocationManager extends ChangeNotifier with WidgetsBindingObserver {
           ),
         );
       } catch (e) {
-        debugPrint('⚠️ Gagal dapat posisi: $e');
+        debugPrint('⚠️ Gagal dapat posisi (mis. GPS timeout): $e');
+
+        // 🔥 FIX: getCurrentPosition timeout-nya 10 detik, sama persis
+        // dengan durasi tracking di kasus bug. Selama menunggu, tracking
+        // bisa saja sudah di-stop (mis. karena expired/force-stop).
+        // Re-check di sini supaya kita tidak menjadwalkan retry timer
+        // untuk tracking yang sudah tidak berjalan.
+        if (!_isActive || _isPaused || _isStopping) {
+          debugPrint('🔴 Tracking sudah berhenti, abaikan kegagalan kirim lokasi ini');
+          return;
+        }
+
         _handleSendFailure();
         return;
       }
@@ -1117,6 +1119,7 @@ class LiveLocationManager extends ChangeNotifier with WidgetsBindingObserver {
     
     _isActive = false;
     _isPaused = false;
+    _isStopping = false;
     _startedAt = null;
     _pausedAt = null;
     _userId = null;

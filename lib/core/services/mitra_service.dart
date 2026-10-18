@@ -162,7 +162,7 @@ class MitraService {
     if (diff.inDays > 30) return '${(diff.inDays / 30).floor()} bln lalu';
     if (diff.inDays > 0) return '${diff.inDays} hari lalu';
     if (diff.inHours > 0) return '${diff.inHours} jam lalu';
-    if (diff.inMinutes > 0) return '${diff.inMinutes} mnt lalu';
+    if (diff.inMinutes > 0) return '${diff.inMinutes} menit lalu';
     return 'Baru saja';
   }
 
@@ -1183,6 +1183,15 @@ class MitraService {
         );
       }
 
+      // 🔔 Kabari Superadmin juga (info-level, biar nggak ganggu prioritas)
+      _notifService.notifySuperAdmins(
+        type: 'check_in',
+        title: '🟢 Check In Lembur',
+        message: '$userName melakukan check-in lembur.',
+        data: {'lemburId': lemburId, 'mitraName': userName},
+        priority: 5,
+      );
+
       logger.i('Check-in berhasil: $userName -> $lemburId');
     } catch (e) {
       logger.e('Gagal check-in: $e');
@@ -1263,6 +1272,15 @@ class MitraService {
           income: income,
         );
       }
+
+      // 🔔 Kabari Superadmin juga (info-level, biar nggak ganggu prioritas)
+      _notifService.notifySuperAdmins(
+        type: 'check_out',
+        title: '🔴 Check Out Lembur',
+        message: '$userName check-out setelah ${actualHours.toStringAsFixed(1)} jam lembur.',
+        data: {'lemburId': lemburId, 'mitraName': userName, 'actualHours': actualHours},
+        priority: 5,
+      );
 
       logger.i('Check-out berhasil: $userName -> $lemburId, jam=$actualHours, income=$income');
       return income;

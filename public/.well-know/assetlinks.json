@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.pertamina.kmj.project_otp_kmj",
+      "sha256_cert_fingerprints": [
+        "AB:79:C8:03:73:17:7C:53:6E:A2:DB:33:A0:CF:33:61:37:CB:F6:64:83:1D:90:02:84:44:0B:37:B3:27:51:AC"
+      ]
+    }
+  }
+]

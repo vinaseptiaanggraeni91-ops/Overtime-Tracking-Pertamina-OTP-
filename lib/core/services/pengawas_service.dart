@@ -39,7 +39,7 @@ class PengawasService {
     if (diff.inDays > 0) return '${diff.inDays} hr';
     if (diff.inHours > 0) return '${diff.inHours} jam';
     if (diff.inMinutes > 0) return '${diff.inMinutes} mnt';
-    return 'br saja';
+    return 'baru saja';
   }
 
   Color getRoleColor(String role) {

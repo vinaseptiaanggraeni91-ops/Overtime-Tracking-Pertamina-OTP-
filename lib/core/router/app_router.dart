@@ -6,6 +6,7 @@ import '../../screens/welcome_screen.dart';
 import '../../screens/login_screen.dart';
 import '../../screens/register_screen.dart';
 import '../../screens/reset_password_screen.dart';
+import '../../screens/reset_password_confirm_screen.dart';
 import '../../screens/profile_menu_screen.dart';
 
 // SUPERADMIN
@@ -95,18 +96,25 @@ class AppRouter {
             path: '/register',
             builder: (context, state) => const RegisterScreen(),
           ),
-          // ✅ FIX: Reset Password sekarang di Public Routes
+          
           GoRoute(
-            path: '/reset-password',
-            builder: (context, state) {
-              final email = state.uri.queryParameters['email'] ?? '';
-              return ResetPasswordScreen(initialEmail: email);
-            },
-          ),
+          path: '/reset-password',
+          builder: (context, state) {
+            final oobCode = state.uri.queryParameters['oobCode'] ?? '';
+            return ResetPasswordConfirmScreen(oobCode: oobCode);
+          },
+        ),
 
-          // ============================================================
-          // 👑 SUPERADMIN ROUTES
-          // ============================================================
+
+          GoRoute(
+          // Layar "kirim email reset" (yang lama, sudah disederhanakan)
+          path: '/reset-password-request',
+          builder: (context, state) {
+            final email = state.uri.queryParameters['email'] ?? '';
+            return ResetPasswordScreen(initialEmail: email);
+          },
+        ),
+
           GoRoute(
             path: '/superadmin-dashboard',
             builder: (context, state) => const SuperAdminDashboard(),
@@ -203,9 +211,6 @@ class AppRouter {
             },
           ),
 
-          // ============================================================
-          // 👀 PENGAWAS ROUTES
-          // ============================================================
           GoRoute(
             path: '/pengawas-dashboard',
             builder: (context, state) => const PengawasDashboard(),
@@ -219,9 +224,6 @@ class AppRouter {
             builder: (context, state) => const MyTeamScreen(),
           ),
 
-          // ============================================================
-          // 🤝 MITRA ROUTES
-          // ============================================================
           GoRoute(
             path: '/mitra-dashboard',
             builder: (context, state) => const MitraDashboard(),
@@ -239,10 +241,7 @@ class AppRouter {
             name: 'mitra-absensi',
             builder: (context, state) => const AbsensiPage(),
           ),
-
-          // ============================================================
-          // 🔗 SHARED ROUTES (Bisa diakses semua role yang login)
-          // ============================================================
+          
           GoRoute(
             path: '/profile',
             builder: (context, state) => const ProfileScreen(),
@@ -277,6 +276,7 @@ class AppRouter {
     '/login',
     '/register',
     '/reset-password',
+    '/reset-password-request',
   ];
 
   if (publicRoutes.contains(cleanRoute)) {

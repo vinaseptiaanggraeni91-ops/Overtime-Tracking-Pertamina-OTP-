@@ -12,6 +12,7 @@ import '/widgets/menu/mitra_menu.dart';
 import '/widgets/absensi/absensi_dialog.dart';
 import '/widgets/bottom_nav/mitra_bottom_nav.dart';
 import '/widgets/mitra/mitra_attendance_overtime_card.dart';
+import 'notification_list_screen.dart';
 
 // ═══════════════════════════════════════════════════════
 // 🎨 PREMIUM COLOR SYSTEM
@@ -623,16 +624,36 @@ class _MitraDashboardBodyState extends State<_MitraDashboardBody>
           ]),
         ),
         GestureDetector(
-          onTap: () {},
+          onTap: () async {
+            await Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const NotificationListScreen()),
+            );
+            _loadNotifications();
+          },
           child: Container(
             width: 42, height: 42,
             decoration: BoxDecoration(color: AppColors.bgSecondary, borderRadius: BorderRadius.circular(12)),
-            child: Stack(children: [
+            child: Stack(clipBehavior: Clip.none, children: [
               const Center(child: Icon(Icons.notifications_outlined, color: AppColors.textSecondary, size: 22)),
               if (_unreadNotificationCount > 0)
-                Positioned(top: 8, right: 8,
-                  child: Container(width: 8, height: 8,
-                    decoration: BoxDecoration(color: AppColors.dangerColor, shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                Positioned(
+                  top: -4, right: -4,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                    decoration: BoxDecoration(
+                      color: AppColors.dangerColor,
+                      borderRadius: BorderRadius.circular(9),
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                    child: Center(
+                      child: Text(
+                        _unreadNotificationCount > 99 ? '99+' : '$_unreadNotificationCount',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700, height: 1),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
                   ),
                 ),
             ]),
